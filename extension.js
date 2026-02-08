@@ -222,10 +222,14 @@ function activate(context) {
     // Register command to show symbols
     context.subscriptions.push(
         vscode.commands.registerCommand('verilog.showSymbols', function () {
+            const MAX_PREVIEW_LENGTH = 200;
             const allSymbols = symbolDatabase.getAllSymbols();
             const symbolInfo = allSymbols.map(s => `${s.type}: ${s.name} (line ${s.line + 1})`).join('\n');
+            const preview = symbolInfo.length > MAX_PREVIEW_LENGTH 
+                ? symbolInfo.substring(0, MAX_PREVIEW_LENGTH) + '...' 
+                : symbolInfo;
             vscode.window.showInformationMessage(
-                `Found ${allSymbols.length} symbols:\n${symbolInfo.substring(0, 200)}${symbolInfo.length > 200 ? '...' : ''}`,
+                `Found ${allSymbols.length} symbols:\n${preview}`,
                 { modal: false }
             );
             console.log('All symbols in database:', allSymbols);
