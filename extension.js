@@ -100,7 +100,6 @@ function parseVerilogSymbols(document) {
                 // Find the offset of this specific name within namesText
                 const nameOffset = namesStartOffset + namesText.indexOf(name);
                 const nameLine = document.positionAt(nameOffset).line;
-                const lineStartOffset = document.positionAt(document.lineAt(nameLine).range.start).line;
                 const lineText = document.lineAt(nameLine).text;
                 // Calculate character position within the line
                 const charIndex = nameOffset - text.lastIndexOf('\n', nameOffset) - 1;
@@ -135,7 +134,6 @@ function parseVerilogSymbols(document) {
                 // Find the offset of this specific name within namesText
                 const nameOffset = namesStartOffset + namesText.indexOf(name);
                 const nameLine = document.positionAt(nameOffset).line;
-                const lineStartOffset = document.positionAt(document.lineAt(nameLine).range.start).line;
                 const lineText = document.lineAt(nameLine).text;
                 // Calculate character position within the line
                 const charIndex = nameOffset - text.lastIndexOf('\n', nameOffset) - 1;
