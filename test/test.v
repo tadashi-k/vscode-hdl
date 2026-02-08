@@ -8,6 +8,15 @@ module counter (
 /*
  * multiline comment example
  */
+	reg [7:0] count_int;
+
+	always @(posedge clk) begin
+		if (reset) begin
+			count_int <= 8'b0;
+		end else begin
+			count_int <= count_int + 1;
+		end
+	end
 
     // Counter logic
     always @(posedge clk or posedge reset) begin

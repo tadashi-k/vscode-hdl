@@ -83,6 +83,22 @@
           "match": "(\\+|\\-|\\*|\\/|%|\\^|&|\\||~|!|<<|>>|<=|>=|==|!=|===|!==|&&|\\|\\||\\?|:)"
         }
       ]
+    },
+    "signals": {
+      "patterns": [
+        {
+          "name": "variable.input.verilog",
+          "match": "\\binput\\s+(?:\\[.*?\\]\\s+)?\\w+\\b"
+        },
+        {
+          "name": "variable.output.verilog",
+          "match": "\\boutput\\s+(?:\\[.*?\\]\\s+)?\\w+\\b"
+        },
+        {
+          "name": "variable.internal.verilog",
+          "match": "\\b(?:wire|reg)\\s+(?:\\[.*?\\]\\s+)?\\w+\\b"
+        }
+      ]
     }
   }
 }
