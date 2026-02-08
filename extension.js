@@ -262,6 +262,41 @@ function activate(context) {
         })
     );
 
+    // Register hover provider for Verilog
+    context.subscriptions.push(
+        vscode.languages.registerHoverProvider('verilog', {
+            provideHover(document, position, token) {
+                const wordRange = document.getWordRangeAtPosition(position);
+                const word = document.getText(wordRange);
+
+                // Fetch symbols for the current document
+                const symbols = symbolDatabase.getSymbols(document.uri.toString());
+
+                // Find the symbol matching the hovered word
+                const symbol = symbols.find(s => s.name === word);
+
+                if (symbol) {
+                    // Build hover content
+                    let hoverContent = `**${symbol.name}**\n\n`;
+                    if (symbol.direction) {
+                        hoverContent += `${symbol.direction}\n`;
+                    }
+                    if (symbol.type) {
+                        hoverContent += `${symbol.type}\n`;
+                    }
+                    if (symbol.bitWidth) {
+                        hoverContent += `${symbol.bitWidth}\n`;
+                    }
+                    hoverContent += `at line ${symbol.line + 1}`;
+
+                    return new vscode.Hover(hoverContent);
+                }
+
+                return null;
+            }
+        })
+    );
+
     context.subscriptions.push(disposable);
 }
 
