@@ -5,6 +5,10 @@ module counter (
     output reg [7:0] count
 );
 
+/*
+ * multiline comment example
+ */
+
     // Counter logic
     always @(posedge clk or posedge reset) begin
         if (reset) begin
