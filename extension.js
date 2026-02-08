@@ -118,14 +118,13 @@ function parseVerilogSymbols(document) {
     let match;
     while ((match = moduleRegex.exec(text)) !== null) {
         const name = match[1];
-        const line = document.positionAt(match.index).line;
-        const lineText = document.lineAt(line).text;
-        const charIndex = lineText.indexOf(name);
+		const index = match.index + match[0].indexOf(name);
+		const position = document.positionAt(index);
         modules.push({
             name: name,
             type: 'module',
-            line: line,
-            character: charIndex,
+            line: position.line,
+            character: position.character,
             uri: document.uri.toString()
         });
     }
@@ -336,6 +335,7 @@ class VerilogDefinitionProvider {
         
         if (moduleSymbol) {
             const uri = vscode.Uri.parse(moduleSymbol.uri);
+			console.log('Module symbol found:', moduleSymbol);
             const pos = new vscode.Position(moduleSymbol.line, moduleSymbol.character || 0);
             return new vscode.Location(uri, pos);
         }

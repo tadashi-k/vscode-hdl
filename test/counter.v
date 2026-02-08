@@ -1,4 +1,4 @@
-// Counter module definition
+// Counter module definition   
 module counter (
     input wire clk,
     input wire reset,
@@ -15,5 +15,13 @@ module counter (
             count <= count + 1;
         end
     end
+
+	full_adder full_adder_i(
+		.a(),
+		.b(),
+		.cin(),
+		.sum(),
+		.cout()
+	);
 
 endmodule
