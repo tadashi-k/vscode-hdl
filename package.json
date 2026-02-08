@@ -33,6 +33,12 @@
         "scopeName": "source.verilog",
         "path": "./syntaxes/verilog.tmLanguage.json"
       }
+    ],
+    "commands": [
+      {
+        "command": "verilog.showSymbols",
+        "title": "Verilog: Show Symbols Database"
+      }
     ]
   }
 }
