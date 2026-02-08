@@ -2,63 +2,110 @@
 // Import the module and reference it with the alias vscode in your code below
 const vscode = require('vscode');
 
-// Internal symbol database
-class SymbolDatabase {
+// Signal database - stores signals (wire/reg) per file
+class SignalDatabase {
     constructor() {
-        // Map of file URI -> symbols array
-        this.symbols = new Map();
+        // Map of file URI -> signals array
+        this.signals = new Map();
     }
 
     /**
-     * Update symbols for a document
+     * Update signals for a document
      * @param {string} uri - Document URI
-     * @param {Array} symbols - Array of symbol objects
+     * @param {Array} signals - Array of signal objects
      */
-    updateSymbols(uri, symbols) {
-        this.symbols.set(uri, symbols);
+    updateSignals(uri, signals) {
+        this.signals.set(uri, signals);
     }
 
     /**
-     * Get symbols for a document
+     * Get signals for a document
      * @param {string} uri - Document URI
-     * @returns {Array} Array of symbol objects
+     * @returns {Array} Array of signal objects
      */
-    getSymbols(uri) {
-        return this.symbols.get(uri) || [];
+    getSignals(uri) {
+        return this.signals.get(uri) || [];
     }
 
     /**
-     * Remove symbols for a document
+     * Remove signals for a document
      * @param {string} uri - Document URI
      */
-    removeSymbols(uri) {
-        this.symbols.delete(uri);
+    removeSignals(uri) {
+        this.signals.delete(uri);
     }
 
     /**
-     * Get all symbols from all documents
-     * @returns {Array} Array of all symbol objects
+     * Get all signals from all documents
+     * @returns {Array} Array of all signal objects
      */
-    getAllSymbols() {
-        const allSymbols = [];
-        for (const symbols of this.symbols.values()) {
-            allSymbols.push(...symbols);
+    getAllSignals() {
+        const allSignals = [];
+        for (const signals of this.signals.values()) {
+            allSignals.push(...signals);
         }
-        return allSymbols;
+        return allSignals;
     }
 }
 
-// Create global symbol database instance
-const symbolDatabase = new SymbolDatabase();
+// Module database - stores modules for entire workspace
+class ModuleDatabase {
+    constructor() {
+        // Map of module name -> module symbol
+        this.modules = new Map();
+    }
+
+    /**
+     * Add or update a module in the database
+     * @param {Object} module - Module symbol object
+     */
+    addModule(module) {
+        this.modules.set(module.name, module);
+    }
+
+    /**
+     * Get a module by name
+     * @param {string} name - Module name
+     * @returns {Object|undefined} Module symbol object or undefined
+     */
+    getModule(name) {
+        return this.modules.get(name);
+    }
+
+    /**
+     * Remove modules from a specific file
+     * @param {string} uri - Document URI
+     */
+    removeModulesFromFile(uri) {
+        for (const [name, module] of this.modules.entries()) {
+            if (module.uri === uri) {
+                this.modules.delete(name);
+            }
+        }
+    }
+
+    /**
+     * Get all modules
+     * @returns {Array} Array of all module objects
+     */
+    getAllModules() {
+        return Array.from(this.modules.values());
+    }
+}
+
+// Create global database instances
+const signalDatabase = new SignalDatabase();
+const moduleDatabase = new ModuleDatabase();
 
 /**
  * Parse Verilog document and extract symbols
  * @param {vscode.TextDocument} document 
- * @returns {Array} Array of symbol objects
+ * @returns {Object} Object with modules and signals arrays
  */
 function parseVerilogSymbols(document) {
     const text = document.getText();
-    const symbols = [];
+    const modules = [];
+    const signals = [];
 
     // Regular expressions for matching Verilog constructs
     const moduleRegex = /^\s*module\s+(\w+)/gm;
@@ -74,7 +121,7 @@ function parseVerilogSymbols(document) {
         const line = document.positionAt(match.index).line;
         const lineText = document.lineAt(line).text;
         const charIndex = lineText.indexOf(name);
-        symbols.push({
+        modules.push({
             name: name,
             type: 'module',
             line: line,
@@ -104,7 +151,7 @@ function parseVerilogSymbols(document) {
                 // Calculate character position within the line
                 const charIndex = nameOffset - text.lastIndexOf('\n', nameOffset) - 1;
                 
-                symbols.push({
+                signals.push({
                     name: name,
                     type: 'wire',
                     direction: direction,
@@ -138,7 +185,7 @@ function parseVerilogSymbols(document) {
                 // Calculate character position within the line
                 const charIndex = nameOffset - text.lastIndexOf('\n', nameOffset) - 1;
                 
-                symbols.push({
+                signals.push({
                     name: name,
                     type: 'reg',
                     direction: direction,
@@ -151,7 +198,7 @@ function parseVerilogSymbols(document) {
         });
     }
 
-    return symbols;
+    return { modules, signals };
 }
 
 /**
@@ -163,10 +210,16 @@ function updateDocumentSymbols(document) {
         return;
     }
 
-    const symbols = parseVerilogSymbols(document);
-    symbolDatabase.updateSymbols(document.uri.toString(), symbols);
+    const { modules, signals } = parseVerilogSymbols(document);
+    const uri = document.uri.toString();
     
-    console.log(`Updated symbols for ${document.uri.toString()}: ${symbols.length} symbols found`);
+    // Update signal database (per-file)
+    signalDatabase.updateSignals(uri, signals);
+    
+    // Update module database (workspace-wide)
+    modules.forEach(module => moduleDatabase.addModule(module));
+    
+    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals.length} signals found`);
 }
 
 /**
@@ -174,9 +227,10 @@ function updateDocumentSymbols(document) {
  */
 class VerilogDocumentSymbolProvider {
     provideDocumentSymbols(document, token) {
-        const symbols = parseVerilogSymbols(document);
+        const { modules, signals } = parseVerilogSymbols(document);
+        const allSymbols = [...modules, ...signals];
         
-        return symbols.map(symbol => {
+        return allSymbols.map(symbol => {
             const line = document.lineAt(symbol.line);
             const range = new vscode.Range(
                 new vscode.Position(symbol.line, line.firstNonWhitespaceCharacterIndex),
@@ -263,23 +317,18 @@ class VerilogDefinitionProvider {
         
         const word = document.getText(wordRange);
         
-        // First, check for signal definitions (wire/reg) in the current document
-        const currentDocSymbols = symbolDatabase.getSymbols(document.uri.toString());
-        const localSymbol = currentDocSymbols.find(s => 
-            s.name === word && (s.type === 'wire' || s.type === 'reg')
-        );
+        // First, check for signal definitions (wire/reg) in the current document using signal database
+        const currentDocSignals = signalDatabase.getSignals(document.uri.toString());
+        const localSignal = currentDocSignals.find(s => s.name === word);
         
-        if (localSymbol) {
-            const uri = vscode.Uri.parse(localSymbol.uri);
-            const pos = new vscode.Position(localSymbol.line, localSymbol.character || 0);
+        if (localSignal) {
+            const uri = vscode.Uri.parse(localSignal.uri);
+            const pos = new vscode.Position(localSignal.line, localSignal.character || 0);
             return new vscode.Location(uri, pos);
         }
         
-        // Check for module definitions across all files
-        const allSymbols = symbolDatabase.getAllSymbols();
-        const moduleSymbol = allSymbols.find(s => 
-            s.name === word && s.type === 'module'
-        );
+        // Check for module definitions in the module database (workspace-wide)
+        const moduleSymbol = moduleDatabase.getModule(word);
         
         if (moduleSymbol) {
             const uri = vscode.Uri.parse(moduleSymbol.uri);
@@ -325,8 +374,10 @@ function activate(context) {
     context.subscriptions.push(
         vscode.workspace.onDidCloseTextDocument(document => {
             if (document.languageId === 'verilog') {
-                symbolDatabase.removeSymbols(document.uri.toString());
-                console.log(`Removed symbols for ${document.uri.toString()}`);
+                const uri = document.uri.toString();
+                signalDatabase.removeSignals(uri);
+                moduleDatabase.removeModulesFromFile(uri);
+                console.log(`Removed symbols for ${uri}`);
             }
         })
     );
@@ -367,16 +418,23 @@ function activate(context) {
     context.subscriptions.push(
         vscode.commands.registerCommand('verilog.showSymbols', function () {
             const MAX_PREVIEW_LENGTH = 200;
-            const allSymbols = symbolDatabase.getAllSymbols();
-            const symbolInfo = allSymbols.map(s => `${s.type}: ${s.name} (line ${s.line + 1})`).join('\n');
+            const allModules = moduleDatabase.getAllModules();
+            const allSignals = signalDatabase.getAllSignals();
+            const totalSymbols = allModules.length + allSignals.length;
+            
+            const moduleInfo = allModules.map(m => `module: ${m.name} (line ${m.line + 1})`).join('\n');
+            const signalInfo = allSignals.map(s => `${s.type}: ${s.name} (line ${s.line + 1})`).join('\n');
+            const symbolInfo = [moduleInfo, signalInfo].filter(s => s.length > 0).join('\n');
+            
             const preview = symbolInfo.length > MAX_PREVIEW_LENGTH 
                 ? symbolInfo.substring(0, MAX_PREVIEW_LENGTH) + '...' 
                 : symbolInfo;
             vscode.window.showInformationMessage(
-                `Found ${allSymbols.length} symbols:\n${preview}`,
+                `Found ${totalSymbols} symbols (${allModules.length} modules, ${allSignals.length} signals):\n${preview}`,
                 { modal: false }
             );
-            console.log('All symbols in database:', allSymbols);
+            console.log('Module database:', allModules);
+            console.log('Signal database:', allSignals);
         })
     );
 
@@ -387,25 +445,25 @@ function activate(context) {
                 const wordRange = document.getWordRangeAtPosition(position);
                 const word = document.getText(wordRange);
 
-                // Fetch symbols for the current document
-                const symbols = symbolDatabase.getSymbols(document.uri.toString());
+                // Fetch signals for the current document from signal database
+                const signals = signalDatabase.getSignals(document.uri.toString());
 
-                // Find the symbol matching the hovered word
-                const symbol = symbols.find(s => s.name === word);
+                // Find the signal matching the hovered word
+                const signal = signals.find(s => s.name === word);
 
-                if (symbol) {
+                if (signal) {
                     // Build hover content
-                    let hoverContent = `**${symbol.name}**\n\n`;
-                    if (symbol.direction) {
-                        hoverContent += `${symbol.direction}\n`;
+                    let hoverContent = `**${signal.name}**\n\n`;
+                    if (signal.direction) {
+                        hoverContent += `${signal.direction}\n`;
                     }
-                    if (symbol.type) {
-                        hoverContent += `${symbol.type}\n`;
+                    if (signal.type) {
+                        hoverContent += `${signal.type}\n`;
                     }
-                    if (symbol.bitWidth) {
-                        hoverContent += `${symbol.bitWidth}\n`;
+                    if (signal.bitWidth) {
+                        hoverContent += `${signal.bitWidth}\n`;
                     }
-                    hoverContent += `at line ${symbol.line + 1}`;
+                    hoverContent += `at line ${signal.line + 1}`;
 
                     return new vscode.Hover(hoverContent);
                 }
