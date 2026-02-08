@@ -5,10 +5,14 @@ A Visual Studio Code extension that provides syntax highlighting and symbol extr
 ## Features
 
 - **Syntax Highlighting**: Comprehensive syntax highlighting for Verilog reserved words
-- **Symbol Extraction**: Automatically extracts and stores Verilog symbols in an internal database
+- **Enhanced Symbol Extraction**: Automatically extracts and stores Verilog symbols with detailed information
   - Module names
-  - Wire declarations
-  - Register (reg) declarations
+  - Wire declarations with bit width (e.g., `data[7:0]`)
+  - Register (reg) declarations with bit width (e.g., `counter[15:0]`)
+  - Port direction information (input, output, inout)
+- **Enhanced Outline View**: 
+  - Variables displayed with bit definitions (e.g., `count[7:0]`)
+  - Hover information shows full type details (e.g., `clk (input wire)`)
 - **Document Symbol Provider**: Navigate symbols using VS Code's built-in symbol navigation (Ctrl+Shift+O)
 - **File Detection**: Automatically detects and activates for *.v files
 - **Language Configuration**: Proper comment handling, bracket matching, and auto-closing pairs
@@ -18,8 +22,10 @@ A Visual Studio Code extension that provides syntax highlighting and symbol extr
 The extension maintains an internal database of all Verilog symbols found in your workspace:
 
 - **Module Symbols**: All module declarations (`module module_name`)
-- **Wire Symbols**: Wire declarations with or without port directions (`wire`, `input wire`, `output wire`)
-- **Reg Symbols**: Register declarations with or without port directions (`reg`, `output reg`)
+- **Wire Symbols**: Wire declarations with or without port directions and bit widths
+  - Examples: `wire enable`, `input wire [7:0] data_in`, `output wire [3:0] addr`
+- **Reg Symbols**: Register declarations with or without port directions and bit widths
+  - Examples: `reg state`, `output reg [7:0] data_out`, `reg [15:0] counter`
 
 The symbol database is automatically updated when:
 - A Verilog file is opened
@@ -58,8 +64,19 @@ Simply open any file with the `.v` extension, and the extension will automatical
 ### Symbol Navigation
 
 - **Outline View**: View all symbols in the current file in the Outline panel
+  - Variables are displayed with their bit width (e.g., `data[7:0]`, `counter[31:0]`)
+  - Hover over symbols to see detailed type information (e.g., `input wire`, `output reg`)
 - **Quick Symbol Search**: Press `Ctrl+Shift+O` (or `Cmd+Shift+O` on Mac) to search and jump to symbols
 - **Breadcrumbs**: Symbol names appear in the breadcrumb navigation at the top of the editor
+
+### Symbol Display Examples
+
+In the Outline view, symbols are displayed as:
+- `count[7:0]` - with hover showing `output reg`
+- `clk` - with hover showing `input wire`
+- `data_in[7:0]` - with hover showing `input wire`
+- `enable` - with hover showing `wire`
+- `counter[15:0]` - with hover showing `reg`
 
 ## Development
 
