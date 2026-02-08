@@ -23,28 +23,41 @@ A Visual Studio Code extension that provides syntax highlighting, symbol extract
 
 ## Verilog Symbol Database
 
-The extension maintains an internal database of all Verilog symbols found in your workspace:
+The extension maintains two separate internal databases for Verilog symbols:
 
-- **Module Symbols**: All module declarations (`module module_name`)
+### Signal Database (Per-File)
+Stores signals (wire and reg declarations) separately for each file:
 - **Wire Symbols**: Wire declarations with or without port directions and bit widths
   - Examples: `wire enable`, `input wire [7:0] data_in`, `output wire [3:0] addr`
 - **Reg Symbols**: Register declarations with or without port directions and bit widths
   - Examples: `reg state`, `output reg [7:0] data_out`, `reg [15:0] counter`
 
-The symbol database is automatically updated when:
+The signal database is automatically updated when:
 - A Verilog file is opened
 - A Verilog file is modified
-- A Verilog file is closed (symbols are removed)
+- A Verilog file is closed (signals for that file are removed)
+
+### Module Database (Workspace-Wide)
+Stores all module declarations across the entire workspace in a single database:
+- **Module Symbols**: All module declarations (`module module_name`)
+- Modules are indexed by name for fast lookup
+- The module database persists across file operations
+
+The module database is automatically updated when:
+- A Verilog file is opened or modified (modules are added/updated)
+- A Verilog file is closed (modules from that file are removed)
 - Files are created or deleted in the workspace
 
 ## Goto Definition
 
 The extension provides "goto definition" functionality for:
 
-1. **Signals (wire/reg)**: Right-click or F12 on a signal name to jump to its declaration
+1. **Signals (wire/reg)**: Right-click or F12 on a signal name to jump to its declaration in the current file
+   - Uses the per-file signal database for fast lookups
 2. **Modules**: Right-click or F12 on a module instantiation to jump to the module definition
+   - Uses the workspace-wide module database to find modules across all files
 
-The extension assumes that file names match module names (e.g., `counter` module is in `counter.v`). It scans the current workspace folder tree to find all Verilog modules.
+The extension scans the current workspace folder tree to find all Verilog modules.
 
 ### Example Usage
 

@@ -216,6 +216,10 @@ function updateDocumentSymbols(document) {
     // Update signal database (per-file)
     signalDatabase.updateSignals(uri, signals);
     
+    // Remove existing modules from this file before adding new ones
+    // to prevent stale entries if modules were renamed or deleted
+    moduleDatabase.removeModulesFromFile(uri);
+    
     // Update module database (workspace-wide)
     modules.forEach(module => moduleDatabase.addModule(module));
     
@@ -424,7 +428,11 @@ function activate(context) {
             
             const moduleInfo = allModules.map(m => `module: ${m.name} (line ${m.line + 1})`).join('\n');
             const signalInfo = allSignals.map(s => `${s.type}: ${s.name} (line ${s.line + 1})`).join('\n');
-            const symbolInfo = [moduleInfo, signalInfo].filter(s => s.length > 0).join('\n');
+            
+            let symbolInfo = '';
+            if (moduleInfo) symbolInfo += moduleInfo;
+            if (moduleInfo && signalInfo) symbolInfo += '\n';
+            if (signalInfo) symbolInfo += signalInfo;
             
             const preview = symbolInfo.length > MAX_PREVIEW_LENGTH 
                 ? symbolInfo.substring(0, MAX_PREVIEW_LENGTH) + '...' 
