@@ -335,7 +335,6 @@ class VerilogDefinitionProvider {
         
         if (moduleSymbol) {
             const uri = vscode.Uri.parse(moduleSymbol.uri);
-			console.log('Module symbol found:', moduleSymbol);
             const pos = new vscode.Position(moduleSymbol.line, moduleSymbol.character || 0);
             return new vscode.Location(uri, pos);
         }
