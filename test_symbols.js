@@ -29,10 +29,10 @@ function parseVerilogSymbols(document) {
 
     // Regular expressions for matching Verilog constructs
     const moduleRegex = /^\s*module\s+(\w+)/gm;
-    // Improved wire regex - more specific patterns
-    const wireRegex = /^\s*(?:input\s+|output\s+|inout\s+)?wire\s+(?:\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
-    // Improved reg regex - more specific patterns
-    const regRegex = /^\s*(?:input\s+|output\s+|inout\s+)?reg\s+(?:\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
+    // Enhanced wire regex - capture direction, bit width, and names
+    const wireRegex = /^\s*(input\s+|output\s+|inout\s+)?wire\s+(\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
+    // Enhanced reg regex - capture direction, bit width, and names
+    const regRegex = /^\s*(input\s+|output\s+|inout\s+)?reg\s+(\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
 
     // Extract module names
     let match;
@@ -49,7 +49,9 @@ function parseVerilogSymbols(document) {
 
     // Extract wire declarations
     while ((match = wireRegex.exec(text)) !== null) {
-        const names = match[1].split(',').map(n => n.trim());
+        const direction = match[1] ? match[1].trim() : null; // input, output, or inout
+        const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
+        const names = match[3].split(',').map(n => n.trim());
         const line = document.positionAt(match.index).line;
         names.forEach(name => {
             // Filter out empty names or keywords
@@ -57,6 +59,8 @@ function parseVerilogSymbols(document) {
                 symbols.push({
                     name: name,
                     type: 'wire',
+                    direction: direction,
+                    bitWidth: bitWidth,
                     line: line,
                     uri: document.uri.toString()
                 });
@@ -66,7 +70,9 @@ function parseVerilogSymbols(document) {
 
     // Extract reg declarations
     while ((match = regRegex.exec(text)) !== null) {
-        const names = match[1].split(',').map(n => n.trim());
+        const direction = match[1] ? match[1].trim() : null; // input, output, or inout
+        const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
+        const names = match[3].split(',').map(n => n.trim());
         const line = document.positionAt(match.index).line;
         names.forEach(name => {
             // Filter out empty names or keywords
@@ -74,6 +80,8 @@ function parseVerilogSymbols(document) {
                 symbols.push({
                     name: name,
                     type: 'reg',
+                    direction: direction,
+                    bitWidth: bitWidth,
                     line: line,
                     uri: document.uri.toString()
                 });
@@ -132,7 +140,17 @@ function runTests() {
     console.log(`  - Regs: ${reg2Count}`);
     
     test2Symbols.forEach(s => {
-        console.log(`    ${s.type}: ${s.name} (line ${s.line + 1})`);
+        let displayName = s.name;
+        if (s.bitWidth) {
+            displayName = `${s.name}${s.bitWidth}`;
+        }
+        let detail = '';
+        if (s.direction) {
+            detail = ` (${s.direction} ${s.type})`;
+        } else {
+            detail = ` (${s.type})`;
+        }
+        console.log(`    ${displayName}${detail} - line ${s.line + 1}`);
     });
     
     if (module2Count === 2 && wire2Count >= 5 && reg2Count >= 5) {
