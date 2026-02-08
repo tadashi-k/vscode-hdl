@@ -62,10 +62,10 @@ function parseVerilogSymbols(document) {
 
     // Regular expressions for matching Verilog constructs
     const moduleRegex = /^\s*module\s+(\w+)/gm;
-    // Improved wire regex - more specific patterns
-    const wireRegex = /^\s*(?:input\s+|output\s+|inout\s+)?wire\s+(?:\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
-    // Improved reg regex - more specific patterns
-    const regRegex = /^\s*(?:input\s+|output\s+|inout\s+)?reg\s+(?:\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
+    // Enhanced wire regex - capture direction, bit width, and names
+    const wireRegex = /^\s*(input\s+|output\s+|inout\s+)?wire\s+(\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
+    // Enhanced reg regex - capture direction, bit width, and names
+    const regRegex = /^\s*(input\s+|output\s+|inout\s+)?reg\s+(\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
 
     // Extract module names
     let match;
@@ -82,7 +82,9 @@ function parseVerilogSymbols(document) {
 
     // Extract wire declarations
     while ((match = wireRegex.exec(text)) !== null) {
-        const names = match[1].split(',').map(n => n.trim());
+        const direction = match[1] ? match[1].trim() : null; // input, output, or inout
+        const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
+        const names = match[3].split(',').map(n => n.trim());
         const line = document.positionAt(match.index).line;
         names.forEach(name => {
             // Filter out empty names or keywords
@@ -90,6 +92,8 @@ function parseVerilogSymbols(document) {
                 symbols.push({
                     name: name,
                     type: 'wire',
+                    direction: direction,
+                    bitWidth: bitWidth,
                     line: line,
                     uri: document.uri.toString()
                 });
@@ -99,7 +103,9 @@ function parseVerilogSymbols(document) {
 
     // Extract reg declarations
     while ((match = regRegex.exec(text)) !== null) {
-        const names = match[1].split(',').map(n => n.trim());
+        const direction = match[1] ? match[1].trim() : null; // input, output, or inout
+        const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
+        const names = match[3].split(',').map(n => n.trim());
         const line = document.positionAt(match.index).line;
         names.forEach(name => {
             // Filter out empty names or keywords
@@ -107,6 +113,8 @@ function parseVerilogSymbols(document) {
                 symbols.push({
                     name: name,
                     type: 'reg',
+                    direction: direction,
+                    bitWidth: bitWidth,
                     line: line,
                     uri: document.uri.toString()
                 });
@@ -161,12 +169,30 @@ class VerilogDocumentSymbolProvider {
                     kind = vscode.SymbolKind.Variable;
             }
 
-            return new vscode.SymbolInformation(
-                symbol.name,
+            // Build display name with bit width if available
+            let displayName = symbol.name;
+            if (symbol.bitWidth) {
+                displayName = `${symbol.name}${symbol.bitWidth}`;
+            }
+
+            // Build detail string for hover (e.g., "input wire", "output reg", "wire")
+            let detail = '';
+            if (symbol.direction) {
+                detail = `${symbol.direction} ${symbol.type}`;
+            } else {
+                detail = symbol.type;
+            }
+
+            // Use DocumentSymbol instead of SymbolInformation for better detail support
+            const docSymbol = new vscode.DocumentSymbol(
+                displayName,
+                detail,
                 kind,
-                '',
-                new vscode.Location(document.uri, range)
+                range,
+                range
             );
+
+            return docSymbol;
         });
     }
 }
