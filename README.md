@@ -1,6 +1,6 @@
 # Verilog Language Support for VS Code
 
-A Visual Studio Code extension that provides syntax highlighting and symbol extraction for Verilog (*.v) files.
+A Visual Studio Code extension that provides syntax highlighting, symbol extraction, and goto definition for Verilog (*.v) files.
 
 ## Features
 
@@ -14,6 +14,10 @@ A Visual Studio Code extension that provides syntax highlighting and symbol extr
   - Variables displayed with bit definitions (e.g., `count[7:0]`)
   - Hover information shows full type details (e.g., `clk (input wire)`)
 - **Document Symbol Provider**: Navigate symbols using VS Code's built-in symbol navigation (Ctrl+Shift+O)
+- **Goto Definition**: Navigate to signal and module definitions
+  - Click on a signal (wire/reg) to jump to its declaration
+  - Click on a module instantiation to jump to the module definition (even in different files)
+  - Workspace-wide module scanning to find definitions across all .v files
 - **File Detection**: Automatically detects and activates for *.v files
 - **Language Configuration**: Proper comment handling, bracket matching, and auto-closing pairs
 
@@ -31,6 +35,41 @@ The symbol database is automatically updated when:
 - A Verilog file is opened
 - A Verilog file is modified
 - A Verilog file is closed (symbols are removed)
+- Files are created or deleted in the workspace
+
+## Goto Definition
+
+The extension provides "goto definition" functionality for:
+
+1. **Signals (wire/reg)**: Right-click or F12 on a signal name to jump to its declaration
+2. **Modules**: Right-click or F12 on a module instantiation to jump to the module definition
+
+The extension assumes that file names match module names (e.g., `counter` module is in `counter.v`). It scans the current workspace folder tree to find all Verilog modules.
+
+### Example Usage
+
+```verilog
+// In counter.v
+module counter (
+    input wire clk,
+    output reg [7:0] count
+);
+    // implementation
+endmodule
+
+// In top_module.v
+module top_module (
+    input wire clk
+);
+    wire [7:0] count_value;
+    
+    // F12 on "counter" will jump to counter.v
+    counter u_counter (
+        .clk(clk),
+        .count(count_value)  // F12 on "count_value" will jump to declaration above
+    );
+endmodule
+```
 
 ## Commands
 
