@@ -71,7 +71,7 @@ function parseVerilogSymbols(document) {
     let match;
     while ((match = moduleRegex.exec(text)) !== null) {
         const name = match[1];
-        const line = document.positionAt(match.index).line;
+        const line = document.positionAt(match.index).line + 1; // Add 1 to match actual line number
         symbols.push({
             name: name,
             type: 'module',
@@ -85,7 +85,7 @@ function parseVerilogSymbols(document) {
         const direction = match[1] ? match[1].trim() : null; // input, output, or inout
         const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
         const names = match[3].split(',').map(n => n.trim());
-        const line = document.positionAt(match.index).line;
+        const line = document.positionAt(match.index).line + 1; // Add 1 to match actual line number
         names.forEach(name => {
             // Filter out empty names or keywords
             if (name && !['input', 'output', 'inout', 'wire'].includes(name)) {
@@ -106,7 +106,7 @@ function parseVerilogSymbols(document) {
         const direction = match[1] ? match[1].trim() : null; // input, output, or inout
         const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
         const names = match[3].split(',').map(n => n.trim());
-        const line = document.positionAt(match.index).line;
+        const line = document.positionAt(match.index).line + 1; // Add 1 to match actual line number
         names.forEach(name => {
             // Filter out empty names or keywords
             if (name && !['input', 'output', 'inout', 'reg'].includes(name)) {
