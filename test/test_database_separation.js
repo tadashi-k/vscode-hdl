@@ -212,12 +212,12 @@ function runTests() {
     const moduleDB = new ModuleDatabase();
 
     // Load test files
-    const counterPath = path.join(__dirname, 'test', 'counter.v');
+    const counterPath = path.join(__dirname, '..', 'contents', 'counter.v');
     const counterContent = fs.readFileSync(counterPath, 'utf8');
     const counterDoc = new MockTextDocument(counterContent, counterPath);
     const counterParsed = parseVerilogSymbols(counterDoc);
     
-    const topPath = path.join(__dirname, 'test', 'top_module.v');
+    const topPath = path.join(__dirname, '..', 'contents', 'top_module.v');
     const topContent = fs.readFileSync(topPath, 'utf8');
     const topDoc = new MockTextDocument(topContent, topPath);
     const topParsed = parseVerilogSymbols(topDoc);

@@ -161,7 +161,7 @@ function runTests() {
 
     // Test 1: Parse counter.v
     console.log('Test 1: Parsing counter.v');
-    const counterPath = path.join(__dirname, 'test', 'counter.v');
+    const counterPath = path.join(__dirname, '..', 'contents', 'counter.v');
     const counterContent = fs.readFileSync(counterPath, 'utf8');
     const counterDoc = new MockTextDocument(counterContent, counterPath);
     const counterSymbols = parseVerilogSymbols(counterDoc);
@@ -180,7 +180,7 @@ function runTests() {
 
     // Test 2: Parse top_module.v
     console.log('\nTest 2: Parsing top_module.v');
-    const topPath = path.join(__dirname, 'test', 'top_module.v');
+    const topPath = path.join(__dirname, '..', 'contents', 'top_module.v');
     const topContent = fs.readFileSync(topPath, 'utf8');
     const topDoc = new MockTextDocument(topContent, topPath);
     const topSymbols = parseVerilogSymbols(topDoc);

@@ -101,7 +101,7 @@ function runTests() {
 
     // Test 1: test.v file
     console.log('Test 1: test.v');
-    const test1Path = path.join(__dirname, 'test', 'test.v');
+    const test1Path = path.join(__dirname, '../contents', 'full_adder.v');
     const test1Content = fs.readFileSync(test1Path, 'utf8');
     const test1Doc = new MockTextDocument(test1Content, test1Path);
     const test1Symbols = parseVerilogSymbols(test1Doc);
@@ -125,7 +125,7 @@ function runTests() {
 
     // Test 2: test_symbols.v file
     console.log('Test 2: test_symbols.v');
-    const test2Path = path.join(__dirname, 'test', 'test_symbols.v');
+    const test2Path = path.join(__dirname, '../contents', 'test_symbols.v');
     const test2Content = fs.readFileSync(test2Path, 'utf8');
     const test2Doc = new MockTextDocument(test2Content, test2Path);
     const test2Symbols = parseVerilogSymbols(test2Doc);

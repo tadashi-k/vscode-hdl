@@ -256,13 +256,13 @@ function runTests() {
     const definitionProvider = new VerilogDefinitionProvider(db);
 
     // Load test files
-    const counterPath = path.join(__dirname, 'test', 'counter.v');
+    const counterPath = path.join(__dirname, '..', 'contents', 'counter.v');
     const counterContent = fs.readFileSync(counterPath, 'utf8');
     const counterDoc = new MockTextDocument(counterContent, counterPath);
     const counterSymbols = parseVerilogSymbols(counterDoc);
     db.updateSymbols(counterPath, counterSymbols);
 
-    const topPath = path.join(__dirname, 'test', 'top_module.v');
+    const topPath = path.join(__dirname, '..', 'contents', 'top_module.v');
     const topContent = fs.readFileSync(topPath, 'utf8');
     const topDoc = new MockTextDocument(topContent, topPath);
     const topSymbols = parseVerilogSymbols(topDoc);
