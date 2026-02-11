@@ -422,12 +422,14 @@ class VerilogParser {
                 let foundSemicolon = false;
                 for (let i = line + 1; i < Math.min(line + 3, lines.length); i++) {
                     const nextLine = lines[i].trim();
-                    if (nextLine.endsWith(';') || nextLine.includes(';')) {
-                        foundSemicolon = true;
+                    
+                    // If next line starts a new statement, it's an error
+                    if (nextLine.match(/^(wire|reg|integer|module|always|assign|endmodule|end\b)/)) {
                         break;
                     }
-                    // If next line starts a new statement, it's an error
-                    if (nextLine.match(/^\s*(wire|reg|integer|module|always|assign|endmodule)/)) {
+                    
+                    if (nextLine.endsWith(';') || nextLine.includes(';')) {
+                        foundSemicolon = true;
                         break;
                     }
                 }
