@@ -1,10 +1,18 @@
 # Verilog Language Support for VS Code
 
-A Visual Studio Code extension that provides syntax highlighting, symbol extraction, and goto definition for Verilog (*.v) files.
+A Visual Studio Code extension that provides syntax highlighting, symbol extraction, goto definition, and syntax error detection for Verilog (*.v) files.
 
 ## Features
 
 - **Syntax Highlighting**: Comprehensive syntax highlighting for Verilog reserved words
+- **Syntax Error Detection**: Real-time parsing and error detection with diagnostics displayed in the editor
+  - Module/endmodule matching
+  - Bracket matching (parentheses, square brackets, curly braces)
+  - Missing semicolons in declarations
+  - Invalid identifiers and reserved keyword usage
+  - Malformed assign statements
+  - Always block syntax validation
+  - Duplicate signal declarations
 - **Enhanced Symbol Extraction**: Automatically extracts and stores Verilog symbols with detailed information
   - Module names
   - Wire declarations with bit width (e.g., `data[7:0]`)
@@ -20,6 +28,10 @@ A Visual Studio Code extension that provides syntax highlighting, symbol extract
   - Workspace-wide module scanning to find definitions across all .v files
 - **File Detection**: Automatically detects and activates for *.v files
 - **Language Configuration**: Proper comment handling, bracket matching, and auto-closing pairs
+
+## Syntax Error Detection
+
+The extension includes a Verilog parser that performs real-time syntax checking and displays errors directly in the editor. The parser detects:
 
 ## Verilog Symbol Database
 
@@ -47,6 +59,75 @@ The module database is automatically updated when:
 - A Verilog file is opened or modified (modules are added/updated)
 - A Verilog file is closed (modules from that file are removed)
 - Files are created or deleted in the workspace
+
+## Verilog Parser and Syntax Error Detection
+
+The extension includes a comprehensive Verilog parser that performs real-time syntax checking. Errors are displayed directly in the editor with squiggly underlines and detailed error messages.
+
+### Error Types Detected
+
+1. **Module Structure Errors**
+   - Missing `endmodule` statements
+   - Extra `endmodule` without matching `module`
+   - Module names that are reserved keywords
+
+2. **Bracket Matching Errors**
+   - Unmatched opening brackets: `(`, `[`, `{`
+   - Unmatched closing brackets: `)`, `]`, `}`
+   - Mismatched bracket types (e.g., `(` closed with `]`)
+
+3. **Declaration Errors**
+   - Missing semicolons in wire/reg/parameter declarations
+   - Duplicate signal declarations
+   - Invalid identifiers (e.g., starting with a digit)
+   - Port names that are reserved keywords
+
+4. **Statement Errors**
+   - Assign statements without assignment operator (`=`)
+   - Assign statements missing semicolons
+   - Always blocks with empty sensitivity lists
+
+### Example Errors Detected
+
+```verilog
+// Error: Missing endmodule
+module test_module (
+    input wire clk
+);
+    assign out = clk;
+// Missing endmodule - parser will flag this
+
+// Error: Unmatched bracket
+module bracket_error (
+    input wire a
+);
+    assign result = (a & 1'b1;  // Missing closing parenthesis
+endmodule
+
+// Error: Reserved keyword as module name
+module wire (  // 'wire' is a reserved keyword
+    input a
+);
+endmodule
+
+// Error: Missing semicolon
+module decl_error (
+    input wire clk
+);
+    wire temp  // Missing semicolon
+    assign temp = clk;
+endmodule
+```
+
+The parser runs automatically whenever you:
+- Open a Verilog file
+- Edit a Verilog file
+- Save a Verilog file
+
+Errors are displayed in:
+- The editor with squiggly underlines
+- The Problems panel (Ctrl+Shift+M or Cmd+Shift+M)
+- Hover tooltips when you mouse over the error
 
 ## Goto Definition
 
