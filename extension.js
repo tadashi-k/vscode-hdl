@@ -434,7 +434,9 @@ class VerilogParser {
                     }
                 }
                 
-                if (!foundSemicolon && !lineText.includes('//')) {
+                // Check if line is a comment (more robust check)
+                const isComment = lineText.startsWith('//') || lineText.startsWith('/*');
+                if (!foundSemicolon && !isComment) {
                     this.addError(
                         line,
                         0,
@@ -458,11 +460,20 @@ class VerilogParser {
         let match;
         while ((match = invalidIdRegex.exec(text)) !== null) {
             const line = document.positionAt(match.index).line;
-            const lineText = lines[line];
             
             // Skip if it's a number literal (e.g., 16'b0)
+            // Check character immediately before the match
             const beforeChar = match.index > 0 ? text[match.index - 1] : ' ';
-            if (beforeChar === "'" || lineText.includes("'b") || lineText.includes("'h") || lineText.includes("'d")) {
+            if (beforeChar === "'") {
+                continue;
+            }
+            
+            // Check if this is part of a bit literal by looking at surrounding context
+            const contextStart = Math.max(0, match.index - 10);
+            const contextEnd = Math.min(text.length, match.index + match[0].length + 5);
+            const context = text.substring(contextStart, contextEnd);
+            // Skip if we see patterns like "8'b" or "16'h" near this match
+            if (context.match(/\d+'\w/)) {
                 continue;
             }
             
