@@ -120,8 +120,8 @@ function parseVerilogSymbols(document) {
     let match;
     while ((match = moduleRegex.exec(text)) !== null) {
         const name = match[1];
-		const index = match.index + match[0].indexOf(name);
-		const position = document.positionAt(index);
+        const index = match.index + match[0].indexOf(name);
+        const position = document.positionAt(index);
         modules.push({
             name: name,
             type: 'module',
