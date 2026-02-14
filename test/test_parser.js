@@ -52,22 +52,10 @@ class MockTextDocument {
     }
 }
 
-// Load VerilogParser class from extension.js
-// We'll extract just the parser class for testing
-const extensionCode = fs.readFileSync(path.join(__dirname, '../extension.js'), 'utf8');
-
-// Extract the VerilogParser class
-const parserClassMatch = extensionCode.match(/class VerilogParser \{[\s\S]*?\n\}/);
-if (!parserClassMatch) {
-    console.error('Could not find VerilogParser class in extension.js');
-    process.exit(1);
-}
-
-// Create a safe eval environment
-const VerilogParser = eval(`(function() {
-    ${parserClassMatch[0]}
-    return VerilogParser;
-})()`);
+// Load VerilogParser class from src/parser.js
+// Mock vscode module for the parser
+global.vscode = vscode;
+const VerilogParser = require('../src/parser');
 
 function runTests() {
     console.log('Running Verilog Parser Tests...\n');
