@@ -76,30 +76,38 @@ class MockTextDocument {
 }
 
 // Load extension code
-const extensionCode = fs.readFileSync(path.join(__dirname, '../extension.js'), 'utf8');
+const VerilogParser = require('../src/parser');
 
-// Extract VerilogParser and updateDiagnostics
-const parserMatch = extensionCode.match(/class VerilogParser \{[\s\S]*?\n\}/);
-const updateDiagMatch = extensionCode.match(/function updateDiagnostics\([\s\S]*?\n\}/);
+// Create parser instance
+const verilogParser = new VerilogParser();
 
-if (!parserMatch || !updateDiagMatch) {
-    console.error('Could not extract parser or updateDiagnostics from extension.js');
-    process.exit(1);
+// Define updateDiagnostics function (extracted from extension)
+function updateDiagnostics(document, diagnosticCollection) {
+    if (document.languageId !== 'verilog') {
+        return;
+    }
+
+    const errors = verilogParser.parse(document);
+    const diagnostics = [];
+
+    for (const error of errors) {
+        const range = new vscode.Range(
+            new vscode.Position(error.line, error.character),
+            new vscode.Position(error.line, error.character + error.length)
+        );
+        
+        const diagnostic = new vscode.Diagnostic(
+            range,
+            error.message,
+            error.severity
+        );
+        
+        diagnostic.source = 'verilog-parser';
+        diagnostics.push(diagnostic);
+    }
+
+    diagnosticCollection.set(document.uri, diagnostics);
 }
-
-// Create evaluation environment
-const VerilogParser = eval(`(function() {
-    const vscode = global.vscode;
-    ${parserMatch[0]}
-    return VerilogParser;
-})()`);
-
-const updateDiagnostics = eval(`(function() {
-    const vscode = global.vscode;
-    const verilogParser = new VerilogParser();
-    ${updateDiagMatch[0]}
-    return updateDiagnostics;
-})()`);
 
 // Mock diagnostic collection
 class MockDiagnosticCollection {
