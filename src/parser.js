@@ -142,11 +142,28 @@ class VerilogParser {
     }
 
     /**
+     * Check if a line contains an assignment statement
+     * @param {string} line - The line to check
+     * @returns {boolean} True if line appears to contain an assignment
+     */
+    isAssignmentStatement(line) {
+        // Match various assignment patterns:
+        // - Simple: signal = value
+        // - Non-blocking: signal <= value  
+        // - Array element: arr[0] = value
+        // - Bit selection: signal[7:0] = value
+        // - Concatenation: {a, b} = value
+        // Note: This is a heuristic check and may not catch all cases
+        return /(\w+(\[\w*:?\w*\])?|\{.*\})\s*[<]?=/.test(line);
+    }
+
+    /**
      * Check always blocks for syntax errors
      */
     checkAlwaysBlocks(text, lines, document) {
         // Find all always blocks
         const alwaysRegex = /^\s*always\b/gm;
+        const ALWAYS_KEYWORD_LENGTH = 'always'.length;
         
         let match;
         while ((match = alwaysRegex.exec(text)) !== null) {
@@ -159,7 +176,7 @@ class VerilogParser {
             const lineWithoutComment = this.stripComments(lineText);
             
             // Check if always has timing control (@)
-            const hasAtSymbol = /@/.test(lineWithoutComment.substring(lineWithoutComment.indexOf('always') + 6));
+            const hasAtSymbol = /@/.test(lineWithoutComment.substring(lineWithoutComment.indexOf('always') + ALWAYS_KEYWORD_LENGTH));
             
             // Look ahead a few lines to check for timing control
             let foundTimingControl = hasAtSymbol;
@@ -172,7 +189,7 @@ class VerilogParser {
                         break;
                     }
                     // If we hit a begin or statement without @, it's an error
-                    if (nextLine.startsWith('begin') || nextLine.match(/^\w+\s*[<]?=/)) {
+                    if (nextLine.startsWith('begin') || this.isAssignmentStatement(nextLine)) {
                         break;
                     }
                 }
@@ -180,7 +197,7 @@ class VerilogParser {
                 // Always blocks should have timing control (@)
                 if (!foundTimingControl) {
                     // Check if this is 'always begin' pattern
-                    const afterAlways = lineWithoutComment.substring(lineWithoutComment.indexOf('always') + 6).trim();
+                    const afterAlways = lineWithoutComment.substring(lineWithoutComment.indexOf('always') + ALWAYS_KEYWORD_LENGTH).trim();
                     if (afterAlways.startsWith('begin') || 
                         (line + 1 < lines.length && this.stripComments(lines[line + 1]).trim().startsWith('begin'))) {
                         this.addError(
@@ -365,7 +382,7 @@ class VerilogParser {
             
             // Check for begin, statement, or other module constructs
             if (nextLine.startsWith('begin') ||
-                nextLine.match(/^\w+\s*[<]?=/) ||  // Assignment
+                this.isAssignmentStatement(nextLine) ||  // Assignment (various forms)
                 nextLine.startsWith('if') ||
                 nextLine.startsWith('case') ||
                 nextLine.startsWith('for') ||
