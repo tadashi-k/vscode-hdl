@@ -34,6 +34,7 @@ class VerilogParser {
         this.checkModuleStructure(text, lines, document);
         this.checkPortDeclarations(text, lines, document);
         this.checkAlwaysBlocks(text, lines, document);
+        this.checkInitialBlocks(text, lines, document);
         this.checkAssignStatements(text, lines, document);
         this.checkBracketMatching(text, lines, document);
         this.checkSemicolons(text, lines, document);
@@ -144,8 +145,8 @@ class VerilogParser {
      * Check always blocks for syntax errors
      */
     checkAlwaysBlocks(text, lines, document) {
-        // Check for always blocks with sensitivity list
-        const alwaysRegex = /^\s*always\s*@\s*\(/gm;
+        // Find all always blocks
+        const alwaysRegex = /^\s*always\b/gm;
         
         let match;
         while ((match = alwaysRegex.exec(text)) !== null) {
@@ -154,15 +155,86 @@ class VerilogParser {
             const line = document.positionAt(alwaysOffset).line;
             const lineText = lines[line];
             
-            // Check for missing closing parenthesis
-            const openParen = lineText.indexOf('@(');
-            if (openParen !== -1) {
-                const closeParen = lineText.indexOf(')', openParen);
-                if (closeParen === -1) {
-                    // Check next line for closing paren
-                    if (line + 1 < lines.length) {
-                        const nextLine = lines[line + 1];
-                        if (!nextLine.includes(')')) {
+            // Strip comments from line for accurate parsing
+            const lineWithoutComment = this.stripComments(lineText);
+            
+            // Check if always has timing control (@)
+            const hasAtSymbol = /@/.test(lineWithoutComment.substring(lineWithoutComment.indexOf('always') + 6));
+            
+            // Look ahead a few lines to check for timing control
+            let foundTimingControl = hasAtSymbol;
+            if (!foundTimingControl) {
+                // Check next line for @ or direct begin/statement
+                for (let i = line + 1; i < Math.min(line + 3, lines.length); i++) {
+                    const nextLine = this.stripComments(lines[i]).trim();
+                    if (nextLine.startsWith('@')) {
+                        foundTimingControl = true;
+                        break;
+                    }
+                    // If we hit a begin or statement without @, it's an error
+                    if (nextLine.startsWith('begin') || nextLine.match(/^\w+\s*[<]?=/)) {
+                        break;
+                    }
+                }
+                
+                // Always blocks should have timing control (@)
+                if (!foundTimingControl) {
+                    // Check if this is 'always begin' pattern
+                    const afterAlways = lineWithoutComment.substring(lineWithoutComment.indexOf('always') + 6).trim();
+                    if (afterAlways.startsWith('begin') || 
+                        (line + 1 < lines.length && this.stripComments(lines[line + 1]).trim().startsWith('begin'))) {
+                        this.addError(
+                            line,
+                            0,
+                            lineText.length,
+                            'Always block is missing timing control (@)',
+                            vscode.DiagnosticSeverity.Error
+                        );
+                    }
+                }
+            }
+            
+            // Check for always with @ sensitivity list
+            if (hasAtSymbol) {
+                const atIndex = lineWithoutComment.indexOf('@', lineWithoutComment.indexOf('always'));
+                const afterAt = lineWithoutComment.substring(atIndex + 1).trim();
+                
+                // Check for @* or @(*)
+                if (afterAt.startsWith('*') || afterAt.startsWith('(*)')) {
+                    // Valid - @* or @(*)
+                } else if (afterAt.startsWith('(')) {
+                    // Check for empty sensitivity list @()
+                    const sensListMatch = lineWithoutComment.match(/@\s*\(\s*\)/);
+                    if (sensListMatch) {
+                        this.addError(
+                            line,
+                            sensListMatch.index,
+                            sensListMatch[0].length,
+                            'Always block has empty sensitivity list',
+                            vscode.DiagnosticSeverity.Warning
+                        );
+                    }
+                    
+                    // Check for missing closing parenthesis
+                    let parenText = afterAt;
+                    let checkLine = line;
+                    
+                    // Collect text until we find end of sensitivity list or hit begin/statement
+                    while (checkLine < lines.length) {
+                        if (checkLine > line) {
+                            parenText += ' ' + this.stripComments(lines[checkLine]).trim();
+                        }
+                        
+                        // Count parentheses
+                        let openCount = (parenText.match(/\(/g) || []).length;
+                        let closeCount = (parenText.match(/\)/g) || []).length;
+                        
+                        if (openCount === closeCount) {
+                            break; // Found matching closing paren
+                        }
+                        
+                        // Check if we've gone too far (hit begin or semicolon)
+                        if (parenText.includes('begin') || parenText.includes(';')) {
                             this.addError(
                                 line,
                                 0,
@@ -170,48 +242,156 @@ class VerilogParser {
                                 'Always block sensitivity list is missing closing parenthesis',
                                 vscode.DiagnosticSeverity.Error
                             );
+                            break;
+                        }
+                        
+                        checkLine++;
+                        if (checkLine >= Math.min(line + 5, lines.length)) {
+                            break; // Stop after checking a few lines
                         }
                     }
+                } else if (!afterAt.startsWith('*')) {
+                    // @ not followed by * or ( - invalid
+                    this.addError(
+                        line,
+                        atIndex,
+                        2,
+                        'Invalid timing control syntax: @ must be followed by *, (*), or (...)',
+                        vscode.DiagnosticSeverity.Error
+                    );
                 }
             }
             
-            // Check for empty sensitivity list
-            const sensListMatch = lineText.match(/@\s*\(\s*\)/);
-            if (sensListMatch) {
-                this.addError(
-                    line,
-                    sensListMatch.index,
-                    sensListMatch[0].length,
-                    'Always block has empty sensitivity list',
-                    vscode.DiagnosticSeverity.Warning
-                );
-            }
+            // Check for statements after always
+            this.checkProceduralBlockStatement(text, lines, document, line, 'always');
         }
-
-        // Check for always blocks without begin/end when multiple statements
-        const alwaysBeginRegex = /^\s*always\s*@.*$/gm;
-        while ((match = alwaysBeginRegex.exec(text)) !== null) {
+    }
+    
+    /**
+     * Check initial blocks for syntax errors
+     */
+    checkInitialBlocks(text, lines, document) {
+        // Find all initial blocks
+        const initialRegex = /^\s*initial\b/gm;
+        
+        let match;
+        while ((match = initialRegex.exec(text)) !== null) {
             const matchText = match[0];
-            const alwaysOffset = match.index + matchText.indexOf('always');
-            const line = document.positionAt(alwaysOffset).line;
+            const initialOffset = match.index + matchText.indexOf('initial');
+            const line = document.positionAt(initialOffset).line;
             const lineText = lines[line];
             
-            // If the always block doesn't have 'begin' on the same or next line
-            if (!lineText.includes('begin')) {
-                if (line + 1 < lines.length) {
-                    const nextLine = lines[line + 1].trim();
-                    if (!nextLine.startsWith('begin')) {
-                        // Check if there are multiple statements (heuristic: look for two assignment statements)
-                        let stmtCount = 0;
-                        for (let i = line + 1; i < Math.min(line + 5, lines.length); i++) {
-                            if (lines[i].includes('<=') || lines[i].includes('=')) {
-                                stmtCount++;
-                            }
+            // Strip comments before checking for @
+            const lineWithoutComment = this.stripComments(lineText);
+            
+            // Check if initial has @ (which is an error - initial blocks don't have sensitivity lists)
+            const afterInitial = lineWithoutComment.substring(lineWithoutComment.indexOf('initial') + 7).trim();
+            const hasAtSymbol = /@/.test(afterInitial);
+            
+            if (hasAtSymbol) {
+                const atIndex = lineWithoutComment.indexOf('@', lineWithoutComment.indexOf('initial'));
+                this.addError(
+                    line,
+                    atIndex,
+                    1,
+                    'Initial blocks cannot have sensitivity lists (@)',
+                    vscode.DiagnosticSeverity.Error
+                );
+            }
+            
+            // Check for statements after initial
+            this.checkProceduralBlockStatement(text, lines, document, line, 'initial');
+        }
+    }
+    
+    /**
+     * Check if a procedural block (always/initial) has a statement following it
+     */
+    checkProceduralBlockStatement(text, lines, document, blockLine, blockType) {
+        const lineText = lines[blockLine];
+        const blockKeyword = blockType; // 'always' or 'initial'
+        
+        // Strip comments
+        const lineWithoutComment = this.stripComments(lineText);
+        
+        // Check if there's a statement on the same line
+        const afterBlock = lineWithoutComment.substring(lineWithoutComment.indexOf(blockKeyword) + blockKeyword.length);
+        
+        // Skip timing control part for always blocks
+        let checkText = afterBlock;
+        if (blockType === 'always' && checkText.includes('@')) {
+            // Skip the @ sensitivity list
+            const atIndex = checkText.indexOf('@');
+            // Find the end of sensitivity list
+            if (checkText.substring(atIndex + 1).trim().startsWith('*')) {
+                checkText = checkText.substring(atIndex + 2); // Skip @*
+            } else if (checkText.substring(atIndex + 1).trim().startsWith('(')) {
+                // Find matching closing paren
+                let parenDepth = 0;
+                let foundClosing = false;
+                for (let i = atIndex + 1; i < checkText.length; i++) {
+                    if (checkText[i] === '(') parenDepth++;
+                    if (checkText[i] === ')') {
+                        parenDepth--;
+                        if (parenDepth === 0) {
+                            checkText = checkText.substring(i + 1);
+                            foundClosing = true;
+                            break;
                         }
-                        // This is just a warning since single statements don't need begin/end
                     }
                 }
+                if (!foundClosing) {
+                    checkText = ''; // Couldn't find closing, will check next lines
+                }
             }
+        }
+        
+        checkText = checkText.trim();
+        
+        // If there's something after the block declaration on the same line
+        if (checkText.length > 0) {
+            return; // Has statement on same line
+        }
+        
+        // Check next few lines for a statement or begin
+        let foundStatement = false;
+        for (let i = blockLine + 1; i < Math.min(blockLine + 5, lines.length); i++) {
+            const nextLine = this.stripComments(lines[i]).trim();
+            
+            // Skip empty lines
+            if (nextLine.length === 0) {
+                continue;
+            }
+            
+            // Check for begin, statement, or other module constructs
+            if (nextLine.startsWith('begin') ||
+                nextLine.match(/^\w+\s*[<]?=/) ||  // Assignment
+                nextLine.startsWith('if') ||
+                nextLine.startsWith('case') ||
+                nextLine.startsWith('for') ||
+                nextLine.startsWith('while')) {
+                foundStatement = true;
+                break;
+            }
+            
+            // If we hit another block or module construct, no statement found
+            if (nextLine.startsWith('end') ||
+                nextLine.startsWith('endmodule') ||
+                nextLine.startsWith('always') ||
+                nextLine.startsWith('initial') ||
+                nextLine.startsWith('assign')) {
+                break;
+            }
+        }
+        
+        if (!foundStatement) {
+            this.addError(
+                blockLine,
+                0,
+                lineText.length,
+                `${blockType.charAt(0).toUpperCase() + blockType.slice(1)} block is missing a statement`,
+                vscode.DiagnosticSeverity.Error
+            );
         }
     }
 
@@ -467,6 +647,17 @@ class VerilogParser {
         ];
         
         return keywords.includes(name.toLowerCase());
+    }
+
+    /**
+     * Strip single-line comments from a line of code
+     */
+    stripComments(line) {
+        const commentIndex = line.indexOf('//');
+        if (commentIndex !== -1) {
+            return line.substring(0, commentIndex);
+        }
+        return line;
     }
 
     /**
