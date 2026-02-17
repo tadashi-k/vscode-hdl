@@ -40,5 +40,8 @@
         "title": "Verilog: Show Symbols Database"
       }
     ]
+  },
+  "dependencies": {
+    "antlr4": "^4.13.2"
   }
 }
