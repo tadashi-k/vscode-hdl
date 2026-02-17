@@ -13,6 +13,10 @@
     "onLanguage:verilog"
   ],
   "main": "./src/extension.js",
+  "scripts": {
+    "build:antlr": "node antlr/build.js",
+    "clean:antlr": "rm -rf antlr/generated"
+  },
   "contributes": {
     "languages": [
       {
@@ -42,6 +46,9 @@
     ]
   },
   "dependencies": {
-    "antlr4": "^4.13.2"
+    "antlr4": "^4.8.0"
+  },
+  "devDependencies": {
+    "antlr4-tool": "^1.1.1"
   }
 }
