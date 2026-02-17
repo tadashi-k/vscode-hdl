@@ -13,6 +13,10 @@
     "onLanguage:verilog"
   ],
   "main": "./src/extension.js",
+  "scripts": {
+    "build:antlr": "node antlr/build.js",
+    "clean:antlr": "rm -rf antlr/generated"
+  },
   "contributes": {
     "languages": [
       {
