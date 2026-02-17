@@ -13,7 +13,6 @@ try {
 }
 
 // Import ANTLR4 runtime
-const antlr4 = require('antlr4ts');
 const { CharStreams } = require('antlr4ts');
 const { CommonTokenStream } = require('antlr4ts');
 
