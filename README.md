@@ -11,7 +11,14 @@ A Visual Studio Code extension that provides syntax highlighting, symbol extract
   - Missing semicolons in declarations
   - Invalid identifiers and reserved keyword usage
   - Malformed assign statements
-  - Always block syntax validation
+  - **Always block syntax validation**
+    - Missing timing control (@)
+    - Empty sensitivity lists
+    - Invalid timing control syntax
+    - Missing statements
+  - **Initial block syntax validation**
+    - Initial blocks with sensitivity lists (error)
+    - Missing statements
   - Duplicate signal declarations
 - **Enhanced Symbol Extraction**: Automatically extracts and stores Verilog symbols with detailed information
   - Module names
@@ -85,7 +92,17 @@ The extension includes a comprehensive Verilog parser that performs real-time sy
 4. **Statement Errors**
    - Assign statements without assignment operator (`=`)
    - Assign statements missing semicolons
-   - Always blocks with empty sensitivity lists
+
+5. **Always Block Errors**
+   - Always blocks without timing control (`@`)
+   - Always blocks with empty sensitivity lists `@()`
+   - Invalid timing control syntax
+   - Always blocks missing statements
+   - Support for valid syntax: `@(posedge clk)`, `@(*)`, `@*`
+
+6. **Initial Block Errors**
+   - Initial blocks with sensitivity lists (not allowed in Verilog)
+   - Initial blocks missing statements
 
 ### Example Errors Detected
 
@@ -108,6 +125,55 @@ endmodule
 module wire (  // 'wire' is a reserved keyword
     input a
 );
+endmodule
+
+// Error: Always block without timing control
+module always_error (
+    input wire clk,
+    output reg q
+);
+    always begin  // Missing @ timing control
+        q <= 1'b1;
+    end
+endmodule
+
+// Error: Always block with empty sensitivity list
+module empty_sens (
+    input wire clk,
+    output reg q
+);
+    always @() begin  // Empty sensitivity list
+        q <= 1'b1;
+    end
+endmodule
+
+// Error: Initial block with sensitivity list
+module initial_error (
+    output reg q
+);
+    initial @(posedge clk) begin  // Initial blocks cannot have @ sensitivity
+        q = 1'b0;
+    end
+endmodule
+
+// Valid: Always block with proper timing control
+module valid_always (
+    input wire clk,
+    output reg q
+);
+    always @(posedge clk) begin  // Correct syntax
+        q <= 1'b1;
+    end
+endmodule
+
+// Valid: Always block with @*
+module valid_always_star (
+    input wire a, b,
+    output reg c
+);
+    always @* begin  // Valid syntax
+        c = a & b;
+    end
 endmodule
 
 // Error: Missing semicolon
