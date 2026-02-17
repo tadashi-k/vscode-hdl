@@ -43,11 +43,34 @@ class VerilogErrorListener {
         const endPos = new vscode.Position(line - 1, charPositionInLine + length);
         const range = new vscode.Range(startPos, endPos);
         
+        // Enhance error messages for better user understanding
+        let enhancedMsg = msg;
+        
+        // Check for reserved keyword usage as identifier
+        if (offendingSymbol && offendingSymbol.text) {
+            const token = offendingSymbol.text;
+            const reservedKeywords = [
+                'module', 'endmodule', 'input', 'output', 'inout', 'wire', 'reg',
+                'always', 'initial', 'begin', 'end', 'if', 'else', 'case', 'endcase',
+                'assign', 'parameter', 'posedge', 'negedge', 'or', 'and', 'not'
+            ];
+            if (reservedKeywords.includes(token) && msg.includes('no viable alternative')) {
+                enhancedMsg = `'${token}' is a reserved keyword and cannot be used as an identifier`;
+            }
+        }
+        
+        // Enhance bracket-related errors
+        if (msg.includes("missing ')'")) {
+            enhancedMsg = msg.replace("missing ')'", "missing closing bracket ')'");
+        } else if (msg.includes("missing '('")) {
+            enhancedMsg = msg.replace("missing '('", "missing opening bracket '('");
+        }
+        
         const diagnostic = {
             line: line - 1,
             character: charPositionInLine,
             length: length,
-            message: msg,
+            message: enhancedMsg,
             severity: vscode.DiagnosticSeverity.Error,
             range: range
         };
