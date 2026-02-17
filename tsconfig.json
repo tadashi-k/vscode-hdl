@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./src/generated",
+    "rootDir": "./src/generated",
+    "strict": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": false,
+    "moduleResolution": "node"
+  },
+  "include": [
+    "src/generated/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
