@@ -487,10 +487,11 @@ class AntlrVerilogParser {
      * Parse Verilog document and detect syntax errors
      * Also generates semantic warnings (signal usage issues).
      * @param {vscode.TextDocument} document 
+     * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
      * @returns {Array} Array of diagnostic objects (syntax errors + signal warnings)
      */
-    parse(document) {
-        const { errors, warnings } = this.parseSymbols(document);
+    parse(document, moduleDatabase = null) {
+        const { errors, warnings } = this.parseSymbols(document, moduleDatabase);
         return [...errors, ...warnings];
     }
 
@@ -499,13 +500,14 @@ class AntlrVerilogParser {
      * Replaces the regex-based parseVerilogSymbols function.
      *
      * @param {vscode.TextDocument} document
+     * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
      * @returns {{ modules: Array, signals: Array, errors: Array, warnings: Array }}
      *   modules: [{ name, uri, line, character, ports[] }]
      *   signals: [{ name, uri, line, character, direction, type, bitWidth, moduleName }]
      *   errors:  syntax errors
      *   warnings: signal usage warnings
      */
-    parseSymbols(document) {
+    parseSymbols(document, moduleDatabase = null) {
         this.errorListener.clearErrors();
 
         const text = document.getText();
@@ -544,7 +546,7 @@ class AntlrVerilogParser {
             });
         }
 
-        const warnings = visitor ? this._generateSignalWarnings(modules, signals, visitor) : [];
+        const warnings = visitor ? this._generateSignalWarnings(modules, signals, visitor, moduleDatabase) : [];
         const instances = visitor ? visitor.instances : [];
 
         return { modules, signals, instances, errors: this.errorListener.getErrors(), warnings };
@@ -555,16 +557,26 @@ class AntlrVerilogParser {
      * @param {Array} modules
      * @param {Array} signals
      * @param {VerilogSymbolVisitor} visitor
+     * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
      * @returns {Array} Array of warning diagnostic objects
      */
-    _generateSignalWarnings(modules, signals, visitor) {
+    _generateSignalWarnings(modules, signals, visitor, moduleDatabase = null) {
         const warnings = [];
         const wireTypes = new Set(['wire', 'tri', 'supply0', 'supply1']);
 
-        // Build a map of module name -> port name -> port object for instantiation checks
+        // Build a map of module name -> port name -> port object for instantiation checks.
+        // First populate from locally-parsed modules, then fill in missing entries from
+        // the workspace-wide moduleDatabase (cross-file module support).
         const modulePortMap = new Map();
         for (const mod of modules) {
             modulePortMap.set(mod.name, new Map(mod.ports.map(p => [p.name, p])));
+        }
+        if (moduleDatabase) {
+            for (const mod of moduleDatabase.getAllModules()) {
+                if (!modulePortMap.has(mod.name)) {
+                    modulePortMap.set(mod.name, new Map(mod.ports.map(p => [p.name, p])));
+                }
+            }
         }
 
         for (const module of modules) {
@@ -573,6 +585,25 @@ class AntlrVerilogParser {
             const declaredByName = new Map(declaredSignals.map(s => [s.name, s]));
             const paramNames = visitor._moduleParamNames.get(moduleName) || new Set();
             const refNames = visitor._moduleSignalRefs.get(moduleName) || new Set();
+
+            // Build sets of signals that are "used" or "assigned" via port connections
+            // to instantiated modules, using cross-file port information from modulePortMap.
+            // - Signals connected to input or inout ports are "used" (the submodule reads them).
+            // - Signals connected to output or inout ports are "assigned" (the submodule drives them).
+            const usedViaPortInput = new Set();
+            const assignedViaPortOutput = new Set();
+            for (const conn of visitor._instPortConnections.filter(c => c.moduleName === moduleName)) {
+                const instModPorts = modulePortMap.get(conn.instModuleName);
+                if (!instModPorts) continue;
+                const instPort = instModPorts.get(conn.portName);
+                if (!instPort) continue;
+                if (instPort.direction === 'input' || instPort.direction === 'inout') {
+                    usedViaPortInput.add(conn.localSignalName);
+                }
+                if (instPort.direction === 'output' || instPort.direction === 'inout') {
+                    assignedViaPortOutput.add(conn.localSignalName);
+                }
+            }
 
             // Warning 1: signal reference without declaration
             const reportedUndefined = new Set();
@@ -591,8 +622,10 @@ class AntlrVerilogParser {
             }
 
             // Warning 2: signal declared but never used
+            // Signals connected to input or inout ports of instantiated modules are
+            // treated as "used" even if they have no other references in the module body.
             for (const signal of declaredSignals) {
-                if (!refNames.has(signal.name)) {
+                if (!refNames.has(signal.name) && !usedViaPortInput.has(signal.name)) {
                     warnings.push({
                         line: signal.line,
                         character: signal.character,
@@ -653,32 +686,31 @@ class AntlrVerilogParser {
                 }
             }
 
-            // Build the set of assigned signals: all l-values plus signals driven by
-            // output ports of instantiated modules (used for Warning 7).
-            const assignedSignals = new Set();
+            // Build the set of assigned signals: all explicit l-values plus signals driven
+            // by output or inout ports of instantiated modules (used for Warning 7).
+            const assignedSignals = new Set(assignedViaPortOutput);
             for (const lval of [...visitor.assignLvalues, ...visitor.procLvalues].filter(l => l.moduleName === moduleName)) {
                 assignedSignals.add(lval.name);
             }
 
-            // Warning 6: output port of instantiated module connected to reg signal
+            // Warning 6: output or inout port of instantiated module connected to reg signal
+            // A reg cannot be driven by a submodule's output/inout port.
             const reportedOutputPortReg = new Set();
             for (const conn of visitor._instPortConnections.filter(c => c.moduleName === moduleName)) {
                 const instModPorts = modulePortMap.get(conn.instModuleName);
                 if (!instModPorts) continue;
                 const instPort = instModPorts.get(conn.portName);
-                if (!instPort || instPort.direction !== 'output') continue;
-
-                // This local signal is driven by the instantiated module's output port
-                assignedSignals.add(conn.localSignalName);
+                if (!instPort || (instPort.direction !== 'output' && instPort.direction !== 'inout')) continue;
 
                 if (!reportedOutputPortReg.has(conn.localSignalName) &&
                     declaredSignals.some(s => s.name === conn.localSignalName && s.type === 'reg')) {
                     reportedOutputPortReg.add(conn.localSignalName);
+                    const dirLabel = instPort.direction.charAt(0).toUpperCase() + instPort.direction.slice(1);
                     warnings.push({
                         line: conn.line,
                         character: conn.character,
                         length: conn.localSignalName.length,
-                        message: `Output port '${conn.portName}' of instantiated module cannot be connected to reg signal '${conn.localSignalName}'`,
+                        message: `${dirLabel} port '${conn.portName}' of instantiated module cannot be connected to reg signal '${conn.localSignalName}'`,
                         severity: vscode.DiagnosticSeverity.Warning
                     });
                 }

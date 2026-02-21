@@ -28,6 +28,15 @@ class MockTextDocument {
 global.vscode = vscode;
 const AntlrVerilogParser = require('../src/antlr-parser');
 
+// Shared mock for a workspace-wide module database (used by cross-file tests)
+class MockModuleDatabase {
+    constructor(modules) {
+        this._modules = new Map(modules.map(m => [m.name, m]));
+    }
+    getModule(name) { return this._modules.get(name); }
+    getAllModules() { return Array.from(this._modules.values()); }
+}
+
 function runTests() {
     console.log('Running Signal Warning Tests...\n');
     console.log('='.repeat(60));
@@ -596,6 +605,307 @@ endmodule
             passedTests++;
         } else {
             console.log('  ✗ Test 16 FAILED (unexpected "never assigned" warning for received)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 17: Inout port of instantiated module connected to reg signal → warning
+    {
+        totalTests++;
+        console.log('\nTest 17: Inout port of instantiated module connected to reg signal');
+        const code = `
+module bidir_mod (
+    input wire clk,
+    inout wire bus
+);
+    assign bus = clk;
+endmodule
+
+module top_inout (
+    input wire clk,
+    output reg out
+);
+    reg  bus_reg;
+    wire bus_wire;
+
+    bidir_mod u1 (
+        .clk(clk),
+        .bus(bus_reg)
+    );
+
+    bidir_mod u2 (
+        .clk(clk),
+        .bus(bus_wire)
+    );
+
+    always @(posedge clk) begin
+        out <= bus_wire;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'inout_reg.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasInoutRegWarning = warnings.some(w =>
+            w.message.includes('bus_reg') && w.message.includes('cannot be connected to reg')
+        );
+        const noWireWarning = !warnings.some(w =>
+            w.message.includes('bus_wire') && w.message.includes('cannot be connected to reg')
+        );
+
+        if (hasInoutRegWarning && noWireWarning) {
+            console.log('  ✓ Test 17 PASSED (inout-port-to-reg warning detected, wire not falsely warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 17 FAILED (hasInoutRegWarning: ${hasInoutRegWarning}, noWireWarning: ${noWireWarning})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 18: Signal connected to inout port is treated as "assigned" (no "never assigned" warning)
+    {
+        totalTests++;
+        console.log('\nTest 18: Signal connected to inout port counts as assigned');
+        const code = `
+module bidir_mod (
+    input wire clk,
+    inout wire bus
+);
+    assign bus = clk;
+endmodule
+
+module top_inout_assigned (
+    input wire clk,
+    output reg out
+);
+    wire bus_io;
+
+    bidir_mod u1 (
+        .clk(clk),
+        .bus(bus_io)
+    );
+
+    always @(posedge clk) begin
+        out <= bus_io;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'inout_assigned.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noBusNeverAssigned = !warnings.some(w =>
+            w.message.includes('bus_io') && w.message.includes('never assigned')
+        );
+
+        if (noBusNeverAssigned) {
+            console.log('  ✓ Test 18 PASSED (no false "never assigned" for inout-port-connected wire)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 18 FAILED (unexpected "never assigned" warning for bus_io)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 19: Signal connected to input port counts as "used" (no "declared but never used" warning)
+    {
+        totalTests++;
+        console.log('\nTest 19: Signal connected to input port counts as used');
+        const code = `
+module sub_mod (
+    input wire data_in,
+    output wire data_out
+);
+    assign data_out = data_in;
+endmodule
+
+module top_input_used (
+    input wire clk,
+    output wire result
+);
+    wire my_data;
+
+    sub_mod u1 (
+        .data_in(my_data),
+        .data_out(result)
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'input_used.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noMyDataUnused = !warnings.some(w =>
+            w.message.includes('my_data') && w.message.includes('never used')
+        );
+
+        if (noMyDataUnused) {
+            console.log('  ✓ Test 19 PASSED (no false "never used" for input-port-connected signal)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 19 FAILED (unexpected "never used" warning for my_data)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 20: Cross-file module lookup via moduleDatabase (output port)
+    {
+        totalTests++;
+        console.log('\nTest 20: Cross-file module lookup via moduleDatabase - output port assigned');
+
+        // "ext_mod" is defined in another file, with an output port "data"
+        const extModule = {
+            name: 'ext_mod',
+            uri: 'other_file.v',
+            line: 0,
+            character: 0,
+            ports: [
+                { name: 'clk', direction: 'input', type: 'wire' },
+                { name: 'data', direction: 'output', type: 'wire' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([extModule]);
+
+        // top_mod instantiates ext_mod (defined in another file)
+        const code = `
+module top_mod (
+    input wire clk,
+    output reg out
+);
+    wire received;
+
+    ext_mod u1 (
+        .clk(clk),
+        .data(received)
+    );
+
+    always @(posedge clk) begin
+        out <= received;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'top_mod.v');
+        const { errors, warnings } = parser.parseSymbols(doc, mockDb);
+
+        const noReceivedNeverAssigned = !warnings.some(w =>
+            w.message.includes('received') && w.message.includes('never assigned')
+        );
+
+        if (noReceivedNeverAssigned) {
+            console.log('  ✓ Test 20 PASSED (cross-file output port: no false "never assigned" for received)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 20 FAILED (unexpected "never assigned" warning for received)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 21: Cross-file module lookup via moduleDatabase - reg connected to output port warns
+    {
+        totalTests++;
+        console.log('\nTest 21: Cross-file module lookup via moduleDatabase - reg connected to output port');
+
+        const extModule = {
+            name: 'ext_producer',
+            uri: 'other_file.v',
+            line: 0,
+            character: 0,
+            ports: [
+                { name: 'clk', direction: 'input', type: 'wire' },
+                { name: 'result', direction: 'output', type: 'wire' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([extModule]);
+
+        const code = `
+module top_cross (
+    input wire clk,
+    output reg out
+);
+    reg captured;
+
+    ext_producer u1 (
+        .clk(clk),
+        .result(captured)
+    );
+
+    always @(posedge clk) begin
+        out <= captured;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'top_cross.v');
+        const { errors, warnings } = parser.parseSymbols(doc, mockDb);
+
+        const hasCapturedRegWarning = warnings.some(w =>
+            w.message.includes('captured') && w.message.includes('cannot be connected to reg')
+        );
+
+        if (hasCapturedRegWarning) {
+            console.log('  ✓ Test 21 PASSED (cross-file: output-port-to-reg warning detected)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 21 FAILED (expected "cannot be connected to reg" warning for captured)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 22: Cross-file inout port - reg warning and assigned correctly
+    {
+        totalTests++;
+        console.log('\nTest 22: Cross-file inout port - reg warning and assigned correctly');
+
+        const extModule = {
+            name: 'ext_bidir',
+            uri: 'other_file.v',
+            line: 0,
+            character: 0,
+            ports: [
+                { name: 'clk', direction: 'input', type: 'wire' },
+                { name: 'bus', direction: 'inout', type: 'wire' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([extModule]);
+
+        const code = `
+module top_bidir (
+    input wire clk,
+    output reg out
+);
+    reg  bus_reg;
+    wire bus_wire;
+
+    ext_bidir u1 (
+        .clk(clk),
+        .bus(bus_reg)
+    );
+
+    ext_bidir u2 (
+        .clk(clk),
+        .bus(bus_wire)
+    );
+
+    always @(posedge clk) begin
+        out <= bus_wire;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'top_bidir.v');
+        const { errors, warnings } = parser.parseSymbols(doc, mockDb);
+
+        const hasBusRegWarning = warnings.some(w =>
+            w.message.includes('bus_reg') && w.message.includes('cannot be connected to reg')
+        );
+        const noBusWireRegWarning = !warnings.some(w =>
+            w.message.includes('bus_wire') && w.message.includes('cannot be connected to reg')
+        );
+        const noBusWireNeverAssigned = !warnings.some(w =>
+            w.message.includes('bus_wire') && w.message.includes('never assigned')
+        );
+
+        if (hasBusRegWarning && noBusWireRegWarning && noBusWireNeverAssigned) {
+            console.log('  ✓ Test 22 PASSED (cross-file inout: reg warning, wire not warned, assigned correctly)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 22 FAILED (hasBusRegWarning: ${hasBusRegWarning}, noBusWireRegWarning: ${noBusWireRegWarning}, noBusWireNeverAssigned: ${noBusWireNeverAssigned})`);
             warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
         }
     }
