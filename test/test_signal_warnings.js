@@ -384,6 +384,222 @@ endmodule
         }
     }
 
+    // Test 12: Input signal used as l-value in assign statement
+    {
+        totalTests++;
+        console.log('\nTest 12: Input signal used as l-value in assign statement');
+        const code = `
+module input_assign_lval (
+    input wire in_sig,
+    output wire out_sig
+);
+    assign in_sig = 1'b0;
+    assign out_sig = 1'b1;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'input_assign_lval.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasInputLvalWarning = warnings.some(w =>
+            w.message.includes('in_sig') && w.message.includes('cannot be used as l-value')
+        );
+        const noOutWarning = !warnings.some(w =>
+            w.message.includes('out_sig') && w.message.includes('cannot be used as l-value')
+        );
+
+        if (hasInputLvalWarning && noOutWarning) {
+            console.log('  ✓ Test 12 PASSED (input l-value warning detected, output not falsely warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 12 FAILED (hasInputLvalWarning: ${hasInputLvalWarning}, noOutWarning: ${noOutWarning})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 13: Input signal used as l-value in procedural block
+    {
+        totalTests++;
+        console.log('\nTest 13: Input signal used as l-value in procedural block');
+        const code = `
+module input_proc_lval (
+    input wire clk,
+    input wire data_in,
+    output reg data_out
+);
+    always @(posedge clk) begin
+        data_in <= 1'b0;
+        data_out <= 1'b1;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'input_proc_lval.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasInputLvalWarning = warnings.some(w =>
+            w.message.includes('data_in') && w.message.includes('cannot be used as l-value')
+        );
+        const noDataOutWarning = !warnings.some(w =>
+            w.message.includes('data_out') && w.message.includes('cannot be used as l-value')
+        );
+
+        if (hasInputLvalWarning && noDataOutWarning) {
+            console.log('  ✓ Test 13 PASSED (input procedural l-value warning detected)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 13 FAILED (hasInputLvalWarning: ${hasInputLvalWarning}, noDataOutWarning: ${noDataOutWarning})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 14: Output port of instantiated module connected to reg signal
+    {
+        totalTests++;
+        console.log('\nTest 14: Output port of instantiated module connected to reg signal');
+        const code = `
+module sub_mod (
+    input wire clk,
+    output wire result
+);
+    assign result = clk;
+endmodule
+
+module top_mod (
+    input wire clk,
+    output reg out
+);
+    reg captured;
+    wire captured_wire;
+
+    sub_mod u1 (
+        .clk(clk),
+        .result(captured)
+    );
+
+    sub_mod u2 (
+        .clk(clk),
+        .result(captured_wire)
+    );
+
+    always @(posedge clk) begin
+        out <= captured;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'inst_output_reg.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasOutputRegWarning = warnings.some(w =>
+            w.message.includes('captured') && w.message.includes('cannot be connected to reg')
+        );
+        const noWireWarning = !warnings.some(w =>
+            w.message.includes('captured_wire') && w.message.includes('cannot be connected to reg')
+        );
+
+        if (hasOutputRegWarning && noWireWarning) {
+            console.log('  ✓ Test 14 PASSED (output-port-to-reg warning detected, wire connection not falsely warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 14 FAILED (hasOutputRegWarning: ${hasOutputRegWarning}, noWireWarning: ${noWireWarning})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 15: Output/internal signal never assigned
+    {
+        totalTests++;
+        console.log('\nTest 15: Output/internal signal never assigned');
+        const code = `
+module never_assigned (
+    input wire clk,
+    output reg out_never,
+    output reg out_assigned
+);
+    wire internal_never;
+    wire internal_assigned;
+
+    assign internal_assigned = clk;
+
+    always @(posedge clk) begin
+        out_assigned <= internal_assigned;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'never_assigned.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasOutNeverWarning = warnings.some(w =>
+            w.message.includes('out_never') && w.message.includes('never assigned')
+        );
+        const hasInternalNeverWarning = warnings.some(w =>
+            w.message.includes('internal_never') && w.message.includes('never assigned')
+        );
+        const noOutAssignedWarning = !warnings.some(w =>
+            w.message.includes('out_assigned') && w.message.includes('never assigned')
+        );
+        const noInternalAssignedWarning = !warnings.some(w =>
+            w.message.includes('internal_assigned') && w.message.includes('never assigned')
+        );
+        const noInputWarning = !warnings.some(w =>
+            w.message.includes('clk') && w.message.includes('never assigned')
+        );
+
+        if (hasOutNeverWarning && hasInternalNeverWarning &&
+            noOutAssignedWarning && noInternalAssignedWarning && noInputWarning) {
+            console.log('  ✓ Test 15 PASSED (never-assigned warnings correct)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 15 FAILED`);
+            console.log(`    out_never warned: ${hasOutNeverWarning}, internal_never warned: ${hasInternalNeverWarning}`);
+            console.log(`    out_assigned not warned: ${noOutAssignedWarning}, internal_assigned not warned: ${noInternalAssignedWarning}`);
+            console.log(`    clk not warned: ${noInputWarning}`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 16: Signal assigned via output port of instantiated module is not "never assigned"
+    {
+        totalTests++;
+        console.log('\nTest 16: Signal assigned via instantiated module output port counts as assigned');
+        const code = `
+module producer (
+    input wire clk,
+    output wire data
+);
+    assign data = clk;
+endmodule
+
+module consumer (
+    input wire clk,
+    output reg result
+);
+    wire received;
+
+    producer p1 (
+        .clk(clk),
+        .data(received)
+    );
+
+    always @(posedge clk) begin
+        result <= received;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'inst_assigned.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noReceivedNeverAssigned = !warnings.some(w =>
+            w.message.includes('received') && w.message.includes('never assigned')
+        );
+
+        if (noReceivedNeverAssigned) {
+            console.log('  ✓ Test 16 PASSED (no false "never assigned" for output-port-connected wire)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 16 FAILED (unexpected "never assigned" warning for received)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);

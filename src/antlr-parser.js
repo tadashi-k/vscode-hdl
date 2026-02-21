@@ -77,6 +77,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._signalRefList = [];             // [{name, moduleName, line, character}]
         this.assignLvalues = [];             // [{name, moduleName, line, character}] continuous assign lvalues
         this.procLvalues = [];               // [{name, moduleName, line, character}] blocking/non-blocking lvalues
+        this._instPortConnections = [];      // [{instModuleName, portName, localSignalName, line, character, moduleName}]
         this._moduleParamNames = new Map();  // moduleName -> Set<paramName>
         this._currentModule = null;
         this._inProcedural = false;
@@ -114,6 +115,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return rangeCtx ? rangeCtx.getText() : null;
     }
 
+    // Normalises a raw ANTLR rule-context result to a (possibly empty) array.
+    // ANTLR returns a single context for exactly one match and an array for multiple.
+    _toArray(raw) {
+        if (!raw) return [];
+        return Array.isArray(raw) ? raw : [raw];
+    }
+
     visitModule_declaration(ctx) {
         const info = this._getIdentifierInfo(ctx.module_identifier().identifier());
         if (!info) return null;
@@ -134,6 +142,68 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
         this.modules.push(this._currentModule);
         this._currentModule = null;
+        return null;
+    }
+
+    // Returns identifier info if the expression is a simple (unmodified) identifier primary
+    _getPrimaryIdentifier(exprCtx) {
+        if (!exprCtx) return null;
+        if (exprCtx.unary_operator && exprCtx.unary_operator()) return null;
+        const primaryCtx = exprCtx.primary ? exprCtx.primary() : null;
+        if (!primaryCtx) return null;
+        const identCtx = primaryCtx.identifier ? primaryCtx.identifier() : null;
+        if (!identCtx) return null;
+        return this._getIdentifierInfo(identCtx);
+    }
+
+    // Track module instantiations for port-connection warnings
+    visitModule_instantiation(ctx) {
+        if (!this._currentModule) return null;
+
+        const instModIdCtx = ctx.module_identifier();
+        const instModInfo = this._getIdentifierInfo(instModIdCtx.identifier());
+        if (instModInfo) {
+            const instModuleName = instModInfo.name;
+
+            // Collect named port connections for each instance
+            const instances = this._toArray(ctx.module_instance ? ctx.module_instance() : null);
+
+            for (const inst of instances) {
+                const portConnsCtx = inst.list_of_port_connections
+                    ? inst.list_of_port_connections()
+                    : null;
+                if (!portConnsCtx) continue;
+
+                const namedConns = this._toArray(
+                    portConnsCtx.named_port_connection
+                        ? portConnsCtx.named_port_connection()
+                        : null
+                );
+
+                for (const conn of namedConns) {
+                    const portIdCtx = conn.port_identifier ? conn.port_identifier() : null;
+                    if (!portIdCtx) continue;
+                    const portInfo = this._getIdentifierInfo(portIdCtx.identifier());
+                    if (!portInfo) continue;
+
+                    const exprCtx = conn.expression ? conn.expression() : null;
+                    const localSignalInfo = this._getPrimaryIdentifier(exprCtx);
+                    if (localSignalInfo) {
+                        this._instPortConnections.push({
+                            instModuleName,
+                            portName: portInfo.name,
+                            localSignalName: localSignalInfo.name,
+                            line: localSignalInfo.line,
+                            character: localSignalInfo.character,
+                            moduleName: this._currentModule.name
+                        });
+                    }
+                }
+            }
+        }
+
+        // Visit children for normal r-value reference tracking
+        this.visitChildren(ctx);
         return null;
     }
 
@@ -465,6 +535,12 @@ class AntlrVerilogParser {
         const warnings = [];
         const wireTypes = new Set(['wire', 'tri', 'supply0', 'supply1']);
 
+        // Build a map of module name -> port name -> port object for instantiation checks
+        const modulePortMap = new Map();
+        for (const mod of modules) {
+            modulePortMap.set(mod.name, new Map(mod.ports.map(p => [p.name, p])));
+        }
+
         for (const module of modules) {
             const moduleName = module.name;
             const declaredSignals = signals.filter(s => s.moduleName === moduleName);
@@ -530,6 +606,70 @@ class AntlrVerilogParser {
                         character: lval.character,
                         length: lval.name.length,
                         message: `Procedural assignment l-value '${lval.name}' is a wire`,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
+
+            // Warning 5: input signal used as l-value in assign or procedural block
+            const reportedInputLval = new Set();
+            for (const lval of [...visitor.assignLvalues, ...visitor.procLvalues].filter(l => l.moduleName === moduleName)) {
+                if (reportedInputLval.has(lval.name)) continue;
+                if (declaredSignals.some(s => s.name === lval.name && s.direction === 'input')) {
+                    reportedInputLval.add(lval.name);
+                    warnings.push({
+                        line: lval.line,
+                        character: lval.character,
+                        length: lval.name.length,
+                        message: `Input signal '${lval.name}' cannot be used as l-value`,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
+
+            // Build the set of assigned signals: all l-values plus signals driven by
+            // output ports of instantiated modules (used for Warning 7).
+            const assignedSignals = new Set();
+            for (const lval of [...visitor.assignLvalues, ...visitor.procLvalues].filter(l => l.moduleName === moduleName)) {
+                assignedSignals.add(lval.name);
+            }
+
+            // Warning 6: output port of instantiated module connected to reg signal
+            const reportedOutputPortReg = new Set();
+            for (const conn of visitor._instPortConnections.filter(c => c.moduleName === moduleName)) {
+                const instModPorts = modulePortMap.get(conn.instModuleName);
+                if (!instModPorts) continue;
+                const instPort = instModPorts.get(conn.portName);
+                if (!instPort || instPort.direction !== 'output') continue;
+
+                // This local signal is driven by the instantiated module's output port
+                assignedSignals.add(conn.localSignalName);
+
+                if (!reportedOutputPortReg.has(conn.localSignalName) &&
+                    declaredSignals.some(s => s.name === conn.localSignalName && s.type === 'reg')) {
+                    reportedOutputPortReg.add(conn.localSignalName);
+                    warnings.push({
+                        line: conn.line,
+                        character: conn.character,
+                        length: conn.localSignalName.length,
+                        message: `Output port '${conn.portName}' of instantiated module cannot be connected to reg signal '${conn.localSignalName}'`,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
+
+            // Warning 7: output or internal signal never assigned
+            const reportedNeverAssigned = new Set();
+            for (const signal of declaredSignals) {
+                if (signal.direction === 'input' || signal.direction === 'inout') continue;
+                if (reportedNeverAssigned.has(signal.name)) continue;
+                if (!assignedSignals.has(signal.name)) {
+                    reportedNeverAssigned.add(signal.name);
+                    warnings.push({
+                        line: signal.line,
+                        character: signal.character,
+                        length: signal.name.length,
+                        message: `Signal '${signal.name}' is never assigned`,
                         severity: vscode.DiagnosticSeverity.Warning
                     });
                 }
