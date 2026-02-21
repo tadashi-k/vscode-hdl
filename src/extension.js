@@ -352,7 +352,7 @@ function updateDiagnostics(document, diagnosticCollection) {
         return;
     }
 
-    const errors = verilogParser.parse(document);
+    const errors = verilogParser.parse(document, moduleDatabase);
     const diagnostics = [];
 
     for (const error of errors) {
