@@ -1,7 +1,7 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 const vscode = require('vscode');
-const VerilogParser = require('./parser');
+const AntlrVerilogParser = require('./antlr-parser');
 
 // Signal database - stores signals (wire/reg) per file
 class SignalDatabase {
@@ -97,7 +97,7 @@ class ModuleDatabase {
 // Create global database instances
 const signalDatabase = new SignalDatabase();
 const moduleDatabase = new ModuleDatabase();
-const verilogParser = new VerilogParser();
+const verilogParser = new AntlrVerilogParser();
 
 /**
  * Parse Verilog document and extract symbols

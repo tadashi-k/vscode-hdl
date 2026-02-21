@@ -33,6 +33,24 @@ list_of_ports
 port
     : port_expression?
     | '.' port_identifier '(' port_expression? ')'
+    | ansi_port_declaration
+    ;
+
+// ANSI-style port declaration (e.g., input wire clk, output reg [7:0] data)
+ansi_port_declaration
+    : port_direction port_data_type? range? port_identifier
+    ;
+
+// Data type for ports (can be net types or reg)
+port_data_type
+    : net_type
+    | REG
+    ;
+
+port_direction
+    : INPUT
+    | OUTPUT
+    | INOUT
     ;
 
 port_expression
