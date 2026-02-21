@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 
-// Simple test script to validate symbol extraction
+// Simple test script to validate symbol extraction using the ANTLR-based parser
 const fs = require('fs');
 const path = require('path');
 
 // Mock vscode API for testing
+const vscode = {
+    DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 }
+};
+global.vscode = vscode;
+
+const AntlrVerilogParser = require('../src/antlr-parser');
+const parser = new AntlrVerilogParser();
+
 class MockTextDocument {
     constructor(text, uri) {
         this.text = text;
@@ -15,81 +23,6 @@ class MockTextDocument {
     getText() {
         return this.text;
     }
-
-    positionAt(offset) {
-        const lines = this.text.substring(0, offset).split('\n');
-        return { line: lines.length - 1 };
-    }
-}
-
-// Load the parser function from extension.js
-function parseVerilogSymbols(document) {
-    const text = document.getText();
-    const symbols = [];
-
-    // Regular expressions for matching Verilog constructs
-    const moduleRegex = /^\s*module\s+(\w+)/gm;
-    // Enhanced wire regex - capture direction, bit width, and names
-    const wireRegex = /^\s*(input\s+|output\s+|inout\s+)?wire\s+(\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
-    // Enhanced reg regex - capture direction, bit width, and names
-    const regRegex = /^\s*(input\s+|output\s+|inout\s+)?reg\s+(\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
-
-    // Extract module names
-    let match;
-    while ((match = moduleRegex.exec(text)) !== null) {
-        const name = match[1];
-        const line = document.positionAt(match.index).line;
-        symbols.push({
-            name: name,
-            type: 'module',
-            line: line,
-            uri: document.uri.toString()
-        });
-    }
-
-    // Extract wire declarations
-    while ((match = wireRegex.exec(text)) !== null) {
-        const direction = match[1] ? match[1].trim() : null; // input, output, or inout
-        const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
-        const names = match[3].split(',').map(n => n.trim());
-        const line = document.positionAt(match.index).line;
-        names.forEach(name => {
-            // Filter out empty names or keywords
-            if (name && !['input', 'output', 'inout', 'wire'].includes(name)) {
-                symbols.push({
-                    name: name,
-                    type: 'wire',
-                    direction: direction,
-                    bitWidth: bitWidth,
-                    line: line,
-                    uri: document.uri.toString()
-                });
-            }
-        });
-    }
-
-    // Extract reg declarations
-    while ((match = regRegex.exec(text)) !== null) {
-        const direction = match[1] ? match[1].trim() : null; // input, output, or inout
-        const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
-        const names = match[3].split(',').map(n => n.trim());
-        const line = document.positionAt(match.index).line;
-        names.forEach(name => {
-            // Filter out empty names or keywords
-            if (name && !['input', 'output', 'inout', 'reg'].includes(name)) {
-                symbols.push({
-                    name: name,
-                    type: 'reg',
-                    direction: direction,
-                    bitWidth: bitWidth,
-                    line: line,
-                    uri: document.uri.toString()
-                });
-            }
-        });
-    }
-
-    return symbols;
 }
 
 // Run tests
@@ -99,60 +32,55 @@ function runTests() {
     let passed = 0;
     let failed = 0;
 
-    // Test 1: test.v file
-    console.log('Test 1: test.v');
+    // Test 1: full_adder.v
+    console.log('Test 1: full_adder.v');
     const test1Path = path.join(__dirname, '../contents', 'full_adder.v');
     const test1Content = fs.readFileSync(test1Path, 'utf8');
     const test1Doc = new MockTextDocument(test1Content, test1Path);
-    const test1Symbols = parseVerilogSymbols(test1Doc);
-    
-    console.log(`Found ${test1Symbols.length} symbols:`);
-    const moduleCount = test1Symbols.filter(s => s.type === 'module').length;
-    const wireCount = test1Symbols.filter(s => s.type === 'wire').length;
-    const regCount = test1Symbols.filter(s => s.type === 'reg').length;
-    
+    const { modules: modules1, signals: signals1 } = parser.parseSymbols(test1Doc);
+
+    const moduleCount = modules1.length;
+    const wireCount = signals1.filter(s => s.type === 'wire').length;
+    const regCount = signals1.filter(s => s.type === 'reg').length;
+
+    console.log(`Found ${modules1.length} modules, ${signals1.length} signals:`);
     console.log(`  - Modules: ${moduleCount}`);
     console.log(`  - Wires: ${wireCount}`);
     console.log(`  - Regs: ${regCount}`);
-    
+
     if (moduleCount === 2 && wireCount >= 3 && regCount >= 1) {
         console.log('✓ Test 1 PASSED\n');
         passed++;
     } else {
-        console.log(`✗ Test 1 FAILED (expected 3 modules, >=3 wires, >=1 regs, got ${moduleCount} modules, ${wireCount} wires, ${regCount} regs)\n`);
+        console.log(`✗ Test 1 FAILED (expected 2 modules, >=3 wires, >=1 regs, got ${moduleCount} modules, ${wireCount} wires, ${regCount} regs)\n`);
         failed++;
     }
 
-    // Test 2: test_symbols.v file
+    // Test 2: test_symbols.v
     console.log('Test 2: test_symbols.v');
     const test2Path = path.join(__dirname, '../contents', 'test_symbols.v');
     const test2Content = fs.readFileSync(test2Path, 'utf8');
     const test2Doc = new MockTextDocument(test2Content, test2Path);
-    const test2Symbols = parseVerilogSymbols(test2Doc);
-    
-    console.log(`Found ${test2Symbols.length} symbols:`);
-    const module2Count = test2Symbols.filter(s => s.type === 'module').length;
-    const wire2Count = test2Symbols.filter(s => s.type === 'wire').length;
-    const reg2Count = test2Symbols.filter(s => s.type === 'reg').length;
-    
+    const { modules: modules2, signals: signals2 } = parser.parseSymbols(test2Doc);
+
+    const module2Count = modules2.length;
+    const wire2Count = signals2.filter(s => s.type === 'wire').length;
+    const reg2Count = signals2.filter(s => s.type === 'reg').length;
+
+    console.log(`Found ${modules2.length} modules, ${signals2.length} signals:`);
     console.log(`  - Modules: ${module2Count}`);
     console.log(`  - Wires: ${wire2Count}`);
     console.log(`  - Regs: ${reg2Count}`);
-    
-    test2Symbols.forEach(s => {
+
+    signals2.forEach(s => {
         let displayName = s.name;
         if (s.bitWidth) {
             displayName = `${s.name}${s.bitWidth}`;
         }
-        let detail = '';
-        if (s.direction) {
-            detail = ` (${s.direction} ${s.type})`;
-        } else {
-            detail = ` (${s.type})`;
-        }
+        let detail = s.direction ? ` (${s.direction} ${s.type})` : ` (${s.type})`;
         console.log(`    ${displayName}${detail} - line ${s.line + 1}`);
     });
-    
+
     if (module2Count === 2 && wire2Count >= 5 && reg2Count >= 5) {
         console.log('✓ Test 2 PASSED\n');
         passed++;
@@ -172,3 +100,4 @@ function runTests() {
 // Run the tests
 const success = runTests();
 process.exit(success ? 0 : 1);
+

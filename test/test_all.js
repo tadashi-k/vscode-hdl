@@ -11,6 +11,7 @@ const testFiles = [
   'test_module_update.js',
   'test_symbols.js',
   'test_antlr_parser.js',
+  'test_antlr_symbols.js',
   'test_parser.js',
   'test_integration.js'
 ];
