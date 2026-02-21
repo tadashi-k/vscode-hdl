@@ -13,7 +13,8 @@ const testFiles = [
   'test_antlr_parser.js',
   'test_antlr_symbols.js',
   'test_parser.js',
-  'test_integration.js'
+  'test_integration.js',
+  'test_signal_warnings.js'
 ];
 
 let allPassed = true;
