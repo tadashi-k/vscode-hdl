@@ -14,7 +14,8 @@ const testFiles = [
   'test_antlr_symbols.js',
   'test_parser.js',
   'test_integration.js',
-  'test_signal_warnings.js'
+  'test_signal_warnings.js',
+  'test_instance_database.js'
 ];
 
 let allPassed = true;

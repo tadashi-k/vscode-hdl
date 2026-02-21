@@ -77,7 +77,80 @@ class SignalDatabase {
     }
 }
 
-// Module database - stores modules for entire workspace
+// Instance database - stores module instantiations per parent module
+class InstanceDatabase {
+    constructor() {
+        // Map of parent module name -> instances array
+        this.instances = new Map();
+        // Map of file URI -> parent module names (for cleanup when file changes)
+        this._modulesByUri = new Map();
+    }
+
+    /**
+     * Update instances for a parent module
+     * @param {string} parentModuleName - Parent module name
+     * @param {string} uri - Document URI (for cleanup tracking)
+     * @param {Array} instances - Array of instance objects
+     */
+    updateInstances(parentModuleName, uri, instances) {
+        this.instances.set(parentModuleName, instances);
+        if (!this._modulesByUri.has(uri)) {
+            this._modulesByUri.set(uri, []);
+        }
+        const list = this._modulesByUri.get(uri);
+        if (!list.includes(parentModuleName)) {
+            list.push(parentModuleName);
+        }
+    }
+
+    /**
+     * Get instances for a parent module
+     * @param {string} parentModuleName - Parent module name
+     * @returns {Array} Array of instance objects
+     */
+    getInstances(parentModuleName) {
+        return this.instances.get(parentModuleName) || [];
+    }
+
+    /**
+     * Get all instances from all parent modules in a file
+     * @param {string} uri - Document URI
+     * @returns {Array} Array of instance objects
+     */
+    getInstancesByUri(uri) {
+        const moduleNames = this._modulesByUri.get(uri) || [];
+        const result = [];
+        for (const name of moduleNames) {
+            result.push(...(this.instances.get(name) || []));
+        }
+        return result;
+    }
+
+    /**
+     * Remove instances for all modules defined in a document
+     * @param {string} uri - Document URI
+     */
+    removeInstancesByUri(uri) {
+        const moduleNames = this._modulesByUri.get(uri) || [];
+        for (const name of moduleNames) {
+            this.instances.delete(name);
+        }
+        this._modulesByUri.delete(uri);
+    }
+
+    /**
+     * Get all instances from all parent modules
+     * @returns {Array} Array of all instance objects
+     */
+    getAllInstances() {
+        const allInstances = [];
+        for (const instances of this.instances.values()) {
+            allInstances.push(...instances);
+        }
+        return allInstances;
+    }
+}
+
 class ModuleDatabase {
     constructor() {
         // Map of module name -> module symbol
@@ -125,6 +198,7 @@ class ModuleDatabase {
 // Create global database instances
 const signalDatabase = new SignalDatabase();
 const moduleDatabase = new ModuleDatabase();
+const instanceDatabase = new InstanceDatabase();
 const verilogParser = new AntlrVerilogParser();
 
 /**
@@ -137,11 +211,12 @@ function updateDocumentSymbols(document) {
     }
 
     const uri = document.uri.toString();
-    const { modules, signals } = verilogParser.parseSymbols(document);
+    const { modules, signals, instances } = verilogParser.parseSymbols(document);
 
     // Remove existing entries for this file before adding fresh ones
     signalDatabase.removeSignalsByUri(uri);
     moduleDatabase.removeModulesFromFile(uri);
+    instanceDatabase.removeInstancesByUri(uri);
 
     // Group signals by module and update the per-module signal database
     const signalsByModule = new Map();
@@ -152,14 +227,26 @@ function updateDocumentSymbols(document) {
         signalsByModule.get(signal.moduleName).push(signal);
     }
 
-    // Update module database (workspace-wide) and signal database (per-module)
+    // Group instances by parent module
+    const instancesByModule = new Map();
+    for (const instance of instances) {
+        if (!instancesByModule.has(instance.parentModuleName)) {
+            instancesByModule.set(instance.parentModuleName, []);
+        }
+        instancesByModule.get(instance.parentModuleName).push(instance);
+    }
+
+    // Update module database (workspace-wide), signal database (per-module),
+    // and instance database (per-module)
     for (const module of modules) {
         moduleDatabase.addModule(module);
         const moduleSignals = signalsByModule.get(module.name) || [];
         signalDatabase.updateSignals(module.name, uri, moduleSignals);
+        const moduleInstances = instancesByModule.get(module.name) || [];
+        instanceDatabase.updateInstances(module.name, uri, moduleInstances);
     }
 
-    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals.length} signals found`);
+    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals.length} signals, ${instances.length} instances found`);
 }
 
 /**
@@ -332,6 +419,7 @@ function activate(context) {
                 const uri = document.uri.toString();
                 signalDatabase.removeSignalsByUri(uri);
                 moduleDatabase.removeModulesFromFile(uri);
+                instanceDatabase.removeInstancesByUri(uri);
                 diagnosticCollection.delete(document.uri);
                 console.log(`Removed symbols for ${uri}`);
             }
