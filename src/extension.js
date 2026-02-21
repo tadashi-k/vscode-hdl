@@ -390,12 +390,6 @@ function activate(context) {
         vscode.window.showInformationMessage('Verilog extension is active!');
     });
 
-    // Parse all open Verilog documents on activation
-    vscode.workspace.textDocuments.forEach(document => {
-        updateDocumentSymbols(document);
-        updateDiagnostics(document, diagnosticCollection);
-    });
-
     // Listen for document open events
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(document => {
@@ -442,8 +436,13 @@ function activate(context) {
         )
     );
 
-    // Scan workspace for all Verilog modules on activation
-    scanWorkspaceForModules();
+    // Scan workspace for all Verilog modules on activation, then run diagnostics
+    // on open documents using the now-complete module database
+    scanWorkspaceForModules().then(() => {
+        vscode.workspace.textDocuments.forEach(document => {
+            updateDiagnostics(document, diagnosticCollection);
+        });
+    });
 
     // Re-scan workspace when files are created or deleted
     context.subscriptions.push(
