@@ -60,7 +60,7 @@ class MockTextDocument {
     }
 
     positionAt(offset) {
-        const lines = this.text.substring(0, offset).split('\n');
+        const lines = this.text.substring(0, offset + 1).split('\n');
         return new MockPosition(lines.length - 1, 0);
     }
 

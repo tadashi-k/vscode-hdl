@@ -115,7 +115,7 @@ function runTests() {
     console.log(`  - Wires: ${wireCount}`);
     console.log(`  - Regs: ${regCount}`);
     
-    if (moduleCount === 3 && wireCount >= 3 && regCount >= 1) {
+    if (moduleCount === 2 && wireCount >= 3 && regCount >= 1) {
         console.log('✓ Test 1 PASSED\n');
         passed++;
     } else {

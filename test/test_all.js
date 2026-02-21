@@ -10,6 +10,9 @@ const testFiles = [
   'test_goto_definition.js',
   'test_module_update.js',
   'test_symbols.js',
+  'test_antlr_parser.js',
+  'test_parser.js',
+  'test_integration.js'
 ];
 
 let allPassed = true;

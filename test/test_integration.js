@@ -76,7 +76,7 @@ class MockTextDocument {
 }
 
 // Load extension code
-const VerilogParser = require('../src/parser');
+const VerilogParser = require('../src/antlr-parser');
 
 // Create parser instance
 const verilogParser = new VerilogParser();
