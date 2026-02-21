@@ -72,6 +72,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this.uri = uri;
         this.modules = [];
         this.signals = [];
+        this.instances = [];                 // [{moduleName, instanceName, portConnections[], line, character, parentModuleName}]
         // Per-module signal reference tracking (for warnings)
         this._moduleSignalRefs = new Map();   // moduleName -> Set<signalName>
         this._signalRefList = [];             // [{name, moduleName, line, character}]
@@ -166,39 +167,63 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const instModuleName = instModInfo.name;
 
             // Collect named port connections for each instance
-            const instances = this._toArray(ctx.module_instance ? ctx.module_instance() : null);
+            const moduleInstances = this._toArray(ctx.module_instance ? ctx.module_instance() : null);
 
-            for (const inst of instances) {
+            for (const inst of moduleInstances) {
+                // Get instance name from name_of_instance
+                const nameOfInstCtx = inst.name_of_instance ? inst.name_of_instance() : null;
+                const instNameInfo = nameOfInstCtx
+                    ? this._getIdentifierInfo(nameOfInstCtx.identifier())
+                    : null;
+
+                const portConnections = [];
+
                 const portConnsCtx = inst.list_of_port_connections
                     ? inst.list_of_port_connections()
                     : null;
-                if (!portConnsCtx) continue;
 
-                const namedConns = this._toArray(
-                    portConnsCtx.named_port_connection
-                        ? portConnsCtx.named_port_connection()
-                        : null
-                );
+                if (portConnsCtx) {
+                    const namedConns = this._toArray(
+                        portConnsCtx.named_port_connection
+                            ? portConnsCtx.named_port_connection()
+                            : null
+                    );
 
-                for (const conn of namedConns) {
-                    const portIdCtx = conn.port_identifier ? conn.port_identifier() : null;
-                    if (!portIdCtx) continue;
-                    const portInfo = this._getIdentifierInfo(portIdCtx.identifier());
-                    if (!portInfo) continue;
+                    for (const conn of namedConns) {
+                        const portIdCtx = conn.port_identifier ? conn.port_identifier() : null;
+                        if (!portIdCtx) continue;
+                        const portInfo = this._getIdentifierInfo(portIdCtx.identifier());
+                        if (!portInfo) continue;
 
-                    const exprCtx = conn.expression ? conn.expression() : null;
-                    const localSignalInfo = this._getPrimaryIdentifier(exprCtx);
-                    if (localSignalInfo) {
-                        this._instPortConnections.push({
-                            instModuleName,
-                            portName: portInfo.name,
-                            localSignalName: localSignalInfo.name,
-                            line: localSignalInfo.line,
-                            character: localSignalInfo.character,
-                            moduleName: this._currentModule.name
-                        });
+                        const exprCtx = conn.expression ? conn.expression() : null;
+                        const localSignalInfo = this._getPrimaryIdentifier(exprCtx);
+                        if (localSignalInfo) {
+                            portConnections.push({
+                                portName: portInfo.name,
+                                localSignalName: localSignalInfo.name,
+                                line: localSignalInfo.line,
+                                character: localSignalInfo.character
+                            });
+                            this._instPortConnections.push({
+                                instModuleName,
+                                portName: portInfo.name,
+                                localSignalName: localSignalInfo.name,
+                                line: localSignalInfo.line,
+                                character: localSignalInfo.character,
+                                moduleName: this._currentModule.name
+                            });
+                        }
                     }
                 }
+
+                this.instances.push({
+                    moduleName: instModuleName,
+                    instanceName: instNameInfo ? instNameInfo.name : null,
+                    line: instNameInfo ? instNameInfo.line : instModInfo.line,
+                    character: instNameInfo ? instNameInfo.character : instModInfo.character,
+                    portConnections,
+                    parentModuleName: this._currentModule.name
+                });
             }
         }
 
@@ -520,8 +545,9 @@ class AntlrVerilogParser {
         }
 
         const warnings = visitor ? this._generateSignalWarnings(modules, signals, visitor) : [];
+        const instances = visitor ? visitor.instances : [];
 
-        return { modules, signals, errors: this.errorListener.getErrors(), warnings };
+        return { modules, signals, instances, errors: this.errorListener.getErrors(), warnings };
     }
 
     /**
