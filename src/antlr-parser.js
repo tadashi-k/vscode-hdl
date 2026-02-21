@@ -72,7 +72,32 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this.uri = uri;
         this.modules = [];
         this.signals = [];
+        // Per-module signal reference tracking (for warnings)
+        this._moduleSignalRefs = new Map();   // moduleName -> Set<signalName>
+        this._signalRefList = [];             // [{name, moduleName, line, character}]
+        this.assignLvalues = [];             // [{name, moduleName, line, character}] continuous assign lvalues
+        this.procLvalues = [];               // [{name, moduleName, line, character}] blocking/non-blocking lvalues
+        this._moduleParamNames = new Map();  // moduleName -> Set<paramName>
         this._currentModule = null;
+        this._inProcedural = false;
+        this._inContinuousAssign = false;
+    }
+
+    _addSignalRef(name, line, character) {
+        if (!this._currentModule) return;
+        const moduleName = this._currentModule.name;
+        const refs = this._moduleSignalRefs.get(moduleName);
+        if (refs && !refs.has(name)) {
+            refs.add(name);
+            this._signalRefList.push({ name, moduleName, line, character });
+        }
+    }
+
+    _getLvalueIdentifierInfo(lvalCtx) {
+        if (!lvalCtx) return null;
+        const identCtx = lvalCtx.identifier ? lvalCtx.identifier() : null;
+        if (!identCtx) return null;
+        return this._getIdentifierInfo(identCtx);
     }
 
     _getIdentifierInfo(identCtx) {
@@ -101,10 +126,122 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             ports: []
         };
 
+        // Initialize per-module tracking for signal warnings
+        this._moduleSignalRefs.set(info.name, new Set());
+        this._moduleParamNames.set(info.name, new Set());
+
         this.visitChildren(ctx);
 
         this.modules.push(this._currentModule);
         this._currentModule = null;
+        return null;
+    }
+
+    // Track always/initial block context for procedural assignment warnings
+    visitAlways_construct(ctx) {
+        if (!this._currentModule) return null;
+        const prev = this._inProcedural;
+        this._inProcedural = true;
+        this.visitChildren(ctx);
+        this._inProcedural = prev;
+        return null;
+    }
+
+    visitInitial_construct(ctx) {
+        if (!this._currentModule) return null;
+        const prev = this._inProcedural;
+        this._inProcedural = true;
+        this.visitChildren(ctx);
+        this._inProcedural = prev;
+        return null;
+    }
+
+    // Track continuous assign context for "assign lvalue is reg" warning
+    visitContinuous_assign(ctx) {
+        if (!this._currentModule) return null;
+        const prev = this._inContinuousAssign;
+        this._inContinuousAssign = true;
+        this.visitChildren(ctx);
+        this._inContinuousAssign = prev;
+        return null;
+    }
+
+    // Capture lvalue of continuous assign (assignment rule) or FOR loop (in procedural)
+    visitAssignment(ctx) {
+        if (!this._currentModule) return null;
+        const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
+        if (lvalInfo) {
+            const entry = { ...lvalInfo, moduleName: this._currentModule.name };
+            if (this._inContinuousAssign) {
+                this.assignLvalues.push(entry);
+            } else if (this._inProcedural) {
+                this.procLvalues.push(entry);
+            }
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    // Capture lvalue of blocking assignment (always/initial body)
+    visitBlocking_assignment(ctx) {
+        if (!this._currentModule) return null;
+        const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
+        if (lvalInfo) {
+            this.procLvalues.push({ ...lvalInfo, moduleName: this._currentModule.name });
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    // Capture lvalue of non-blocking assignment (always/initial body)
+    visitNon_blocking_assignment(ctx) {
+        if (!this._currentModule) return null;
+        const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
+        if (lvalInfo) {
+            this.procLvalues.push({ ...lvalInfo, moduleName: this._currentModule.name });
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    // Capture all identifiers used in expressions (r-value signal references)
+    visitPrimary(ctx) {
+        if (this._currentModule && ctx.identifier && ctx.identifier()) {
+            const info = this._getIdentifierInfo(ctx.identifier());
+            if (info) {
+                this._addSignalRef(info.name, info.line, info.character);
+            }
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    // Capture identifiers used as l-values (counts as a signal reference)
+    visitLvalue(ctx) {
+        if (this._currentModule && ctx.identifier && ctx.identifier()) {
+            const info = this._getIdentifierInfo(ctx.identifier());
+            if (info) {
+                this._addSignalRef(info.name, info.line, info.character);
+            }
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    // Track parameter declarations to exclude from "undefined signal" warnings
+    visitParam_assignment(ctx) {
+        if (!this._currentModule) return null;
+        if (ctx.parameter_identifier && ctx.parameter_identifier()) {
+            const identCtx = ctx.parameter_identifier().identifier();
+            if (identCtx) {
+                const info = this._getIdentifierInfo(identCtx);
+                if (info) {
+                    const paramNames = this._moduleParamNames.get(this._currentModule.name);
+                    if (paramNames) paramNames.add(info.name);
+                }
+            }
+        }
+        this.visitChildren(ctx);
         return null;
     }
 
@@ -253,50 +390,13 @@ class AntlrVerilogParser {
 
     /**
      * Parse Verilog document and detect syntax errors
+     * Also generates semantic warnings (signal usage issues).
      * @param {vscode.TextDocument} document 
-     * @returns {Array} Array of diagnostic objects
+     * @returns {Array} Array of diagnostic objects (syntax errors + signal warnings)
      */
     parse(document) {
-        this.errorListener.clearErrors();
-        
-        const text = document.getText();
-        
-        try {
-            // Create the lexer and parser
-            const chars = new antlr4.InputStream(text, true);
-            const lexer = new VerilogLexer(chars);
-            
-            // Remove default error listeners and add our custom one
-            lexer.removeErrorListeners();
-            lexer.addErrorListener(this.errorListener);
-            
-            const tokens = new antlr4.CommonTokenStream(lexer);
-            const parser = new VerilogParser(tokens);
-            
-            // Remove default error listeners and add our custom one
-            parser.removeErrorListeners();
-            parser.addErrorListener(this.errorListener);
-            
-            // Build the parse tree
-            parser.buildParseTrees = true;
-            
-            // Parse the source text (this will trigger error collection)
-            parser.source_text();
-            
-        } catch (error) {
-            // In case of unexpected errors during parsing
-            console.error('ANTLR parsing error:', error);
-            // Add a generic error
-            this.errorListener.errors.push({
-                line: 0,
-                character: 0,
-                length: 1,
-                message: `Parser error: ${error.message}`,
-                severity: vscode.DiagnosticSeverity.Error
-            });
-        }
-
-        return this.errorListener.getErrors();
+        const { errors, warnings } = this.parseSymbols(document);
+        return [...errors, ...warnings];
     }
 
     /**
@@ -304,10 +404,11 @@ class AntlrVerilogParser {
      * Replaces the regex-based parseVerilogSymbols function.
      *
      * @param {vscode.TextDocument} document
-     * @returns {{ modules: Array, signals: Array, errors: Array }}
+     * @returns {{ modules: Array, signals: Array, errors: Array, warnings: Array }}
      *   modules: [{ name, uri, line, character, ports[] }]
      *   signals: [{ name, uri, line, character, direction, type, bitWidth, moduleName }]
-     *   errors:  same format as parse()
+     *   errors:  syntax errors
+     *   warnings: signal usage warnings
      */
     parseSymbols(document) {
         this.errorListener.clearErrors();
@@ -316,6 +417,7 @@ class AntlrVerilogParser {
         const uri = document.uri.toString();
         let modules = [];
         let signals = [];
+        let visitor = null;
 
         try {
             const chars = new antlr4.InputStream(text, true);
@@ -331,7 +433,7 @@ class AntlrVerilogParser {
 
             const tree = parser.source_text();
 
-            const visitor = new VerilogSymbolVisitor(uri);
+            visitor = new VerilogSymbolVisitor(uri);
             tree.accept(visitor);
             modules = visitor.modules;
             signals = visitor.signals;
@@ -347,7 +449,94 @@ class AntlrVerilogParser {
             });
         }
 
-        return { modules, signals, errors: this.errorListener.getErrors() };
+        const warnings = visitor ? this._generateSignalWarnings(modules, signals, visitor) : [];
+
+        return { modules, signals, errors: this.errorListener.getErrors(), warnings };
+    }
+
+    /**
+     * Generate signal-usage warnings for all modules in the parsed result.
+     * @param {Array} modules
+     * @param {Array} signals
+     * @param {VerilogSymbolVisitor} visitor
+     * @returns {Array} Array of warning diagnostic objects
+     */
+    _generateSignalWarnings(modules, signals, visitor) {
+        const warnings = [];
+        const wireTypes = new Set(['wire', 'tri', 'supply0', 'supply1']);
+
+        for (const module of modules) {
+            const moduleName = module.name;
+            const declaredSignals = signals.filter(s => s.moduleName === moduleName);
+            const declaredByName = new Map(declaredSignals.map(s => [s.name, s]));
+            const paramNames = visitor._moduleParamNames.get(moduleName) || new Set();
+            const refNames = visitor._moduleSignalRefs.get(moduleName) || new Set();
+
+            // Warning 1: signal reference without declaration
+            const reportedUndefined = new Set();
+            for (const refEntry of visitor._signalRefList.filter(r => r.moduleName === moduleName)) {
+                const name = refEntry.name;
+                if (!declaredByName.has(name) && !paramNames.has(name) && !reportedUndefined.has(name)) {
+                    reportedUndefined.add(name);
+                    warnings.push({
+                        line: refEntry.line,
+                        character: refEntry.character,
+                        length: name.length,
+                        message: `Signal '${name}' is referenced but not declared`,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
+
+            // Warning 2: signal declared but never used
+            for (const signal of declaredSignals) {
+                if (!refNames.has(signal.name)) {
+                    warnings.push({
+                        line: signal.line,
+                        character: signal.character,
+                        length: signal.name.length,
+                        message: `Signal '${signal.name}' is declared but never used`,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
+
+            // Warning 3: continuous assign statement l-value is a reg
+            const reportedAssignReg = new Set();
+            for (const lval of visitor.assignLvalues.filter(l => l.moduleName === moduleName)) {
+                if (reportedAssignReg.has(lval.name)) continue;
+                const sig = declaredByName.get(lval.name);
+                if (sig && sig.type === 'reg') {
+                    reportedAssignReg.add(lval.name);
+                    warnings.push({
+                        line: lval.line,
+                        character: lval.character,
+                        length: lval.name.length,
+                        message: `Assign statement l-value '${lval.name}' is a reg`,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
+
+            // Warning 4: procedural (always/initial) l-value is a wire
+            const reportedProcWire = new Set();
+            for (const lval of visitor.procLvalues.filter(l => l.moduleName === moduleName)) {
+                if (reportedProcWire.has(lval.name)) continue;
+                const sig = declaredByName.get(lval.name);
+                if (sig && wireTypes.has(sig.type)) {
+                    reportedProcWire.add(lval.name);
+                    warnings.push({
+                        line: lval.line,
+                        character: lval.character,
+                        length: lval.name.length,
+                        message: `Procedural assignment l-value '${lval.name}' is a wire`,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
+        }
+
+        return warnings;
     }
 }
 
