@@ -60,8 +60,10 @@ module valid_module (
     reg [15:0] counter;
 
     always @(posedge clk) begin
-        counter <= counter + 1;
-        data_out <= data_in;
+        if (enable) begin
+            counter <= counter + 1;
+            data_out <= data_in;
+        end
     end
 
     assign enable = 1'b1;
@@ -906,6 +908,87 @@ endmodule
             passedTests++;
         } else {
             console.log(`  ✗ Test 22 FAILED (hasBusRegWarning: ${hasBusRegWarning}, noBusWireRegWarning: ${noBusWireRegWarning}, noBusWireNeverAssigned: ${noBusWireNeverAssigned})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 23: Signal only used as l-value (never read) → "declared but never used" warning (Bug #1)
+    {
+        totalTests++;
+        console.log('\nTest 23: Signal only used as l-value (never read) - "never used" warning');
+        const code = `
+module lval_only (
+    input wire clk,
+    output reg out
+);
+    wire x;
+    assign x = 1'b0;
+
+    always @(posedge clk) begin
+        out <= clk;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'lval_only.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasNeverUsedX = warnings.some(w =>
+            w.message.includes("'x'") && w.message.includes('never used')
+        );
+        const noNeverUsedOut = !warnings.some(w =>
+            w.message.includes("'out'") && w.message.includes('never used')
+        );
+
+        if (hasNeverUsedX && noNeverUsedOut) {
+            console.log('  ✓ Test 23 PASSED (l-value-only signal correctly warned "never used"; output port not falsely warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 23 FAILED (hasNeverUsedX: ${hasNeverUsedX}, noNeverUsedOut: ${noNeverUsedOut})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 24: Signal only connected to output port of instance (never read) → "never used" warning (Bug #2)
+    {
+        totalTests++;
+        console.log('\nTest 24: Signal only connected to output port of instance (never read) - "never used" warning');
+        const code = `
+module driver (
+    output wire data
+);
+    assign data = 1'b0;
+endmodule
+
+module top_driven_only (
+    input wire clk,
+    output reg out
+);
+    wire driven_only;
+
+    driver u1 (
+        .data(driven_only)
+    );
+
+    always @(posedge clk) begin
+        out <= clk;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'driven_only.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasDrivenOnlyNeverUsed = warnings.some(w =>
+            w.message.includes('driven_only') && w.message.includes('never used')
+        );
+        const noOutNeverUsed = !warnings.some(w =>
+            w.message.includes("'out'") && w.message.includes('never used')
+        );
+
+        if (hasDrivenOnlyNeverUsed && noOutNeverUsed) {
+            console.log('  ✓ Test 24 PASSED (output-port-driven-only signal correctly warned "never used"; output port not falsely warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 24 FAILED (hasDrivenOnlyNeverUsed: ${hasDrivenOnlyNeverUsed}, noOutNeverUsed: ${noOutNeverUsed})`);
             warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
         }
     }

@@ -212,6 +212,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 character: localSignalInfo.character,
                                 moduleName: this._currentModule.name
                             });
+                        } else if (exprCtx) {
+                            // Complex expression (not a simple identifier): visit it so its
+                            // identifiers are tracked as r-value references in _moduleSignalRefs.
+                            // Simple identifier connections are handled via _instPortConnections /
+                            // usedViaPortInput and must NOT be added to _moduleSignalRefs here,
+                            // because connections to output ports should not count as "used".
+                            this.visit(exprCtx);
                         }
                     }
                 }
@@ -227,8 +234,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             }
         }
 
-        // Visit children for normal r-value reference tracking
-        this.visitChildren(ctx);
         return null;
     }
 
@@ -311,14 +316,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return null;
     }
 
-    // Capture identifiers used as l-values (counts as a signal reference)
+    // Visit l-value children (e.g. array index expressions) for r-value tracking,
+    // but do NOT add the l-value identifier itself to _moduleSignalRefs.
+    // Being the target of an assignment does not constitute "using" the signal.
     visitLvalue(ctx) {
-        if (this._currentModule && ctx.identifier && ctx.identifier()) {
-            const info = this._getIdentifierInfo(ctx.identifier());
-            if (info) {
-                this._addSignalRef(info.name, info.line, info.character);
-            }
-        }
         this.visitChildren(ctx);
         return null;
     }
@@ -605,6 +606,13 @@ class AntlrVerilogParser {
                 }
             }
 
+            // Build the set of assigned signals: all explicit l-values plus signals driven
+            // by output or inout ports of instantiated modules (used for Warnings 2 and 7).
+            const assignedSignals = new Set(assignedViaPortOutput);
+            for (const lval of [...visitor.assignLvalues, ...visitor.procLvalues].filter(l => l.moduleName === moduleName)) {
+                assignedSignals.add(lval.name);
+            }
+
             // Warning 1: signal reference without declaration
             const reportedUndefined = new Set();
             for (const refEntry of visitor._signalRefList.filter(r => r.moduleName === moduleName)) {
@@ -621,11 +629,19 @@ class AntlrVerilogParser {
                 }
             }
 
-            // Warning 2: signal declared but never used
-            // Signals connected to input or inout ports of instantiated modules are
-            // treated as "used" even if they have no other references in the module body.
+            // Warning 2: signal declared but never used.
+            // A signal is "used" if it appears as an r-value in an expression (refNames)
+            // or is connected to an input/inout port of an instantiated module (usedViaPortInput).
+            // L-value assignments and connections to output ports do NOT count as "using" a signal.
+            // Exception: output/inout port signals that are assigned are considered used externally.
             for (const signal of declaredSignals) {
                 if (!refNames.has(signal.name) && !usedViaPortInput.has(signal.name)) {
+                    // Output/inout ports that are assigned drive the module interface;
+                    // they are consumed externally and must not trigger "never used".
+                    if ((signal.direction === 'output' || signal.direction === 'inout') &&
+                            assignedSignals.has(signal.name)) {
+                        continue;
+                    }
                     warnings.push({
                         line: signal.line,
                         character: signal.character,
@@ -684,13 +700,6 @@ class AntlrVerilogParser {
                         severity: vscode.DiagnosticSeverity.Warning
                     });
                 }
-            }
-
-            // Build the set of assigned signals: all explicit l-values plus signals driven
-            // by output or inout ports of instantiated modules (used for Warning 7).
-            const assignedSignals = new Set(assignedViaPortOutput);
-            for (const lval of [...visitor.assignLvalues, ...visitor.procLvalues].filter(l => l.moduleName === moduleName)) {
-                assignedSignals.add(lval.name);
             }
 
             // Warning 6: output or inout port of instantiated module connected to reg signal
