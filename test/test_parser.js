@@ -78,8 +78,10 @@ module test_module (
     reg [15:0] counter;
 
     always @(posedge clk) begin
-        counter <= counter + 1;
-        data_out <= data_in;
+        if (enable) begin
+            counter <= counter + 1;
+            data_out <= data_in;
+        end
     end
 
     assign enable = 1'b1;
