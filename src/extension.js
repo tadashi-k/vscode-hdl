@@ -3,41 +3,69 @@
 const vscode = require('vscode');
 const AntlrVerilogParser = require('./antlr-parser');
 
-// Signal database - stores signals (wire/reg) per file
+// Signal database - stores signals (wire/reg) per module
 class SignalDatabase {
     constructor() {
-        // Map of file URI -> signals array
+        // Map of module name -> signals array
         this.signals = new Map();
+        // Map of file URI -> module names (for cleanup when file changes)
+        this._modulesByUri = new Map();
     }
 
     /**
-     * Update signals for a document
-     * @param {string} uri - Document URI
+     * Update signals for a module
+     * @param {string} moduleName - Module name
+     * @param {string} uri - Document URI (for cleanup tracking)
      * @param {Array} signals - Array of signal objects
      */
-    updateSignals(uri, signals) {
-        this.signals.set(uri, signals);
+    updateSignals(moduleName, uri, signals) {
+        this.signals.set(moduleName, signals);
+        if (!this._modulesByUri.has(uri)) {
+            this._modulesByUri.set(uri, []);
+        }
+        const list = this._modulesByUri.get(uri);
+        if (!list.includes(moduleName)) {
+            list.push(moduleName);
+        }
     }
 
     /**
-     * Get signals for a document
+     * Get signals for a module
+     * @param {string} moduleName - Module name
+     * @returns {Array} Array of signal objects
+     */
+    getSignals(moduleName) {
+        return this.signals.get(moduleName) || [];
+    }
+
+    /**
+     * Get all signals from all modules in a file
      * @param {string} uri - Document URI
      * @returns {Array} Array of signal objects
      */
-    getSignals(uri) {
-        return this.signals.get(uri) || [];
+    getSignalsByUri(uri) {
+        const moduleNames = this._modulesByUri.get(uri) || [];
+        const result = [];
+        for (const name of moduleNames) {
+            result.push(...(this.signals.get(name) || []));
+        }
+        return result;
     }
 
     /**
-     * Remove signals for a document
+     * Remove signals for all modules defined in a document
      * @param {string} uri - Document URI
      */
-    removeSignals(uri) {
-        this.signals.delete(uri);
+    removeSignalsByUri(uri) {
+        const moduleNames = this._modulesByUri.get(uri) || [];
+        for (const name of moduleNames) {
+            this.signals.delete(name);
+        }
+        this._modulesByUri.delete(uri);
     }
 
     /**
-     * Get all signals from all documents
+     * Get all signals from all modules
      * @returns {Array} Array of all signal objects
      */
     getAllSignals() {
@@ -100,110 +128,7 @@ const moduleDatabase = new ModuleDatabase();
 const verilogParser = new AntlrVerilogParser();
 
 /**
- * Parse Verilog document and extract symbols
- * @param {vscode.TextDocument} document 
- * @returns {Object} Object with modules and signals arrays
- */
-function parseVerilogSymbols(document) {
-    const text = document.getText();
-    const modules = [];
-    const signals = [];
-
-    // Regular expressions for matching Verilog constructs
-    const moduleRegex = /^\s*module\s+(\w+)/gm;
-    // Enhanced wire regex - capture direction, bit width, and names
-    const wireRegex = /^\s*(input\s+|output\s+|inout\s+)?wire\s+(\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
-    // Enhanced reg regex - capture direction, bit width, and names
-    const regRegex = /^\s*(input\s+|output\s+|inout\s+)?reg\s+(\[\d+:\d+\]\s*)?(\w+(?:\s*,\s*\w+)*)\s*[;,)]/gm;
-
-    // Extract module names
-    let match;
-    while ((match = moduleRegex.exec(text)) !== null) {
-        const name = match[1];
-        const index = match.index + match[0].indexOf(name);
-        const position = document.positionAt(index);
-        modules.push({
-            name: name,
-            type: 'module',
-            line: position.line,
-            character: position.character,
-            uri: document.uri.toString()
-        });
-    }
-
-    // Extract wire declarations
-    while ((match = wireRegex.exec(text)) !== null) {
-        const direction = match[1] ? match[1].trim() : null; // input, output, or inout
-        const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
-        const namesText = match[3];
-        const names = namesText.split(',').map(n => n.trim());
-        const line = document.positionAt(match.index).line;
-        
-        // Calculate the offset of the names portion within the match
-        const namesStartOffset = match.index + match[0].indexOf(namesText);
-        
-        names.forEach(name => {
-            // Filter out empty names or keywords
-            if (name && !['input', 'output', 'inout', 'wire'].includes(name)) {
-                // Find the offset of this specific name within namesText
-                const nameOffset = namesStartOffset + namesText.indexOf(name);
-                const nameLine = document.positionAt(nameOffset).line;
-                const lineText = document.lineAt(nameLine).text;
-                // Calculate character position within the line
-                const charIndex = nameOffset - text.lastIndexOf('\n', nameOffset) - 1;
-                
-                signals.push({
-                    name: name,
-                    type: 'wire',
-                    direction: direction,
-                    bitWidth: bitWidth,
-                    line: nameLine,
-                    character: charIndex >= 0 ? charIndex : 0,
-                    uri: document.uri.toString()
-                });
-            }
-        });
-    }
-
-    // Extract reg declarations
-    while ((match = regRegex.exec(text)) !== null) {
-        const direction = match[1] ? match[1].trim() : null; // input, output, or inout
-        const bitWidth = match[2] ? match[2].trim() : null;  // e.g., [7:0]
-        const namesText = match[3];
-        const names = namesText.split(',').map(n => n.trim());
-        const line = document.positionAt(match.index).line;
-        
-        // Calculate the offset of the names portion within the match
-        const namesStartOffset = match.index + match[0].indexOf(namesText);
-        
-        names.forEach(name => {
-            // Filter out empty names or keywords
-            if (name && !['input', 'output', 'inout', 'reg'].includes(name)) {
-                // Find the offset of this specific name within namesText
-                const nameOffset = namesStartOffset + namesText.indexOf(name);
-                const nameLine = document.positionAt(nameOffset).line;
-                const lineText = document.lineAt(nameLine).text;
-                // Calculate character position within the line
-                const charIndex = nameOffset - text.lastIndexOf('\n', nameOffset) - 1;
-                
-                signals.push({
-                    name: name,
-                    type: 'reg',
-                    direction: direction,
-                    bitWidth: bitWidth,
-                    line: nameLine,
-                    character: charIndex >= 0 ? charIndex : 0,
-                    uri: document.uri.toString()
-                });
-            }
-        });
-    }
-
-    return { modules, signals };
-}
-
-/**
- * Update symbols for a document
+ * Update symbols for a document using the ANTLR-based parser.
  * @param {vscode.TextDocument} document 
  */
 function updateDocumentSymbols(document) {
@@ -211,19 +136,29 @@ function updateDocumentSymbols(document) {
         return;
     }
 
-    const { modules, signals } = parseVerilogSymbols(document);
     const uri = document.uri.toString();
-    
-    // Update signal database (per-file)
-    signalDatabase.updateSignals(uri, signals);
-    
-    // Remove existing modules from this file before adding new ones
-    // to prevent stale entries if modules were renamed or deleted
+    const { modules, signals } = verilogParser.parseSymbols(document);
+
+    // Remove existing entries for this file before adding fresh ones
+    signalDatabase.removeSignalsByUri(uri);
     moduleDatabase.removeModulesFromFile(uri);
-    
-    // Update module database (workspace-wide)
-    modules.forEach(module => moduleDatabase.addModule(module));
-    
+
+    // Group signals by module and update the per-module signal database
+    const signalsByModule = new Map();
+    for (const signal of signals) {
+        if (!signalsByModule.has(signal.moduleName)) {
+            signalsByModule.set(signal.moduleName, []);
+        }
+        signalsByModule.get(signal.moduleName).push(signal);
+    }
+
+    // Update module database (workspace-wide) and signal database (per-module)
+    for (const module of modules) {
+        moduleDatabase.addModule(module);
+        const moduleSignals = signalsByModule.get(module.name) || [];
+        signalDatabase.updateSignals(module.name, uri, moduleSignals);
+    }
+
     console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals.length} signals found`);
 }
 
@@ -232,56 +167,31 @@ function updateDocumentSymbols(document) {
  */
 class VerilogDocumentSymbolProvider {
     provideDocumentSymbols(document, token) {
-        const { modules, signals } = parseVerilogSymbols(document);
-        const allSymbols = [...modules, ...signals];
-        
-        return allSymbols.map(symbol => {
-            const line = document.lineAt(symbol.line);
+        const { modules, signals } = verilogParser.parseSymbols(document);
+
+        const moduleSymbols = modules.map(module => {
+            const line = document.lineAt(module.line);
             const range = new vscode.Range(
-                new vscode.Position(symbol.line, line.firstNonWhitespaceCharacterIndex),
-                new vscode.Position(symbol.line, line.text.length)
+                new vscode.Position(module.line, line.firstNonWhitespaceCharacterIndex),
+                new vscode.Position(module.line, line.text.length)
             );
-
-            let kind;
-            switch (symbol.type) {
-                case 'module':
-                    kind = vscode.SymbolKind.Module;
-                    break;
-                case 'wire':
-                    kind = vscode.SymbolKind.Variable;
-                    break;
-                case 'reg':
-                    kind = vscode.SymbolKind.Variable;
-                    break;
-                default:
-                    kind = vscode.SymbolKind.Variable;
-            }
-
-            // Build display name with bit width if available
-            let displayName = symbol.name;
-            if (symbol.bitWidth) {
-                displayName = `${symbol.name}${symbol.bitWidth}`;
-            }
-
-            // Build detail string for hover (e.g., "input wire", "output reg", "wire")
-            let detail = '';
-            if (symbol.direction) {
-                detail = `${symbol.direction} ${symbol.type}`;
-            } else {
-                detail = symbol.type;
-            }
-
-            // Use DocumentSymbol instead of SymbolInformation for better detail support
-            const docSymbol = new vscode.DocumentSymbol(
-                displayName,
-                detail,
-                kind,
-                range,
-                range
-            );
-
-            return docSymbol;
+            return new vscode.DocumentSymbol(module.name, 'module', vscode.SymbolKind.Module, range, range);
         });
+
+        const signalSymbols = signals.map(signal => {
+            const line = document.lineAt(signal.line);
+            const range = new vscode.Range(
+                new vscode.Position(signal.line, line.firstNonWhitespaceCharacterIndex),
+                new vscode.Position(signal.line, line.text.length)
+            );
+
+            const displayName = signal.bitWidth ? `${signal.name}${signal.bitWidth}` : signal.name;
+            const detail = signal.direction ? `${signal.direction} ${signal.type}` : signal.type;
+
+            return new vscode.DocumentSymbol(displayName, detail, vscode.SymbolKind.Variable, range, range);
+        });
+
+        return [...moduleSymbols, ...signalSymbols];
     }
 }
 
@@ -322,8 +232,8 @@ class VerilogDefinitionProvider {
         
         const word = document.getText(wordRange);
         
-        // First, check for signal definitions (wire/reg) in the current document using signal database
-        const currentDocSignals = signalDatabase.getSignals(document.uri.toString());
+        // First, check for signal definitions (wire/reg) in all modules of the current document
+        const currentDocSignals = signalDatabase.getSignalsByUri(document.uri.toString());
         const localSignal = currentDocSignals.find(s => s.name === word);
         
         if (localSignal) {
@@ -420,7 +330,7 @@ function activate(context) {
         vscode.workspace.onDidCloseTextDocument(document => {
             if (document.languageId === 'verilog') {
                 const uri = document.uri.toString();
-                signalDatabase.removeSignals(uri);
+                signalDatabase.removeSignalsByUri(uri);
                 moduleDatabase.removeModulesFromFile(uri);
                 diagnosticCollection.delete(document.uri);
                 console.log(`Removed symbols for ${uri}`);
@@ -496,7 +406,7 @@ function activate(context) {
                 const word = document.getText(wordRange);
 
                 // Fetch signals for the current document from signal database
-                const signals = signalDatabase.getSignals(document.uri.toString());
+                const signals = signalDatabase.getSignalsByUri(document.uri.toString());
 
                 // Find the signal matching the hovered word
                 const signal = signals.find(s => s.name === word);

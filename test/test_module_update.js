@@ -2,18 +2,20 @@
 
 /**
  * Test for verifying module update behavior (rename/delete scenarios)
+ * Uses the ANTLR-based parser (parseSymbols)
  */
 
 const fs = require('fs');
 const path = require('path');
 
 // Mock vscode API
-class MockPosition {
-    constructor(line, character) {
-        this.line = line;
-        this.character = character;
-    }
-}
+const vscode = {
+    DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 }
+};
+global.vscode = vscode;
+
+const AntlrVerilogParser = require('../src/antlr-parser');
+const parser = new AntlrVerilogParser();
 
 class MockUri {
     constructor(filePath) {
@@ -32,60 +34,29 @@ class MockTextDocument {
         this.languageId = 'verilog';
     }
 
-    getText(range) {
+    getText() {
         return this.text;
     }
-
-    positionAt(offset) {
-        const lines = this.text.substring(0, offset).split('\n');
-        return new MockPosition(lines.length - 1, 0);
-    }
-
-    lineAt(lineNum) {
-        const lines = this.text.split('\n');
-        return {
-            text: lines[lineNum] || '',
-            firstNonWhitespaceCharacterIndex: (lines[lineNum] || '').search(/\S/)
-        };
-    }
 }
 
-// Implementation
-function parseVerilogSymbols(document) {
-    const text = document.getText();
-    const modules = [];
-    const signals = [];
-
-    const moduleRegex = /^\s*module\s+(\w+)/gm;
-    let match;
-    while ((match = moduleRegex.exec(text)) !== null) {
-        const name = match[1];
-        const line = document.positionAt(match.index).line;
-        const lineText = document.lineAt(line).text;
-        const charIndex = lineText.indexOf(name);
-        modules.push({
-            name: name,
-            type: 'module',
-            line: line,
-            character: charIndex,
-            uri: document.uri.toString()
-        });
-    }
-
-    return { modules, signals };
-}
-
+// Signal database - per module (mirrors extension.js)
 class SignalDatabase {
     constructor() {
         this.signals = new Map();
+        this._modulesByUri = new Map();
     }
 
-    updateSignals(uri, signals) {
-        this.signals.set(uri, signals);
+    updateSignals(moduleName, uri, signals) {
+        this.signals.set(moduleName, signals);
+        if (!this._modulesByUri.has(uri)) this._modulesByUri.set(uri, []);
+        const list = this._modulesByUri.get(uri);
+        if (!list.includes(moduleName)) list.push(moduleName);
     }
 
-    getSignals(uri) {
-        return this.signals.get(uri) || [];
+    removeSignalsByUri(uri) {
+        const names = this._modulesByUri.get(uri) || [];
+        for (const name of names) this.signals.delete(name);
+        this._modulesByUri.delete(uri);
     }
 }
 
@@ -116,15 +87,22 @@ class ModuleDatabase {
 }
 
 function updateDocumentSymbols(document, signalDB, moduleDB) {
-    const { modules, signals } = parseVerilogSymbols(document);
     const uri = document.uri.toString();
-    
-    signalDB.updateSignals(uri, signals);
-    
-    // Remove existing modules from this file before adding new ones
+    const { modules, signals } = parser.parseSymbols(document);
+
+    signalDB.removeSignalsByUri(uri);
     moduleDB.removeModulesFromFile(uri);
-    
-    modules.forEach(module => moduleDB.addModule(module));
+
+    const signalsByModule = new Map();
+    for (const s of signals) {
+        if (!signalsByModule.has(s.moduleName)) signalsByModule.set(s.moduleName, []);
+        signalsByModule.get(s.moduleName).push(s);
+    }
+
+    for (const module of modules) {
+        moduleDB.addModule(module);
+        signalDB.updateSignals(module.name, uri, signalsByModule.get(module.name) || []);
+    }
 }
 
 // Run tests
@@ -142,7 +120,7 @@ function runTests() {
     const testPath = '/tmp/test.v';
     const doc1 = new MockTextDocument('module original_name ();\nendmodule', testPath);
     updateDocumentSymbols(doc1, signalDB, moduleDB);
-    
+
     if (moduleDB.getModule('original_name')) {
         console.log('✓ Original module added successfully');
         passed++;
@@ -155,18 +133,14 @@ function runTests() {
     console.log('\nTest 2: Module rename handles old module removal');
     const doc2 = new MockTextDocument('module renamed_module ();\nendmodule', testPath);
     updateDocumentSymbols(doc2, signalDB, moduleDB);
-    
+
     if (!moduleDB.getModule('original_name') && moduleDB.getModule('renamed_module')) {
         console.log('✓ Old module removed, new module added');
         passed++;
     } else {
         console.log('✗ Module rename not handled correctly');
-        if (moduleDB.getModule('original_name')) {
-            console.log('  Error: old module still exists');
-        }
-        if (!moduleDB.getModule('renamed_module')) {
-            console.log('  Error: new module not added');
-        }
+        if (moduleDB.getModule('original_name')) console.log('  Error: old module still exists');
+        if (!moduleDB.getModule('renamed_module')) console.log('  Error: new module not added');
         failed++;
     }
 
@@ -177,7 +151,7 @@ function runTests() {
         testPath
     );
     updateDocumentSymbols(doc3, signalDB, moduleDB);
-    
+
     const allModules = moduleDB.getAllModules();
     if (allModules.length === 2 && moduleDB.getModule('mod1') && moduleDB.getModule('mod2')) {
         console.log('✓ Both modules added correctly');
@@ -192,7 +166,7 @@ function runTests() {
     console.log('\nTest 4: File update removes deleted modules');
     const doc4 = new MockTextDocument('module mod1 ();\nendmodule', testPath);
     updateDocumentSymbols(doc4, signalDB, moduleDB);
-    
+
     if (moduleDB.getModule('mod1') && !moduleDB.getModule('mod2')) {
         console.log('✓ Deleted module (mod2) removed, kept module (mod1) preserved');
         passed++;
@@ -206,11 +180,10 @@ function runTests() {
     const otherPath = '/tmp/other.v';
     const otherDoc = new MockTextDocument('module other_module ();\nendmodule', otherPath);
     updateDocumentSymbols(otherDoc, signalDB, moduleDB);
-    
-    // Now update original file
+
     const doc5 = new MockTextDocument('module updated_mod1 ();\nendmodule', testPath);
     updateDocumentSymbols(doc5, signalDB, moduleDB);
-    
+
     if (moduleDB.getModule('other_module') && moduleDB.getModule('updated_mod1') && !moduleDB.getModule('mod1')) {
         console.log('✓ Other file\'s module preserved, original file updated correctly');
         passed++;
@@ -230,3 +203,4 @@ function runTests() {
 // Run the tests
 const success = runTests();
 process.exit(success ? 0 : 1);
+
