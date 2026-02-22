@@ -162,8 +162,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!Array.isArray(ceContexts) || ceContexts.length < 2) return rawText;
         const hi = this._evaluateConstantExpression(ceContexts[0], moduleParams);
         const lo = this._evaluateConstantExpression(ceContexts[1], moduleParams);
-        if (hi !== null && hi !== undefined && lo !== null && lo !== undefined) {
-            return `[${hi}:${lo}]`;
+        if (hi?.value !== null && hi?.value !== undefined && lo?.value !== null && lo?.value !== undefined) {
+            return `[${hi.value}:${lo.value}]`;
         }
         return rawText;
     }
@@ -331,6 +331,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 this.procLvalues.push(entry);
             }
         }
+        // Evaluate r-value expression
+        const exprCtx = ctx.expression ? ctx.expression() : null;
+        if (exprCtx) {
+            const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
+            this._evaluateExpression(exprCtx, moduleParams);
+        }
         this.visitChildren(ctx);
         return null;
     }
@@ -342,6 +348,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (lvalInfo) {
             this.procLvalues.push({ ...lvalInfo, moduleName: this._currentModule.name });
         }
+        // Evaluate r-value expression
+        const exprCtx = ctx.expression ? ctx.expression() : null;
+        if (exprCtx) {
+            const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
+            this._evaluateExpression(exprCtx, moduleParams);
+        }
         this.visitChildren(ctx);
         return null;
     }
@@ -352,6 +364,33 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
         if (lvalInfo) {
             this.procLvalues.push({ ...lvalInfo, moduleName: this._currentModule.name });
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    // Evaluate the case condition expression and visit children
+    visitCase_statement(ctx: any) {
+        if (!this._currentModule) return null;
+        const exprCtx = ctx.expression ? ctx.expression() : null;
+        if (exprCtx) {
+            const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
+            this._evaluateExpression(exprCtx, moduleParams);
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    // Evaluate loop condition/bound expressions and visit children
+    visitLoop_statement(ctx: any) {
+        if (!this._currentModule) return null;
+        const exprs = ctx.expression ? ctx.expression() : null;
+        if (exprs) {
+            const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
+            const exprsArr = Array.isArray(exprs) ? exprs : [exprs];
+            for (const exprCtx of exprsArr) {
+                this._evaluateExpression(exprCtx, moduleParams);
+            }
         }
         this.visitChildren(ctx);
         return null;
@@ -392,11 +431,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     const ceCtx = ctx.constant_expression ? ctx.constant_expression() : null;
                     const exprText = ceCtx ? ceCtx.getText() : null;
                     const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-                    const value = ceCtx ? this._evaluateConstantExpression(ceCtx, moduleParams) : null;
+                    const evalResult = ceCtx ? this._evaluateConstantExpression(ceCtx, moduleParams) : null;
+                    const value = evalResult !== null ? evalResult.value : null;
 
-                    // Store evaluated value for subsequent parameters in the same module
-                    if (value !== null && value !== undefined) {
-                        moduleParams.set(info.name, value);
+                    // Store EvalValue for subsequent parameters in the same module
+                    if (evalResult !== null && evalResult !== undefined) {
+                        moduleParams.set(info.name, evalResult);
                     }
 
                     // The kind ('parameter' or 'localparam') is set by the calling context;
@@ -455,14 +495,43 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         }
     }
 
+    // Helper: parse a Verilog number literal to an EvalValue with both value and width.
+    // Width is extracted from the size prefix (e.g. 8 from 8'hFF); plain integers have null width.
+    _parseVerilogLiteral(text: any): EvalValue | null {
+        if (!text) return null;
+        // Plain integer (no base prefix) – unsized, width = null
+        if (/^\d+$/.test(text)) return { value: parseInt(text, 10), width: null };
+        // Real number – unsized
+        if (/^\d+\.\d+([eE][+-]?\d+)?$/.test(text) || /^\d+[eE][+-]?\d+$/.test(text)) {
+            return { value: parseFloat(text), width: null };
+        }
+        // Verilog number with optional size and base: [size]'[s]<base><digits>
+        const match = text.match(/^(\d*)'[sS]?([dDbBhHoO])([0-9a-fA-F_xXzZ?]+)$/);
+        if (!match) return null;
+        const [, sizeStr, base, digits] = match;
+        const width = sizeStr ? parseInt(sizeStr, 10) : null;
+        const clean = digits.replace(/[_]/g, '');
+        // Unknowns / high-Z: width is still known but value is not
+        if (/[xXzZ?]/.test(clean)) return { value: null, width };
+        let value: number | null;
+        switch (base.toLowerCase()) {
+            case 'd': value = parseInt(clean, 10); break;
+            case 'b': value = parseInt(clean, 2); break;
+            case 'h': value = parseInt(clean, 16); break;
+            case 'o': value = parseInt(clean, 8); break;
+            default:  return null;
+        }
+        return { value, width };
+    }
+
     // Helper: evaluate a constant_expression context
-    _evaluateConstantExpression(ctx: any, paramMap: any) {
+    _evaluateConstantExpression(ctx: any, paramMap: any): EvalValue | null {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         return exprCtx ? this._evaluateExpression(exprCtx, paramMap) : null;
     }
 
-    // Recursively evaluate an expression context; returns a number or null
-    _evaluateExpression(ctx: any, paramMap: any) {
+    // Recursively evaluate an expression context; returns an EvalValue or null
+    _evaluateExpression(ctx: any, paramMap: any): EvalValue | null {
         if (!ctx) return null;
 
         // STRING literal – not numeric
@@ -499,8 +568,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // Ternary: condition ? then : else (3 sub-expressions)
         if (exprsArr.length === 3) {
             const cond = this._evaluateExpression(exprsArr[0], paramMap);
-            if (cond === null) return null;
-            return cond
+            if (cond === null || cond.value === null) return null;
+            return cond.value
                 ? this._evaluateExpression(exprsArr[1], paramMap)
                 : this._evaluateExpression(exprsArr[2], paramMap);
         }
@@ -508,8 +577,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return null;
     }
 
-    // Evaluate a primary context
-    _evaluatePrimary(ctx: any, paramMap: any) {
+    // Evaluate a primary context; returns an EvalValue or null
+    _evaluatePrimary(ctx: any, paramMap: any): EvalValue | null {
         if (!ctx) return null;
 
         // Parenthesised expression
@@ -521,7 +590,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // Number literal
         const numCtx = ctx.number ? ctx.number() : null;
         if (numCtx) {
-            return this._parseVerilogNumber(numCtx.getText());
+            return this._parseVerilogLiteral(numCtx.getText());
         }
 
         // Identifier (parameter reference)
@@ -538,17 +607,18 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return null;
     }
 
-    _applyUnary(op: any, val: any) {
+    _applyUnary(op: any, val: EvalValue): EvalValue | null {
+        const width = this._applyUnaryWidth(op, val);
         switch (op) {
-            case '+':  return +val;
-            case '-':  return -val;
-            case '!':  return val === 0 ? 1 : 0;
-            case '~':  return ~val;
-            // Reduction operators (&, |, ^, ~&, ~|) require bit-by-bit evaluation
-            // of multi-bit values – skip for constant folding purposes.
-            case '&':  return null;
-            case '|':  return null;
-            case '^':  return null;
+            case '+':  return { value: val.value !== null ? +val.value : null, width };
+            case '-':  return { value: val.value !== null ? -val.value : null, width };
+            case '!':  return { value: val.value !== null ? (val.value === 0 ? 1 : 0) : null, width };
+            case '~':  return { value: val.value !== null ? ~val.value : null, width };
+            // Reduction operators (&, |, ^) require bit-by-bit evaluation of multi-bit values –
+            // value is skipped for constant folding, but width (always 1) is still tracked.
+            case '&':  return { value: null, width };
+            case '|':  return { value: null, width };
+            case '^':  return { value: null, width };
             default:   return null;
         }
     }
@@ -563,33 +633,47 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return val.width; // Unary plus, minus, bitwise NOT do not change bit-width
     }
 
-    _applyBinary(op: any, left: any, right: any) {
-        switch (op) {
-            case '+':   return left + right;
-            case '-':   return left - right;
-            case '*':   return left * right;
-            case '/':   return right !== 0 ? Math.trunc(left / right) : null;
-            case '%':   return right !== 0 ? left % right : null;
-            case '**':  return Math.pow(left, right);
-            case '<<':  return left << right;
-            case '>>':  return left >> right;
-            case '<<<': return left << right;
-            case '>>>': return left >>> right;
-            case '&':   return left & right;
-            case '|':   return left | right;
-            case '^':   return left ^ right;
-            case '~&':  return ~(left & right);
-            case '~|':  return ~(left | right);
-            case '==':  return left === right ? 1 : 0;
-            case '!=':  return left !== right ? 1 : 0;
-            case '<':   return left <  right ? 1 : 0;
-            case '>':   return left >  right ? 1 : 0;
-            case '<=':  return left <= right ? 1 : 0;
-            case '>=':  return left >= right ? 1 : 0;
-            case '&&':  return (left && right) ? 1 : 0;
-            case '||':  return (left || right) ? 1 : 0;
-            default:    return null;
+    _applyBinary(op: any, left: EvalValue, right: EvalValue): EvalValue | null {
+        let value: number | null = null;
+        if (left.value !== null && right.value !== null) {
+            switch (op) {
+                case '+':   value = left.value + right.value; break;
+                case '-':   value = left.value - right.value; break;
+                case '*':   value = left.value * right.value; break;
+                case '/':   value = right.value !== 0 ? Math.trunc(left.value / right.value) : null; break;
+                case '%':   value = right.value !== 0 ? left.value % right.value : null; break;
+                case '**':  value = Math.pow(left.value, right.value); break;
+                case '<<':  value = left.value << right.value; break;
+                case '>>':  value = left.value >> right.value; break;
+                case '<<<': value = left.value << right.value; break;
+                case '>>>': value = left.value >>> right.value; break;
+                case '&':   value = left.value & right.value; break;
+                case '|':   value = left.value | right.value; break;
+                case '^':   value = left.value ^ right.value; break;
+                case '~&':  value = ~(left.value & right.value); break;
+                case '~|':  value = ~(left.value | right.value); break;
+                case '==':  value = left.value === right.value ? 1 : 0; break;
+                case '!=':  value = left.value !== right.value ? 1 : 0; break;
+                case '<':   value = left.value <  right.value ? 1 : 0; break;
+                case '>':   value = left.value >  right.value ? 1 : 0; break;
+                case '<=':  value = left.value <= right.value ? 1 : 0; break;
+                case '>=':  value = left.value >= right.value ? 1 : 0; break;
+                case '&&':  value = (left.value && right.value) ? 1 : 0; break;
+                case '||':  value = (left.value || right.value) ? 1 : 0; break;
+                default:    return null;
+            }
+        } else {
+            // value cannot be computed; validate that the operator is known
+            switch (op) {
+                case '+': case '-': case '*': case '/': case '%': case '**':
+                case '<<': case '>>': case '<<<': case '>>>':
+                case '&': case '|': case '^': case '~&': case '~|':
+                case '==': case '!=': case '<': case '>': case '<=': case '>=':
+                case '&&': case '||': break;
+                default: return null;
+            }
         }
+        return { value, width: this._applyBinaryWidth(op, left, right) };
     }
 
     _applyBinaryWidth(op: string, left: EvalValue, right: EvalValue) : number | null {
