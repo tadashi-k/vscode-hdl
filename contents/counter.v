@@ -5,6 +5,9 @@ module counter (
     output reg [7:0] count
 );
 
+parameter WIDTH = 8;
+localparam MAX_COUNT = (1 << WIDTH) - 1;
+
     wire enable;
     reg [7:0] internal_count;
 
@@ -21,7 +24,7 @@ module counter (
 		.b(),
 		.cin(),
 		.sum(),
-		.cout()
+		.cout(enable)
 	);
 
 endmodule
