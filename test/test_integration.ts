@@ -5,8 +5,8 @@
  * This simulates how the extension will work in VS Code
  */
 
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Mock vscode API
 const vscode = {
@@ -17,18 +17,26 @@ const vscode = {
         Hint: 3
     },
     Position: class {
+        line: any;
+        character: any;
         constructor(line, character) {
             this.line = line;
             this.character = character;
         }
     },
     Range: class {
+        start: any;
+        end: any;
         constructor(start, end) {
             this.start = start;
             this.end = end;
         }
     },
     Diagnostic: class {
+        range: any;
+        message: any;
+        severity: any;
+        source: any;
         constructor(range, message, severity) {
             this.range = range;
             this.message = message;
@@ -42,11 +50,15 @@ const vscode = {
 };
 
 // Make vscode available globally for the extension code
-global.vscode = vscode;
+(global as any).vscode = vscode;
 
 // Mock document class
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    lines: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';
@@ -111,8 +123,9 @@ function updateDiagnostics(document, diagnosticCollection) {
 
 // Mock diagnostic collection
 class MockDiagnosticCollection {
+    diagnostics: any;
     constructor() {
-        this.diagnostics = new Map();
+        this.diagnostics = new Map<string, any>();
     }
 
     set(uri, diagnostics) {

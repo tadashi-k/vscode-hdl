@@ -13,12 +13,15 @@
 const vscode = {
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 }
 };
-global.vscode = vscode;
+(global as any).vscode = vscode;
 
-const AntlrVerilogParser = require('../src/antlr-parser');
+import AntlrVerilogParser = require('../src/antlr-parser');
 
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';
@@ -28,8 +31,9 @@ class MockTextDocument {
 
 // Mirrors the ModuleDatabase class from extension.js
 class ModuleDatabase {
+    modules: any;
     constructor() {
-        this.modules = new Map();
+        this.modules = new Map<string, any>();
     }
     addModule(module) {
         this.modules.set(module.name, module);
@@ -45,7 +49,7 @@ class ModuleDatabase {
         }
     }
     getAllModules() {
-        return Array.from(this.modules.values());
+        return Array.from(this.modules.values()) as any[];
     }
 }
 

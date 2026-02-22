@@ -5,3 +5,6 @@
 *.vsix
 contents/**
 test/**
+src/**
+tsconfig*.json
+antlr/**

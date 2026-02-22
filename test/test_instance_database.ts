@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Test script for module instantiation database
-const path = require('path');
+import * as path from 'path';
 
 // Mock vscode API for testing
 const vscode = {
@@ -15,7 +15,10 @@ const vscode = {
 
 // Mock document class
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';
@@ -26,8 +29,8 @@ class MockTextDocument {
     }
 }
 
-global.vscode = vscode;
-const AntlrVerilogParser = require('../src/antlr-parser');
+(global as any).vscode = vscode;
+import AntlrVerilogParser = require('../src/antlr-parser');
 
 function runTests() {
     console.log('Running Module Instantiation Database Tests...\n');
@@ -272,9 +275,11 @@ endmodule
 
         // Inline InstanceDatabase (mirrors extension.js implementation)
         class InstanceDatabase {
+            instances: any;
+            _modulesByUri: any;
             constructor() {
-                this.instances = new Map();
-                this._modulesByUri = new Map();
+                this.instances = new Map<string, any>();
+                this._modulesByUri = new Map<string, any>();
             }
             updateInstances(parentModuleName, uri, instances) {
                 this.instances.set(parentModuleName, instances);
@@ -328,7 +333,7 @@ endmodule
         const db = new InstanceDatabase();
         const uri = 'top3.v';
         // Group instances by parent module (as updateDocumentSymbols does)
-        const byModule = new Map();
+        const byModule = new Map<string, any>();
         for (const inst of instances) {
             if (!byModule.has(inst.parentModuleName)) byModule.set(inst.parentModuleName, []);
             byModule.get(inst.parentModuleName).push(inst);

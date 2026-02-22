@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Test script for Verilog parser
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Mock vscode API for testing
 const vscode = {
@@ -13,12 +13,16 @@ const vscode = {
         Hint: 3
     },
     Position: class {
+        line: any;
+        character: any;
         constructor(line, character) {
             this.line = line;
             this.character = character;
         }
     },
     Range: class {
+        start: any;
+        end: any;
         constructor(start, end) {
             this.start = start;
             this.end = end;
@@ -28,7 +32,11 @@ const vscode = {
 
 // Mock document class
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    lines: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';
@@ -54,8 +62,8 @@ class MockTextDocument {
 
 // Load AntlrVerilogParser class from src/antlr-parser.js
 // Mock vscode module for the parser
-global.vscode = vscode;
-const AntlrVerilogParser = require('../src/antlr-parser');
+(global as any).vscode = vscode;
+import AntlrVerilogParser = require('../src/antlr-parser');
 
 function runTests() {
     console.log('Running Verilog Parser Tests...\n');

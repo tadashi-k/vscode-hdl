@@ -25,8 +25,8 @@ console.log('Building ANTLR grammar...');
 console.log(`Grammar file: ${grammarFile}`);
 console.log(`Output directory: ${outputDir}`);
 
-// Run antlr4-tool to generate JavaScript parser
-const command = `npx antlr4-tool -l javascript -o "${outputDir}" "${grammarFile}"`;
+// Run antlr4-tool to generate TypeScript parser
+const command = `npx antlr4-tool -l typescript -o "${outputDir}" "${grammarFile}"`;
 
 console.log(`\nExecuting: ${command}\n`);
 
@@ -69,5 +69,37 @@ exec(command, { cwd: antlrDir }, (error, stdout, stderr) => {
         }
         if (stdout) console.log(stdout);
         if (stderr) console.error(stderr);
+
+        // Generate VerilogVisitor.d.ts (antlr4-tool does not produce it for visitors)
+        generateVisitorDeclaration();
     });
 });
+
+function generateVisitorDeclaration() {
+    const visitorDts = path.join(outputDir, 'VerilogVisitor.d.ts');
+    const visitorJs = path.join(outputDir, 'VerilogVisitor.js');
+    if (!fs.existsSync(visitorJs)) {
+        return;
+    }
+
+    // Parse visitor method names from VerilogVisitor.js
+    const content = fs.readFileSync(visitorJs, 'utf8');
+    const methods = [];
+    const re = /VerilogVisitor\.prototype\.(visit\w+)\s*=/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+        methods.push(m[1]);
+    }
+
+    const lines = [
+        "import ParseTreeVisitor from 'antlr4/tree/ParseTreeVisitor';",
+        '',
+        'export declare class VerilogVisitor extends ParseTreeVisitor {',
+        ...methods.map(name => `    ${name}(ctx: any): any;`),
+        '}',
+        ''
+    ];
+
+    fs.writeFileSync(visitorDts, lines.join('\n'), 'utf8');
+    console.log(`Generated VerilogVisitor.d.ts with ${methods.length} visitor methods`);
+}

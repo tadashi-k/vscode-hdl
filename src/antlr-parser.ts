@@ -1,33 +1,36 @@
 // ANTLR-based Verilog Parser
 // Replaces regex-based parser with formal grammar-based parser
 
-let vscode;
+import type * as vsCodeModule from 'vscode';
+import antlr4 from 'antlr4';
+import { VerilogLexer } from '../antlr/generated/VerilogLexer';
+import { VerilogParser } from '../antlr/generated/VerilogParser';
+import { VerilogVisitor } from '../antlr/generated/VerilogVisitor';
+
+let vscode: typeof vsCodeModule;
 try {
     vscode = require('vscode');
 } catch (e) {
     // In test environment, use global vscode
-    if (typeof global !== 'undefined' && global.vscode) {
-        vscode = global.vscode;
+    if (typeof global !== 'undefined' && (global as any).vscode) {
+        vscode = (global as any).vscode;
     } else {
         throw new Error('vscode module not found. Make sure to set global.vscode in test environment.');
     }
 }
 
-const antlr4 = require('antlr4');
-const VerilogLexer = require('../antlr/generated/VerilogLexer.js').VerilogLexer;
-const VerilogParser = require('../antlr/generated/VerilogParser.js').VerilogParser;
-const VerilogVisitor = require('../antlr/generated/VerilogVisitor.js').VerilogVisitor;
-
 /**
  * Custom error listener to capture ANTLR parsing errors
  */
 class VerilogErrorListener extends antlr4.error.ErrorListener {
+    errors: any[];
+
     constructor() {
         super();
         this.errors = [];
     }
 
-    syntaxError(recognizer, offendingSymbol, line, column, msg, e) {
+    syntaxError(recognizer: any, offendingSymbol: any, line: any, column: any, msg: any, e: any) {
         // Convert ANTLR error to VS Code diagnostic format
         // ANTLR uses 1-based line numbers, VS Code uses 0-based
         const vscodeLine = line - 1;
@@ -67,7 +70,24 @@ class VerilogErrorListener extends antlr4.error.ErrorListener {
 const DEFAULT_NET_TYPE = 'wire';
 
 class VerilogSymbolVisitor extends VerilogVisitor {
-    constructor(uri) {
+    uri: string;
+    modules: any[];
+    signals: any[];
+    instances: any[];
+    parameters: any[];
+    _moduleSignalRefs: Map<any, any>;
+    _signalRefList: any[];
+    assignLvalues: any[];
+    procLvalues: any[];
+    _instPortConnections: any[];
+    _moduleParamNames: Map<any, any>;
+    _moduleParams: Map<any, any>;
+    _currentModule: any;
+    _inProcedural: boolean;
+    _inContinuousAssign: boolean;
+    _currentParamKind: any;
+
+    constructor(uri: string) {
         super();
         this.uri = uri;
         this.modules = [];
@@ -87,7 +107,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._inContinuousAssign = false;
     }
 
-    _addSignalRef(name, line, character) {
+    _addSignalRef(name: any, line: any, character: any) {
         if (!this._currentModule) return;
         const moduleName = this._currentModule.name;
         const refs = this._moduleSignalRefs.get(moduleName);
@@ -97,14 +117,14 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         }
     }
 
-    _getLvalueIdentifierInfo(lvalCtx) {
+    _getLvalueIdentifierInfo(lvalCtx: any) {
         if (!lvalCtx) return null;
         const identCtx = lvalCtx.identifier ? lvalCtx.identifier() : null;
         if (!identCtx) return null;
         return this._getIdentifierInfo(identCtx);
     }
 
-    _getIdentifierInfo(identCtx) {
+    _getIdentifierInfo(identCtx: any) {
         const token = identCtx.SIMPLE_IDENTIFIER() || identCtx.ESCAPED_IDENTIFIER();
         if (!token) return null;
         return {
@@ -114,14 +134,14 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         };
     }
 
-    _getRangeText(rangeCtx) {
+    _getRangeText(rangeCtx: any) {
         return rangeCtx ? rangeCtx.getText() : null;
     }
 
     // Return the bit-range text for a range context, evaluating constant expressions
     // (which may reference parameters/localparams) where possible.
     // Falls back to the raw text when evaluation fails.
-    _getEvaluatedRangeText(rangeCtx) {
+    _getEvaluatedRangeText(rangeCtx: any) {
         if (!rangeCtx) return null;
         const rawText = rangeCtx.getText();
         if (!this._currentModule) return rawText;
@@ -139,12 +159,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
     // Normalises a raw ANTLR rule-context result to a (possibly empty) array.
     // ANTLR returns a single context for exactly one match and an array for multiple.
-    _toArray(raw) {
+    _toArray(raw: any) {
         if (!raw) return [];
         return Array.isArray(raw) ? raw : [raw];
     }
 
-    visitModule_declaration(ctx) {
+    visitModule_declaration(ctx: any) {
         const info = this._getIdentifierInfo(ctx.module_identifier().identifier());
         if (!info) return null;
 
@@ -169,7 +189,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Returns identifier info if the expression is a simple (unmodified) identifier primary
-    _getPrimaryIdentifier(exprCtx) {
+    _getPrimaryIdentifier(exprCtx: any) {
         if (!exprCtx) return null;
         if (exprCtx.unary_operator && exprCtx.unary_operator()) return null;
         const primaryCtx = exprCtx.primary ? exprCtx.primary() : null;
@@ -180,7 +200,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Track module instantiations for port-connection warnings
-    visitModule_instantiation(ctx) {
+    visitModule_instantiation(ctx: any) {
         if (!this._currentModule) return null;
 
         const instModIdCtx = ctx.module_identifier();
@@ -198,7 +218,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     ? this._getIdentifierInfo(nameOfInstCtx.identifier())
                     : null;
 
-                const portConnections = [];
+                const portConnections: any[] = [];
 
                 const portConnsCtx = inst.list_of_port_connections
                     ? inst.list_of_port_connections()
@@ -260,7 +280,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Track always/initial block context for procedural assignment warnings
-    visitAlways_construct(ctx) {
+    visitAlways_construct(ctx: any) {
         if (!this._currentModule) return null;
         const prev = this._inProcedural;
         this._inProcedural = true;
@@ -269,7 +289,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return null;
     }
 
-    visitInitial_construct(ctx) {
+    visitInitial_construct(ctx: any) {
         if (!this._currentModule) return null;
         const prev = this._inProcedural;
         this._inProcedural = true;
@@ -279,7 +299,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Track continuous assign context for "assign lvalue is reg" warning
-    visitContinuous_assign(ctx) {
+    visitContinuous_assign(ctx: any) {
         if (!this._currentModule) return null;
         const prev = this._inContinuousAssign;
         this._inContinuousAssign = true;
@@ -289,7 +309,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Capture lvalue of continuous assign (assignment rule) or FOR loop (in procedural)
-    visitAssignment(ctx) {
+    visitAssignment(ctx: any) {
         if (!this._currentModule) return null;
         const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
         if (lvalInfo) {
@@ -305,7 +325,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Capture lvalue of blocking assignment (always/initial body)
-    visitBlocking_assignment(ctx) {
+    visitBlocking_assignment(ctx: any) {
         if (!this._currentModule) return null;
         const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
         if (lvalInfo) {
@@ -316,7 +336,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Capture lvalue of non-blocking assignment (always/initial body)
-    visitNon_blocking_assignment(ctx) {
+    visitNon_blocking_assignment(ctx: any) {
         if (!this._currentModule) return null;
         const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
         if (lvalInfo) {
@@ -327,7 +347,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Capture all identifiers used in expressions (r-value signal references)
-    visitPrimary(ctx) {
+    visitPrimary(ctx: any) {
         if (this._currentModule && ctx.identifier && ctx.identifier()) {
             const info = this._getIdentifierInfo(ctx.identifier());
             if (info) {
@@ -341,13 +361,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Visit l-value children (e.g. array index expressions) for r-value tracking,
     // but do NOT add the l-value identifier itself to _moduleSignalRefs.
     // Being the target of an assignment does not constitute "using" the signal.
-    visitLvalue(ctx) {
+    visitLvalue(ctx: any) {
         this.visitChildren(ctx);
         return null;
     }
 
     // Track parameter declarations to exclude from "undefined signal" warnings
-    visitParam_assignment(ctx) {
+    visitParam_assignment(ctx: any) {
         if (!this._currentModule) return null;
         if (ctx.parameter_identifier && ctx.parameter_identifier()) {
             const identCtx = ctx.parameter_identifier().identifier();
@@ -389,7 +409,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // localparam declarations share the same param_assignment structure
-    visitLocal_parameter_declaration(ctx) {
+    visitLocal_parameter_declaration(ctx: any) {
         if (!this._currentModule) return null;
         const prev = this._currentParamKind;
         this._currentParamKind = 'localparam';
@@ -400,7 +420,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
     // Helper: parse a Verilog number literal to a JS number.
     // Handles non-negative literals only; unary minus is handled by _applyUnary.
-    _parseVerilogNumber(text) {
+    _parseVerilogNumber(text: any) {
         if (!text) return null;
         // Plain integer (no base prefix)
         if (/^\d+$/.test(text)) return parseInt(text, 10);
@@ -425,13 +445,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Helper: evaluate a constant_expression context
-    _evaluateConstantExpression(ctx, paramMap) {
+    _evaluateConstantExpression(ctx: any, paramMap: any) {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         return exprCtx ? this._evaluateExpression(exprCtx, paramMap) : null;
     }
 
     // Recursively evaluate an expression context; returns a number or null
-    _evaluateExpression(ctx, paramMap) {
+    _evaluateExpression(ctx: any, paramMap: any) {
         if (!ctx) return null;
 
         // STRING literal – not numeric
@@ -478,7 +498,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Evaluate a primary context
-    _evaluatePrimary(ctx, paramMap) {
+    _evaluatePrimary(ctx: any, paramMap: any) {
         if (!ctx) return null;
 
         // Parenthesised expression
@@ -507,7 +527,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return null;
     }
 
-    _applyUnary(op, val) {
+    _applyUnary(op: any, val: any) {
         switch (op) {
             case '+':  return +val;
             case '-':  return -val;
@@ -522,7 +542,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         }
     }
 
-    _applyBinary(op, left, right) {
+    _applyBinary(op: any, left: any, right: any) {
         switch (op) {
             case '+':   return left + right;
             case '-':   return left - right;
@@ -552,7 +572,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // ANSI-style port declaration: input wire [7:0] data_in
-    visitAnsi_port_declaration(ctx) {
+    visitAnsi_port_declaration(ctx: any) {
         if (!this._currentModule) return null;
 
         const direction = ctx.port_direction().getText();
@@ -580,25 +600,25 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Non-ANSI port declarations: input [7:0] data;
-    visitInput_declaration(ctx) {
+    visitInput_declaration(ctx: any) {
         if (!this._currentModule) return null;
         this._processPortDeclaration(ctx, 'input');
         return null;
     }
 
-    visitOutput_declaration(ctx) {
+    visitOutput_declaration(ctx: any) {
         if (!this._currentModule) return null;
         this._processPortDeclaration(ctx, 'output');
         return null;
     }
 
-    visitInout_declaration(ctx) {
+    visitInout_declaration(ctx: any) {
         if (!this._currentModule) return null;
         this._processPortDeclaration(ctx, 'inout');
         return null;
     }
 
-    _processPortDeclaration(ctx, direction) {
+    _processPortDeclaration(ctx: any, direction: any) {
         const netTypeCtx = ctx.net_type();
         const type = netTypeCtx ? netTypeCtx.getText() : DEFAULT_NET_TYPE;
         const bitWidth = this._getEvaluatedRangeText(ctx.range());
@@ -628,7 +648,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Internal wire/net declarations: wire [7:0] data;
-    visitNet_declaration(ctx) {
+    visitNet_declaration(ctx: any) {
         if (!this._currentModule) return null;
 
         const type = ctx.net_type().getText();
@@ -657,7 +677,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Internal reg declarations: reg [15:0] counter;
-    visitReg_declaration(ctx) {
+    visitReg_declaration(ctx: any) {
         if (!this._currentModule) return null;
 
         const bitWidth = this._getEvaluatedRangeText(ctx.range());
@@ -690,6 +710,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
  * Provides the same interface as the regex-based parser for compatibility
  */
 class AntlrVerilogParser {
+    errorListener: VerilogErrorListener;
+
     constructor() {
         this.errorListener = new VerilogErrorListener();
     }
@@ -701,7 +723,7 @@ class AntlrVerilogParser {
      * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
      * @returns {Array} Array of diagnostic objects (syntax errors + signal warnings)
      */
-    parse(document, moduleDatabase = null) {
+    parse(document: any, moduleDatabase: any = null) {
         const { errors, warnings } = this.parseSymbols(document, moduleDatabase);
         return [...errors, ...warnings];
     }
@@ -719,23 +741,23 @@ class AntlrVerilogParser {
      *   errors:  syntax errors
      *   warnings: signal usage warnings
      */
-    parseSymbols(document, moduleDatabase = null) {
+    parseSymbols(document: any, moduleDatabase: any = null) {
         this.errorListener.clearErrors();
 
         const text = document.getText();
         const uri = document.uri.toString();
-        let modules = [];
-        let signals = [];
-        let visitor = null;
+        let modules: any[] = [];
+        let signals: any[] = [];
+        let visitor: VerilogSymbolVisitor | null = null;
 
         try {
-            const chars = new antlr4.InputStream(text, true);
-            const lexer = new VerilogLexer(chars);
+            const chars = new (antlr4 as any).InputStream(text, true);
+            const lexer = new VerilogLexer(chars as any) as any;
             lexer.removeErrorListeners();
             lexer.addErrorListener(this.errorListener);
 
-            const tokens = new antlr4.CommonTokenStream(lexer);
-            const parser = new VerilogParser(tokens);
+            const tokens = new (antlr4 as any).CommonTokenStream(lexer);
+            const parser = new VerilogParser(tokens) as any;
             parser.removeErrorListeners();
             parser.addErrorListener(this.errorListener);
             parser.buildParseTrees = true;
@@ -743,11 +765,11 @@ class AntlrVerilogParser {
             const tree = parser.source_text();
 
             visitor = new VerilogSymbolVisitor(uri);
-            tree.accept(visitor);
+            (tree as any).accept(visitor);
             modules = visitor.modules;
             signals = visitor.signals;
 
-        } catch (error) {
+        } catch (error: any) {
             console.error('ANTLR symbol extraction error:', error);
             this.errorListener.errors.push({
                 line: 0,
@@ -773,8 +795,8 @@ class AntlrVerilogParser {
      * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
      * @returns {Array} Array of warning diagnostic objects
      */
-    _generateSignalWarnings(modules, signals, visitor, moduleDatabase = null) {
-        const warnings = [];
+    _generateSignalWarnings(modules: any[], signals: any[], visitor: VerilogSymbolVisitor, moduleDatabase: any = null) {
+        const warnings: any[] = [];
         const wireTypes = new Set(['wire', 'tri', 'supply0', 'supply1']);
 
         // Build a map of module name -> port name -> port object for instantiation checks.
@@ -782,12 +804,12 @@ class AntlrVerilogParser {
         // the workspace-wide moduleDatabase (cross-file module support).
         const modulePortMap = new Map();
         for (const mod of modules) {
-            modulePortMap.set(mod.name, new Map(mod.ports.map(p => [p.name, p])));
+            modulePortMap.set(mod.name, new Map(mod.ports.map((p: any) => [p.name, p])));
         }
         if (moduleDatabase) {
             for (const mod of moduleDatabase.getAllModules()) {
                 if (!modulePortMap.has(mod.name)) {
-                    modulePortMap.set(mod.name, new Map(mod.ports.map(p => [p.name, p])));
+                    modulePortMap.set(mod.name, new Map(mod.ports.map((p: any) => [p.name, p])));
                 }
             }
         }
@@ -795,7 +817,7 @@ class AntlrVerilogParser {
         for (const module of modules) {
             const moduleName = module.name;
             const declaredSignals = signals.filter(s => s.moduleName === moduleName);
-            const declaredByName = new Map(declaredSignals.map(s => [s.name, s]));
+            const declaredByName = new Map(declaredSignals.map((s: any) => [s.name, s]));
             const paramNames = visitor._moduleParamNames.get(moduleName) || new Set();
             const refNames = visitor._moduleSignalRefs.get(moduleName) || new Set();
 
@@ -805,7 +827,7 @@ class AntlrVerilogParser {
             // - Signals connected to output or inout ports are "assigned" (the submodule drives them).
             const usedViaPortInput = new Set();
             const assignedViaPortOutput = new Set();
-            for (const conn of visitor._instPortConnections.filter(c => c.moduleName === moduleName)) {
+            for (const conn of visitor._instPortConnections.filter((c: any) => c.moduleName === moduleName)) {
                 const instModPorts = modulePortMap.get(conn.instModuleName);
                 if (!instModPorts) continue;
                 const instPort = instModPorts.get(conn.portName);
@@ -821,13 +843,13 @@ class AntlrVerilogParser {
             // Build the set of assigned signals: all explicit l-values plus signals driven
             // by output or inout ports of instantiated modules (used for Warnings 2 and 7).
             const assignedSignals = new Set(assignedViaPortOutput);
-            for (const lval of [...visitor.assignLvalues, ...visitor.procLvalues].filter(l => l.moduleName === moduleName)) {
+            for (const lval of [...visitor.assignLvalues, ...visitor.procLvalues].filter((l: any) => l.moduleName === moduleName)) {
                 assignedSignals.add(lval.name);
             }
 
             // Warning 1: signal reference without declaration
             const reportedUndefined = new Set();
-            for (const refEntry of visitor._signalRefList.filter(r => r.moduleName === moduleName)) {
+            for (const refEntry of visitor._signalRefList.filter((r: any) => r.moduleName === moduleName)) {
                 const name = refEntry.name;
                 if (!declaredByName.has(name) && !paramNames.has(name) && !reportedUndefined.has(name)) {
                     reportedUndefined.add(name);
@@ -866,7 +888,7 @@ class AntlrVerilogParser {
 
             // Warning 3: continuous assign statement l-value is a reg
             const reportedAssignReg = new Set();
-            for (const lval of visitor.assignLvalues.filter(l => l.moduleName === moduleName)) {
+            for (const lval of visitor.assignLvalues.filter((l: any) => l.moduleName === moduleName)) {
                 if (reportedAssignReg.has(lval.name)) continue;
                 const sig = declaredByName.get(lval.name);
                 if (sig && sig.type === 'reg') {
@@ -883,7 +905,7 @@ class AntlrVerilogParser {
 
             // Warning 4: procedural (always/initial) l-value is a wire
             const reportedProcWire = new Set();
-            for (const lval of visitor.procLvalues.filter(l => l.moduleName === moduleName)) {
+            for (const lval of visitor.procLvalues.filter((l: any) => l.moduleName === moduleName)) {
                 if (reportedProcWire.has(lval.name)) continue;
                 const sig = declaredByName.get(lval.name);
                 if (sig && wireTypes.has(sig.type)) {
@@ -900,9 +922,9 @@ class AntlrVerilogParser {
 
             // Warning 5: input signal used as l-value in assign or procedural block
             const reportedInputLval = new Set();
-            for (const lval of [...visitor.assignLvalues, ...visitor.procLvalues].filter(l => l.moduleName === moduleName)) {
+            for (const lval of [...visitor.assignLvalues, ...visitor.procLvalues].filter((l: any) => l.moduleName === moduleName)) {
                 if (reportedInputLval.has(lval.name)) continue;
-                if (declaredSignals.some(s => s.name === lval.name && s.direction === 'input')) {
+                if (declaredSignals.some((s: any) => s.name === lval.name && s.direction === 'input')) {
                     reportedInputLval.add(lval.name);
                     warnings.push({
                         line: lval.line,
@@ -917,14 +939,14 @@ class AntlrVerilogParser {
             // Warning 6: output or inout port of instantiated module connected to reg signal
             // A reg cannot be driven by a submodule's output/inout port.
             const reportedOutputPortReg = new Set();
-            for (const conn of visitor._instPortConnections.filter(c => c.moduleName === moduleName)) {
+            for (const conn of visitor._instPortConnections.filter((c: any) => c.moduleName === moduleName)) {
                 const instModPorts = modulePortMap.get(conn.instModuleName);
                 if (!instModPorts) continue;
                 const instPort = instModPorts.get(conn.portName);
                 if (!instPort || (instPort.direction !== 'output' && instPort.direction !== 'inout')) continue;
 
                 if (!reportedOutputPortReg.has(conn.localSignalName) &&
-                    declaredSignals.some(s => s.name === conn.localSignalName && s.type === 'reg')) {
+                    declaredSignals.some((s: any) => s.name === conn.localSignalName && s.type === 'reg')) {
                     reportedOutputPortReg.add(conn.localSignalName);
                     const dirLabel = instPort.direction.charAt(0).toUpperCase() + instPort.direction.slice(1);
                     warnings.push({
@@ -959,4 +981,4 @@ class AntlrVerilogParser {
     }
 }
 
-module.exports = AntlrVerilogParser;
+export = AntlrVerilogParser;

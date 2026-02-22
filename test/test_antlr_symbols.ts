@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Test script for ANTLR-based symbol extraction (parseSymbols)
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Mock vscode API for testing
 const vscode = {
@@ -16,7 +16,10 @@ const vscode = {
 
 // Mock document class
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';
@@ -27,8 +30,8 @@ class MockTextDocument {
     }
 }
 
-global.vscode = vscode;
-const AntlrVerilogParser = require('../src/antlr-parser');
+(global as any).vscode = vscode;
+import AntlrVerilogParser = require('../src/antlr-parser');
 
 function runTests() {
     console.log('Running ANTLR Symbol Extraction Tests...\n');

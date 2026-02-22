@@ -11,7 +11,10 @@ const vscode = {
 };
 
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';
@@ -22,8 +25,8 @@ class MockTextDocument {
     }
 }
 
-global.vscode = vscode;
-const AntlrVerilogParser = require('../src/antlr-parser');
+(global as any).vscode = vscode;
+import AntlrVerilogParser = require('../src/antlr-parser');
 
 function runTests() {
     console.log('Running Parameter Database Tests...\n');

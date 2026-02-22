@@ -6,19 +6,21 @@
  * Uses the ANTLR-based parser (parseSymbols)
  */
 
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Mock vscode API
 const vscode = {
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 }
 };
-global.vscode = vscode;
+(global as any).vscode = vscode;
 
-const AntlrVerilogParser = require('../src/antlr-parser');
+import AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
 
 class MockPosition {
+    line: any;
+    character: any;
     constructor(line, character) {
         this.line = line;
         this.character = character;
@@ -26,6 +28,8 @@ class MockPosition {
 }
 
 class MockRange {
+    start: any;
+    end: any;
     constructor(start, end) {
         this.start = start;
         this.end = end;
@@ -33,6 +37,8 @@ class MockRange {
 }
 
 class MockLocation {
+    uri: any;
+    range: any;
     constructor(uri, position) {
         this.uri = uri;
         this.range = new MockRange(position, position);
@@ -40,6 +46,7 @@ class MockLocation {
 }
 
 class MockUri {
+    fsPath: any;
     constructor(filePath) {
         this.fsPath = filePath;
     }
@@ -54,7 +61,10 @@ class MockUri {
 }
 
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = new MockUri(uri);
         this.languageId = 'verilog';
@@ -95,10 +105,13 @@ class MockTextDocument {
 
 // Per-module symbol database (mirrors extension.js SignalDatabase + ModuleDatabase)
 class SymbolDatabase {
+    modules: any;
+    signals: any;
+    _modulesByUri: any;
     constructor() {
-        this.modules = new Map();        // moduleName -> module
-        this.signals = new Map();        // moduleName -> signals[]
-        this._modulesByUri = new Map();  // uri -> moduleNames[]
+        this.modules = new Map<string, any>();        // moduleName -> module
+        this.signals = new Map<string, any>();        // moduleName -> signals[]
+        this._modulesByUri = new Map<string, any>();  // uri -> moduleNames[]
     }
 
     update(doc) {
@@ -112,7 +125,7 @@ class SymbolDatabase {
         }
         this._modulesByUri.set(uri, []);
 
-        const signalsByModule = new Map();
+        const signalsByModule = new Map<string, any>();
         for (const s of signals) {
             if (!signalsByModule.has(s.moduleName)) signalsByModule.set(s.moduleName, []);
             signalsByModule.get(s.moduleName).push(s);
@@ -138,6 +151,7 @@ class SymbolDatabase {
 }
 
 class VerilogDefinitionProvider {
+    symbolDatabase: any;
     constructor(symbolDatabase) {
         this.symbolDatabase = symbolDatabase;
     }

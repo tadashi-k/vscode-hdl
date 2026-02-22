@@ -5,20 +5,23 @@
  * Uses the ANTLR-based parser (parseSymbols)
  */
 
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Mock vscode API
 const vscode = {
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 }
 };
-global.vscode = vscode;
+(global as any).vscode = vscode;
 
-const AntlrVerilogParser = require('../src/antlr-parser');
+import AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
 
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';
@@ -31,9 +34,11 @@ class MockTextDocument {
 
 // Signal database - per module (mirrors extension.js SignalDatabase)
 class SignalDatabase {
+    signals: any;
+    _modulesByUri: any;
     constructor() {
-        this.signals = new Map();
-        this._modulesByUri = new Map();
+        this.signals = new Map<string, any>();
+        this._modulesByUri = new Map<string, any>();
     }
 
     updateSignals(moduleName, uri, signals) {
@@ -79,8 +84,9 @@ class SignalDatabase {
 
 // Module database - workspace-wide (mirrors extension.js ModuleDatabase)
 class ModuleDatabase {
+    modules: any;
     constructor() {
-        this.modules = new Map();
+        this.modules = new Map<string, any>();
     }
 
     addModule(module) {
@@ -100,7 +106,7 @@ class ModuleDatabase {
     }
 
     getAllModules() {
-        return Array.from(this.modules.values());
+        return Array.from(this.modules.values()) as any[];
     }
 }
 
@@ -112,7 +118,7 @@ function updateDatabases(signalDB, moduleDB, doc) {
     signalDB.removeSignalsByUri(uri);
     moduleDB.removeModulesFromFile(uri);
 
-    const signalsByModule = new Map();
+    const signalsByModule = new Map<string, any>();
     for (const signal of signals) {
         if (!signalsByModule.has(signal.moduleName)) {
             signalsByModule.set(signal.moduleName, []);

@@ -1,10 +1,13 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
-const vscode = require('vscode');
-const AntlrVerilogParser = require('./antlr-parser');
+import * as vscode from 'vscode';
+import AntlrVerilogParser = require('./antlr-parser');
 
 // Signal database - stores signals (wire/reg) per module
 class SignalDatabase {
+    signals: Map<string, any[]>;
+    _modulesByUri: Map<string, string[]>;
+
     constructor() {
         // Map of module name -> signals array
         this.signals = new Map();
@@ -18,12 +21,12 @@ class SignalDatabase {
      * @param {string} uri - Document URI (for cleanup tracking)
      * @param {Array} signals - Array of signal objects
      */
-    updateSignals(moduleName, uri, signals) {
+    updateSignals(moduleName: string, uri: string, signals: any[]) {
         this.signals.set(moduleName, signals);
         if (!this._modulesByUri.has(uri)) {
             this._modulesByUri.set(uri, []);
         }
-        const list = this._modulesByUri.get(uri);
+        const list = this._modulesByUri.get(uri)!;
         if (!list.includes(moduleName)) {
             list.push(moduleName);
         }
@@ -34,7 +37,7 @@ class SignalDatabase {
      * @param {string} moduleName - Module name
      * @returns {Array} Array of signal objects
      */
-    getSignals(moduleName) {
+    getSignals(moduleName: string) {
         return this.signals.get(moduleName) || [];
     }
 
@@ -43,9 +46,9 @@ class SignalDatabase {
      * @param {string} uri - Document URI
      * @returns {Array} Array of signal objects
      */
-    getSignalsByUri(uri) {
+    getSignalsByUri(uri: string) {
         const moduleNames = this._modulesByUri.get(uri) || [];
-        const result = [];
+        const result: any[] = [];
         for (const name of moduleNames) {
             result.push(...(this.signals.get(name) || []));
         }
@@ -56,7 +59,7 @@ class SignalDatabase {
      * Remove signals for all modules defined in a document
      * @param {string} uri - Document URI
      */
-    removeSignalsByUri(uri) {
+    removeSignalsByUri(uri: string) {
         const moduleNames = this._modulesByUri.get(uri) || [];
         for (const name of moduleNames) {
             this.signals.delete(name);
@@ -69,7 +72,7 @@ class SignalDatabase {
      * @returns {Array} Array of all signal objects
      */
     getAllSignals() {
-        const allSignals = [];
+        const allSignals: any[] = [];
         for (const signals of this.signals.values()) {
             allSignals.push(...signals);
         }
@@ -79,6 +82,9 @@ class SignalDatabase {
 
 // Instance database - stores module instantiations per parent module
 class InstanceDatabase {
+    instances: Map<string, any[]>;
+    _modulesByUri: Map<string, string[]>;
+
     constructor() {
         // Map of parent module name -> instances array
         this.instances = new Map();
@@ -92,12 +98,12 @@ class InstanceDatabase {
      * @param {string} uri - Document URI (for cleanup tracking)
      * @param {Array} instances - Array of instance objects
      */
-    updateInstances(parentModuleName, uri, instances) {
+    updateInstances(parentModuleName: string, uri: string, instances: any[]) {
         this.instances.set(parentModuleName, instances);
         if (!this._modulesByUri.has(uri)) {
             this._modulesByUri.set(uri, []);
         }
-        const list = this._modulesByUri.get(uri);
+        const list = this._modulesByUri.get(uri)!;
         if (!list.includes(parentModuleName)) {
             list.push(parentModuleName);
         }
@@ -108,7 +114,7 @@ class InstanceDatabase {
      * @param {string} parentModuleName - Parent module name
      * @returns {Array} Array of instance objects
      */
-    getInstances(parentModuleName) {
+    getInstances(parentModuleName: string) {
         return this.instances.get(parentModuleName) || [];
     }
 
@@ -117,9 +123,9 @@ class InstanceDatabase {
      * @param {string} uri - Document URI
      * @returns {Array} Array of instance objects
      */
-    getInstancesByUri(uri) {
+    getInstancesByUri(uri: string) {
         const moduleNames = this._modulesByUri.get(uri) || [];
-        const result = [];
+        const result: any[] = [];
         for (const name of moduleNames) {
             result.push(...(this.instances.get(name) || []));
         }
@@ -130,7 +136,7 @@ class InstanceDatabase {
      * Remove instances for all modules defined in a document
      * @param {string} uri - Document URI
      */
-    removeInstancesByUri(uri) {
+    removeInstancesByUri(uri: string) {
         const moduleNames = this._modulesByUri.get(uri) || [];
         for (const name of moduleNames) {
             this.instances.delete(name);
@@ -143,7 +149,7 @@ class InstanceDatabase {
      * @returns {Array} Array of all instance objects
      */
     getAllInstances() {
-        const allInstances = [];
+        const allInstances: any[] = [];
         for (const instances of this.instances.values()) {
             allInstances.push(...instances);
         }
@@ -152,6 +158,8 @@ class InstanceDatabase {
 }
 
 class ModuleDatabase {
+    modules: Map<string, any>;
+
     constructor() {
         // Map of module name -> module symbol
         this.modules = new Map();
@@ -161,7 +169,7 @@ class ModuleDatabase {
      * Add or update a module in the database
      * @param {Object} module - Module symbol object
      */
-    addModule(module) {
+    addModule(module: any) {
         this.modules.set(module.name, module);
     }
 
@@ -170,7 +178,7 @@ class ModuleDatabase {
      * @param {string} name - Module name
      * @returns {Object|undefined} Module symbol object or undefined
      */
-    getModule(name) {
+    getModule(name: string) {
         return this.modules.get(name);
     }
 
@@ -178,7 +186,7 @@ class ModuleDatabase {
      * Remove modules from a specific file
      * @param {string} uri - Document URI
      */
-    removeModulesFromFile(uri) {
+    removeModulesFromFile(uri: string) {
         for (const [name, module] of this.modules.entries()) {
             if (module.uri === uri) {
                 this.modules.delete(name);
@@ -197,6 +205,9 @@ class ModuleDatabase {
 
 // Parameter database - stores parameter/localparam declarations per module
 class ParameterDatabase {
+    params: Map<string, any[]>;
+    _modulesByUri: Map<string, string[]>;
+
     constructor() {
         // Map of module name -> parameters array
         this.params = new Map();
@@ -210,12 +221,12 @@ class ParameterDatabase {
      * @param {string} uri - Document URI (for cleanup tracking)
      * @param {Array} parameters - Array of parameter objects
      */
-    updateParameters(moduleName, uri, parameters) {
+    updateParameters(moduleName: string, uri: string, parameters: any[]) {
         this.params.set(moduleName, parameters);
         if (!this._modulesByUri.has(uri)) {
             this._modulesByUri.set(uri, []);
         }
-        const list = this._modulesByUri.get(uri);
+        const list = this._modulesByUri.get(uri)!;
         if (!list.includes(moduleName)) {
             list.push(moduleName);
         }
@@ -226,7 +237,7 @@ class ParameterDatabase {
      * @param {string} moduleName - Module name
      * @returns {Array} Array of parameter objects
      */
-    getParameters(moduleName) {
+    getParameters(moduleName: string) {
         return this.params.get(moduleName) || [];
     }
 
@@ -235,9 +246,9 @@ class ParameterDatabase {
      * @param {string} uri - Document URI
      * @returns {Array} Array of parameter objects
      */
-    getParametersByUri(uri) {
+    getParametersByUri(uri: string) {
         const moduleNames = this._modulesByUri.get(uri) || [];
-        const result = [];
+        const result: any[] = [];
         for (const name of moduleNames) {
             result.push(...(this.params.get(name) || []));
         }
@@ -248,7 +259,7 @@ class ParameterDatabase {
      * Remove parameters for all modules defined in a document
      * @param {string} uri - Document URI
      */
-    removeParametersByUri(uri) {
+    removeParametersByUri(uri: string) {
         const moduleNames = this._modulesByUri.get(uri) || [];
         for (const name of moduleNames) {
             this.params.delete(name);
@@ -261,7 +272,7 @@ class ParameterDatabase {
      * @returns {Array} Array of all parameter objects
      */
     getAllParameters() {
-        const all = [];
+        const all: any[] = [];
         for (const params of this.params.values()) {
             all.push(...params);
         }
@@ -280,7 +291,7 @@ const verilogParser = new AntlrVerilogParser();
  * Update symbols for a document using the ANTLR-based parser.
  * @param {vscode.TextDocument} document 
  */
-function updateDocumentSymbols(document) {
+function updateDocumentSymbols(document: vscode.TextDocument) {
     if (document.languageId !== 'verilog') {
         return;
     }
@@ -295,30 +306,30 @@ function updateDocumentSymbols(document) {
     parameterDatabase.removeParametersByUri(uri);
 
     // Group signals by module and update the per-module signal database
-    const signalsByModule = new Map();
+    const signalsByModule = new Map<string, any[]>();
     for (const signal of signals) {
         if (!signalsByModule.has(signal.moduleName)) {
             signalsByModule.set(signal.moduleName, []);
         }
-        signalsByModule.get(signal.moduleName).push(signal);
+        signalsByModule.get(signal.moduleName)!.push(signal);
     }
 
     // Group instances by parent module
-    const instancesByModule = new Map();
+    const instancesByModule = new Map<string, any[]>();
     for (const instance of instances) {
         if (!instancesByModule.has(instance.parentModuleName)) {
             instancesByModule.set(instance.parentModuleName, []);
         }
-        instancesByModule.get(instance.parentModuleName).push(instance);
+        instancesByModule.get(instance.parentModuleName)!.push(instance);
     }
 
     // Group parameters by module
-    const paramsByModule = new Map();
+    const paramsByModule = new Map<string, any[]>();
     for (const param of parameters) {
         if (!paramsByModule.has(param.moduleName)) {
             paramsByModule.set(param.moduleName, []);
         }
-        paramsByModule.get(param.moduleName).push(param);
+        paramsByModule.get(param.moduleName)!.push(param);
     }
 
     // Update module database (workspace-wide), signal database (per-module),
@@ -339,11 +350,11 @@ function updateDocumentSymbols(document) {
 /**
  * Document Symbol Provider for Verilog
  */
-class VerilogDocumentSymbolProvider {
-    provideDocumentSymbols(document, token) {
+class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
+    provideDocumentSymbols(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.DocumentSymbol[] {
         const { modules, signals } = verilogParser.parseSymbols(document);
 
-        const moduleSymbols = modules.map(module => {
+        const moduleSymbols = modules.map((module: any) => {
             const line = document.lineAt(module.line);
             const range = new vscode.Range(
                 new vscode.Position(module.line, line.firstNonWhitespaceCharacterIndex),
@@ -352,7 +363,7 @@ class VerilogDocumentSymbolProvider {
             return new vscode.DocumentSymbol(module.name, 'module', vscode.SymbolKind.Module, range, range);
         });
 
-        const signalSymbols = signals.map(signal => {
+        const signalSymbols = signals.map((signal: any) => {
             const line = document.lineAt(signal.line);
             const range = new vscode.Range(
                 new vscode.Position(signal.line, line.firstNonWhitespaceCharacterIndex),
@@ -397,8 +408,8 @@ async function scanWorkspaceForModules() {
 /**
  * Definition Provider for Verilog
  */
-class VerilogDefinitionProvider {
-    provideDefinition(document, position, token) {
+class VerilogDefinitionProvider implements vscode.DefinitionProvider {
+    provideDefinition(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): vscode.Location | null {
         const wordRange = document.getWordRangeAtPosition(position);
         if (!wordRange) {
             return null;
@@ -408,7 +419,7 @@ class VerilogDefinitionProvider {
         
         // First, check for signal definitions (wire/reg) in all modules of the current document
         const currentDocSignals = signalDatabase.getSignalsByUri(document.uri.toString());
-        const localSignal = currentDocSignals.find(s => s.name === word);
+        const localSignal = currentDocSignals.find((s: any) => s.name === word);
         
         if (localSignal) {
             const uri = vscode.Uri.parse(localSignal.uri);
@@ -418,7 +429,7 @@ class VerilogDefinitionProvider {
 
         // Check for parameter/localparam definitions in the current document
         const currentDocParams = parameterDatabase.getParametersByUri(document.uri.toString());
-        const localParam = currentDocParams.find(p => p.name === word);
+        const localParam = currentDocParams.find((p: any) => p.name === word);
 
         if (localParam) {
             const uri = vscode.Uri.parse(localParam.uri);
@@ -444,13 +455,13 @@ class VerilogDefinitionProvider {
  * @param {vscode.TextDocument} document 
  * @param {vscode.DiagnosticCollection} diagnosticCollection 
  */
-function updateDiagnostics(document, diagnosticCollection) {
+function updateDiagnostics(document: vscode.TextDocument, diagnosticCollection: vscode.DiagnosticCollection) {
     if (document.languageId !== 'verilog') {
         return;
     }
 
     const errors = verilogParser.parse(document, moduleDatabase);
-    const diagnostics = [];
+    const diagnostics: vscode.Diagnostic[] = [];
 
     for (const error of errors) {
         const range = new vscode.Range(
@@ -472,10 +483,7 @@ function updateDiagnostics(document, diagnosticCollection) {
     console.log(`Updated diagnostics for ${document.uri}: ${diagnostics.length} issues found`);
 }
 
-/**
- * @param {vscode.ExtensionContext} context
- */
-function activate(context) {
+export function activate(context: vscode.ExtensionContext) {
     console.log('Verilog language support extension is now active!');
 
     // Create diagnostic collection for Verilog syntax errors
@@ -563,8 +571,8 @@ function activate(context) {
             const allSignals = signalDatabase.getAllSignals();
             const totalSymbols = allModules.length + allSignals.length;
             
-            const moduleInfo = allModules.map(m => `module: ${m.name} (line ${m.line + 1})`).join('\n');
-            const signalInfo = allSignals.map(s => `${s.type}: ${s.name} (line ${s.line + 1})`).join('\n');
+            const moduleInfo = allModules.map((m: any) => `module: ${m.name} (line ${m.line + 1})`).join('\n');
+            const signalInfo = allSignals.map((s: any) => `${s.type}: ${s.name} (line ${s.line + 1})`).join('\n');
             
             let symbolInfo = '';
             if (moduleInfo) symbolInfo += moduleInfo;
@@ -586,13 +594,13 @@ function activate(context) {
     // Register hover provider for Verilog
     context.subscriptions.push(
         vscode.languages.registerHoverProvider('verilog', {
-            provideHover(document, position, token) {
+            provideHover(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken) {
                 const wordRange = document.getWordRangeAtPosition(position);
                 const word = document.getText(wordRange);
 
                 // Check for parameter/localparam first
                 const params = parameterDatabase.getParametersByUri(document.uri.toString());
-                const param = params.find(p => p.name === word);
+                const param = params.find((p: any) => p.name === word);
 
                 if (param) {
                     let hoverContent = `**${param.name}** (${param.kind})\n\n`;
@@ -610,7 +618,7 @@ function activate(context) {
                 const signals = signalDatabase.getSignalsByUri(document.uri.toString());
 
                 // Find the signal matching the hovered word
-                const signal = signals.find(s => s.name === word);
+                const signal = signals.find((s: any) => s.name === word);
 
                 if (signal) {
                     // Build hover content
@@ -638,9 +646,4 @@ function activate(context) {
 }
 
 // This method is called when your extension is deactivated
-function deactivate() {}
-
-module.exports = {
-    activate,
-    deactivate
-}
+export function deactivate() {}

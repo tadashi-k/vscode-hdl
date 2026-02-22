@@ -1,20 +1,23 @@
 #!/usr/bin/env node
 
 // Test script for goto definition functionality using the ANTLR-based parser
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Mock vscode API for testing
 const vscode = {
     DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 }
 };
-global.vscode = vscode;
+(global as any).vscode = vscode;
 
-const AntlrVerilogParser = require('../src/antlr-parser');
+import AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
 
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';
@@ -35,10 +38,13 @@ class MockTextDocument {
 
 // Simple per-module symbol database (matches extension.js behaviour)
 class SymbolDatabase {
+    modules: any;
+    signals: any;
+    _modulesByUri: any;
     constructor() {
-        this.modules = new Map();         // moduleName -> module
-        this.signals = new Map();         // moduleName -> signals[]
-        this._modulesByUri = new Map();   // uri -> moduleNames[]
+        this.modules = new Map<string, any>();         // moduleName -> module
+        this.signals = new Map<string, any>();         // moduleName -> signals[]
+        this._modulesByUri = new Map<string, any>();   // uri -> moduleNames[]
     }
 
     update(doc) {
@@ -53,7 +59,7 @@ class SymbolDatabase {
         }
         this._modulesByUri.set(uri, []);
 
-        const signalsByModule = new Map();
+        const signalsByModule = new Map<string, any>();
         for (const s of signals) {
             if (!signalsByModule.has(s.moduleName)) signalsByModule.set(s.moduleName, []);
             signalsByModule.get(s.moduleName).push(s);

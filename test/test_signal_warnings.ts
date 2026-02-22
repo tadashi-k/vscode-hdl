@@ -14,7 +14,10 @@ const vscode = {
 
 // Mock document class
 class MockTextDocument {
-    constructor(text, uri) {
+    text: any;
+    uri: any;
+    languageId: any;
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';
@@ -25,16 +28,17 @@ class MockTextDocument {
     }
 }
 
-global.vscode = vscode;
-const AntlrVerilogParser = require('../src/antlr-parser');
+(global as any).vscode = vscode;
+import AntlrVerilogParser = require('../src/antlr-parser');
 
 // Shared mock for a workspace-wide module database (used by cross-file tests)
 class MockModuleDatabase {
+    _modules: any;
     constructor(modules) {
         this._modules = new Map(modules.map(m => [m.name, m]));
     }
     getModule(name) { return this._modules.get(name); }
-    getAllModules() { return Array.from(this._modules.values()); }
+    getAllModules() { return Array.from(this._modules.values()) as any[]; }
 }
 
 function runTests() {
