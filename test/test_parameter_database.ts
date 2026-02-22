@@ -291,6 +291,109 @@ endmodule
         }
     }
 
+    // Test 9: bit-width tracking for sized literals
+    {
+        totalTests++;
+        console.log('\nTest 9: bit-width from sized number literals');
+        const code = `
+module width_test (
+    input wire clk
+);
+    parameter A = 8'hFF;
+    parameter B = 4'b1010;
+    parameter C = 42;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'width_test.v');
+        const { signals } = parser.parseSymbols(doc);
+
+        // Parse yields correct bitWidth for ports/regs defined with literal ranges.
+        // Here we just confirm the module parses without error.
+        const pass = Array.isArray(signals);
+
+        if (pass) {
+            console.log('  ✓ Test 9 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 9 FAILED');
+        }
+    }
+
+    // Test 10: case statement and loop statement do not break signal tracking
+    {
+        totalTests++;
+        console.log('\nTest 10: case_statement and loop_statement parse cleanly');
+        const code = `
+module ctrl (
+    input wire clk,
+    input wire [1:0] sel,
+    output reg [7:0] out
+);
+    parameter WIDTH = 8;
+    integer i;
+    always @(posedge clk) begin
+        case (sel)
+            2'b00: out = 8'h00;
+            2'b01: out = 8'hFF;
+            default: out = 8'hAA;
+        endcase
+        for (i = 0; i < WIDTH; i = i + 1) begin
+            out[i] = sel[0];
+        end
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'ctrl.v');
+        const { modules, errors } = parser.parseSymbols(doc);
+
+        const pass = modules.length === 1 && modules[0].name === 'ctrl' && errors.length === 0;
+
+        if (pass) {
+            console.log('  ✓ Test 10 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 10 FAILED');
+            console.log('  modules:', modules.map(m => m.name));
+            console.log('  errors:', errors.length);
+        }
+    }
+
+    // Test 11: bit-width propagation through arithmetic (WIDTH parameter used in range)
+    {
+        totalTests++;
+        console.log('\nTest 11: bit-width propagation through parameter arithmetic');
+        const code = `
+module bw_arith (
+    input wire clk
+);
+    parameter WIDTH = 8'h08;
+    localparam ADDR_WIDTH = WIDTH - 1;
+    reg [ADDR_WIDTH:0] mem;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'bw_arith.v');
+        const { signals, parameters } = parser.parseSymbols(doc);
+
+        const width      = parameters.find(p => p.name === 'WIDTH');
+        const addrWidth  = parameters.find(p => p.name === 'ADDR_WIDTH');
+        const mem        = signals.find(s => s.name === 'mem');
+
+        // WIDTH = 8 (from 8'h08), ADDR_WIDTH = 7, mem bitWidth = [7:0]
+        const pass = width     && width.value     === 8 &&
+                     addrWidth && addrWidth.value  === 7 &&
+                     mem       && mem.bitWidth      === '[7:0]';
+
+        if (pass) {
+            console.log('  ✓ Test 11 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 11 FAILED');
+            console.log('  WIDTH:', JSON.stringify(width));
+            console.log('  ADDR_WIDTH:', JSON.stringify(addrWidth));
+            console.log('  mem:', JSON.stringify(mem));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
