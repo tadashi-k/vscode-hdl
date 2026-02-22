@@ -1,8 +1,14 @@
 {
-  "name": "verilog-support",
+  "name": "hdl-support",
   "displayName": "Verilog Language Support",
-  "description": "Syntax highlighting for Verilog (*.v) files",
+  "description": "",
   "version": "0.0.1",
+  "publisher": "tadashi",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tadashi-k/vscode-hdl.git"
+  },
+  "license": "MIT",
   "engines": {
     "vscode": "^1.60.0"
   },
