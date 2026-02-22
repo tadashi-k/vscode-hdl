@@ -60,6 +60,17 @@ class VerilogErrorListener extends antlr4.error.ErrorListener {
 }
 
 /**
+ * Helper class to represent evaluated expression values.
+ * 
+ * value: the numeric value of the expression, or null if it cannot be evaluated
+ * width: the bit-width of the expression, or null if no base prefix
+ */
+class EvalValue {
+    value: number | null;
+    width: number | null;
+}
+
+/**
  * ANTLR parse-tree visitor that extracts module and signal declarations.
  *
  * Module entry: { name, uri, line, character, ports[] }
@@ -542,6 +553,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         }
     }
 
+    _applyUnaryWidth(op: string, val: EvalValue) : number | null {
+        switch (op) {
+            case '!':
+            case '&':
+            case '|':
+            case '^':  return 1; // Logical and reduction operators always produce 1-bit results
+        }
+        return val.width; // Unary plus, minus, bitwise NOT do not change bit-width
+    }
+
     _applyBinary(op: any, left: any, right: any) {
         switch (op) {
             case '+':   return left + right;
@@ -568,6 +589,45 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             case '&&':  return (left && right) ? 1 : 0;
             case '||':  return (left || right) ? 1 : 0;
             default:    return null;
+        }
+    }
+
+    _applyBinaryWidth(op: string, left: EvalValue, right: EvalValue) : number | null {
+        switch (op) {
+            case '==':
+            case '!=':
+            case '<':
+            case '>':
+            case '<=':
+            case '>=':
+            case '&&':
+            case '||': return 1; // Comparison and logical operators always produce 1-bit results
+        }
+
+        if (left.width === null && right.width === null) {
+            return null;
+        } else if (left.width === null && right.width !== null) {
+            return right.width;
+        } else if (left.width !== null && right.width === null) {
+            return left.width;
+        }
+        switch (op) {
+            case '+':
+            case '-': return Math.max(left.width, right.width);
+            case '*': return left.width + right.width;
+            case '/': return left.width; // Division can reduce bit-width but is complex to evaluate precisely
+            case '%': return right.width; // because maximum value is right - 1
+            case '**': return left.width * right.value; // Exponentiation can greatly increase bit-width
+            case '<<':
+            case '<<<': return left.width + right.value; // not precisely
+            case '>>':
+            case '>>>': return left.width; // not precisely
+            case '&':
+            case '|':
+            case '^':
+            case '~&':
+            case '~|': return Math.max(left.width, right.width);
+            default: return null; // never reach here
         }
     }
 
