@@ -21,7 +21,8 @@
   "main": "./src/extension.js",
   "scripts": {
     "build:antlr": "node antlr/build.js",
-    "clean:antlr": "rm -rf antlr/generated"
+    "clean:antlr": "rm -rf antlr/generated",
+    "pack": "vsce pack"
   },
   "contributes": {
     "languages": [

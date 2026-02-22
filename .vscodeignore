@@ -4,3 +4,5 @@
 .git/**
 node_modules/**
 *.vsix
+contents/**
+test/**
