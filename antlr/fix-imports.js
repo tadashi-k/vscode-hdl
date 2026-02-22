@@ -33,7 +33,7 @@ let fixedCount = 0;
 const files = fs.readdirSync(generatedDir);
 
 files.forEach(file => {
-    if (file.endsWith('.js')) {
+    if (file.endsWith('.js') || file.endsWith('.ts')) {
         const filePath = path.join(generatedDir, file);
         if (fixImports(filePath)) {
             fixedCount++;
