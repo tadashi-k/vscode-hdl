@@ -335,7 +335,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-            this._evaluateExpression(exprCtx, moduleParams);
+            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
         }
         this.visitChildren(ctx);
         return null;
@@ -352,7 +353,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-            this._evaluateExpression(exprCtx, moduleParams);
+            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
         }
         this.visitChildren(ctx);
         return null;
@@ -375,7 +377,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-            this._evaluateExpression(exprCtx, moduleParams);
+            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
         }
         this.visitChildren(ctx);
         return null;
@@ -387,10 +390,24 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprs = ctx.expression ? ctx.expression() : null;
         if (exprs) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
+            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
             const exprsArr = Array.isArray(exprs) ? exprs : [exprs];
             for (const exprCtx of exprsArr) {
-                this._evaluateExpression(exprCtx, moduleParams);
+                this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
             }
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    // Evaluate the if-condition expression and visit children
+    visitConditional_statement(ctx: any) {
+        if (!this._currentModule) return null;
+        const exprCtx = ctx.expression ? ctx.expression() : null;
+        if (exprCtx) {
+            const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
+            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
         }
         this.visitChildren(ctx);
         return null;
@@ -530,8 +547,25 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return exprCtx ? this._evaluateExpression(exprCtx, paramMap) : null;
     }
 
+    // Helper: build a map of signal name -> signal object for a given module
+    _buildModuleSignalsMap(moduleName: string): Map<string, any> {
+        return new Map(
+            this.signals
+                .filter(s => s.moduleName === moduleName)
+                .map(s => [s.name, s])
+        );
+    }
+
+    // Helper: extract the numeric bit-width from a bitWidth string (e.g. "[7:0]" -> 8)
+    _getSignalWidth(bitWidth: string | null): number | null {
+        if (!bitWidth) return null;
+        const match = bitWidth.match(/^\[(\d+):(\d+)\]$/);
+        if (!match) return null;
+        return Math.abs(parseInt(match[1], 10) - parseInt(match[2], 10)) + 1;
+    }
+
     // Recursively evaluate an expression context; returns an EvalValue or null
-    _evaluateExpression(ctx: any, paramMap: any): EvalValue | null {
+    _evaluateExpression(ctx: any, paramMap: any, moduleSignals?: Map<string, any>): EvalValue | null {
         if (!ctx) return null;
 
         // STRING literal – not numeric
@@ -541,7 +575,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
         if (primaryCtx) {
             const unaryOpCtx = ctx.unary_operator ? ctx.unary_operator() : null;
-            const val = this._evaluatePrimary(primaryCtx, paramMap);
+            const val = this._evaluatePrimary(primaryCtx, paramMap, moduleSignals);
             if (val === null) return null;
             if (unaryOpCtx) {
                 const op = unaryOpCtx.getText();
@@ -559,32 +593,32 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const binaryOpCtx = ctx.binary_operator ? ctx.binary_operator() : null;
 
         if (binaryOpCtx && exprsArr.length >= 2) {
-            const left  = this._evaluateExpression(exprsArr[0], paramMap);
-            const right = this._evaluateExpression(exprsArr[1], paramMap);
+            const left  = this._evaluateExpression(exprsArr[0], paramMap, moduleSignals);
+            const right = this._evaluateExpression(exprsArr[1], paramMap, moduleSignals);
             if (left === null || right === null) return null;
             return this._applyBinary(binaryOpCtx.getText(), left, right);
         }
 
         // Ternary: condition ? then : else (3 sub-expressions)
         if (exprsArr.length === 3) {
-            const cond = this._evaluateExpression(exprsArr[0], paramMap);
+            const cond = this._evaluateExpression(exprsArr[0], paramMap, moduleSignals);
             if (cond === null || cond.value === null) return null;
             return cond.value
-                ? this._evaluateExpression(exprsArr[1], paramMap)
-                : this._evaluateExpression(exprsArr[2], paramMap);
+                ? this._evaluateExpression(exprsArr[1], paramMap, moduleSignals)
+                : this._evaluateExpression(exprsArr[2], paramMap, moduleSignals);
         }
 
         return null;
     }
 
     // Evaluate a primary context; returns an EvalValue or null
-    _evaluatePrimary(ctx: any, paramMap: any): EvalValue | null {
+    _evaluatePrimary(ctx: any, paramMap: any, moduleSignals?: Map<string, any>): EvalValue | null {
         if (!ctx) return null;
 
         // Parenthesised expression
         const innerExpr = ctx.expression ? ctx.expression() : null;
         if (innerExpr && !ctx.identifier()) {
-            return this._evaluateExpression(innerExpr, paramMap);
+            return this._evaluateExpression(innerExpr, paramMap, moduleSignals);
         }
 
         // Number literal
@@ -593,13 +627,17 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             return this._parseVerilogLiteral(numCtx.getText());
         }
 
-        // Identifier (parameter reference)
+        // Identifier (parameter or signal reference)
         const identCtx = ctx.identifier ? ctx.identifier() : null;
         if (identCtx) {
             const token = identCtx.SIMPLE_IDENTIFIER() || identCtx.ESCAPED_IDENTIFIER();
             if (token) {
                 const name = token.getText();
                 if (paramMap && paramMap.has(name)) return paramMap.get(name);
+                if (moduleSignals && moduleSignals.has(name)) {
+                    const sig = moduleSignals.get(name);
+                    return { value: null, width: this._getSignalWidth(sig.bitWidth) };
+                }
             }
             return null;
         }
