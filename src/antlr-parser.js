@@ -118,6 +118,25 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return rangeCtx ? rangeCtx.getText() : null;
     }
 
+    // Return the bit-range text for a range context, evaluating constant expressions
+    // (which may reference parameters/localparams) where possible.
+    // Falls back to the raw text when evaluation fails.
+    _getEvaluatedRangeText(rangeCtx) {
+        if (!rangeCtx) return null;
+        const rawText = rangeCtx.getText();
+        if (!this._currentModule) return rawText;
+        const moduleParams = this._moduleParams.get(this._currentModule.name);
+        if (!moduleParams) return rawText;
+        const ceContexts = rangeCtx.constant_expression ? rangeCtx.constant_expression() : null;
+        if (!Array.isArray(ceContexts) || ceContexts.length < 2) return rawText;
+        const hi = this._evaluateConstantExpression(ceContexts[0], moduleParams);
+        const lo = this._evaluateConstantExpression(ceContexts[1], moduleParams);
+        if (hi !== null && hi !== undefined && lo !== null && lo !== undefined) {
+            return `[${hi}:${lo}]`;
+        }
+        return rawText;
+    }
+
     // Normalises a raw ANTLR rule-context result to a (possibly empty) array.
     // ANTLR returns a single context for exactly one match and an array for multiple.
     _toArray(raw) {
@@ -539,7 +558,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const direction = ctx.port_direction().getText();
         const dataTypeCtx = ctx.port_data_type();
         const type = dataTypeCtx ? dataTypeCtx.getText() : DEFAULT_NET_TYPE;
-        const bitWidth = this._getRangeText(ctx.range());
+        const bitWidth = this._getEvaluatedRangeText(ctx.range());
 
         const info = this._getIdentifierInfo(ctx.port_identifier().identifier());
         if (!info) return null;
@@ -582,7 +601,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _processPortDeclaration(ctx, direction) {
         const netTypeCtx = ctx.net_type();
         const type = netTypeCtx ? netTypeCtx.getText() : DEFAULT_NET_TYPE;
-        const bitWidth = this._getRangeText(ctx.range());
+        const bitWidth = this._getEvaluatedRangeText(ctx.range());
 
         const portIdsCtx = ctx.list_of_port_identifiers();
         const rawIds = portIdsCtx.port_identifier();
@@ -613,7 +632,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!this._currentModule) return null;
 
         const type = ctx.net_type().getText();
-        const bitWidth = this._getRangeText(ctx.range());
+        const bitWidth = this._getEvaluatedRangeText(ctx.range());
 
         const netIdsCtx = ctx.list_of_net_identifiers();
         const rawIds = netIdsCtx.net_identifier();
@@ -641,7 +660,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     visitReg_declaration(ctx) {
         if (!this._currentModule) return null;
 
-        const bitWidth = this._getRangeText(ctx.range());
+        const bitWidth = this._getEvaluatedRangeText(ctx.range());
 
         const regIdsCtx = ctx.list_of_register_identifiers();
         const rawIds = regIdsCtx.register_identifier();
