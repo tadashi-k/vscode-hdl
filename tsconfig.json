@@ -5,15 +5,14 @@
         "outDir": "out",
         "lib": ["ES2020"],
         "sourceMap": true,
-        "rootDir": ".",
+        "rootDir": "src",
         "strict": false,
         "esModuleInterop": true,
         "resolveJsonModule": true,
         "skipLibCheck": true
     },
     "include": [
-        "src/**/*",
-        "test/**/*"
+        "src/**/*"
     ],
     "exclude": [
         "node_modules",

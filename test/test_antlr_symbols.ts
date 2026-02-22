@@ -19,7 +19,7 @@ class MockTextDocument {
     text: any;
     uri: any;
     languageId: any;
-    constructor(text, uri) {
+    constructor(text: string, uri: string) {
         this.text = text;
         this.uri = { toString: () => uri };
         this.languageId = 'verilog';

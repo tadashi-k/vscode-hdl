@@ -18,10 +18,12 @@
   "activationEvents": [
     "onLanguage:verilog"
   ],
-  "main": "./src/extension.js",
+  "main": "./out/extension.js",
   "scripts": {
     "build:antlr": "node antlr/build.js",
     "clean:antlr": "rm -rf antlr/generated",
+    "build": "tsc -p tsconfig.json",
+    "test": "node -r ts-node/register test/test_all.ts",
     "pack": "vsce pack"
   },
   "contributes": {
