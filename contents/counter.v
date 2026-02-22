@@ -9,7 +9,7 @@ parameter WIDTH = 8;
 localparam MAX_COUNT = (1 << WIDTH) - 1;
 
     wire enable;
-    reg [7:0] internal_count;
+    reg [WIDTH-1:0] internal_count;
 
     always @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -17,14 +17,15 @@ localparam MAX_COUNT = (1 << WIDTH) - 1;
         end else begin
             count <= count + 1;
         end
+        internal_count <= internal_count + 1;
     end
 
-	full_adder full_adder_i(
-		.a(),
-		.b(),
-		.cin(),
-		.sum(),
-		.cout(enable)
-	);
+    full_adder full_adder_i(
+        .a(),
+        .b(),
+        .cin(),
+        .sum(),
+        .cout(enable)
+    );
 
 endmodule
