@@ -2,7 +2,6 @@
 .vscode-test/**
 .gitignore
 .git/**
-node_modules/**
 *.vsix
 contents/**
 test/**
