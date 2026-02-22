@@ -12,12 +12,12 @@ localparam MAX_COUNT = (1 << WIDTH) - 1;
     reg [WIDTH-1:0] internal_count;
 
     always @(posedge clk or posedge reset) begin
-        if (reset) begin
+        if (reset && !enable) begin
             count <= 8'b0;
         end else begin
             count <= count + 1;
         end
-        internal_count <= internal_count + 1;
+        internal_count <= internal_count + 4'd1;
     end
 
     full_adder full_adder_i(
