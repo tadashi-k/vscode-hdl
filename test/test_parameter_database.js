@@ -257,6 +257,37 @@ endmodule
         }
     }
 
+    // Test 8: parenthesized shift expression evaluation (counter.v example)
+    {
+        totalTests++;
+        console.log('\nTest 8: parenthesized shift expression (1 << WIDTH) - 1');
+        const code = `
+module counter (
+    input wire clk
+);
+    parameter WIDTH = 8;
+    localparam MAX_COUNT = (1 << WIDTH) - 1;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'counter.v');
+        const { parameters } = parser.parseSymbols(doc);
+
+        const width    = parameters.find(p => p.name === 'WIDTH');
+        const maxCount = parameters.find(p => p.name === 'MAX_COUNT');
+
+        const pass = width    && width.value    === 8   &&
+                     maxCount && maxCount.value  === 255;
+
+        if (pass) {
+            console.log('  ✓ Test 8 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 8 FAILED');
+            console.log('  WIDTH:', JSON.stringify(width));
+            console.log('  MAX_COUNT:', JSON.stringify(maxCount));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
