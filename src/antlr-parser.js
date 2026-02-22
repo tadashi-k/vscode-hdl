@@ -464,7 +464,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
         // Parenthesised expression
         const innerExpr = ctx.expression ? ctx.expression() : null;
-        if (innerExpr && !ctx.identifier) {
+        if (innerExpr && !ctx.identifier()) {
             return this._evaluateExpression(innerExpr, paramMap);
         }
 
