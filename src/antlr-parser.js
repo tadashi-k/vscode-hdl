@@ -73,6 +73,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this.modules = [];
         this.signals = [];
         this.instances = [];                 // [{moduleName, instanceName, portConnections[], line, character, parentModuleName}]
+        this.parameters = [];                // [{name, uri, line, character, kind, exprText, value, moduleName}]
         // Per-module signal reference tracking (for warnings)
         this._moduleSignalRefs = new Map();   // moduleName -> Set<signalName>
         this._signalRefList = [];             // [{name, moduleName, line, character}]
@@ -80,6 +81,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this.procLvalues = [];               // [{name, moduleName, line, character}] blocking/non-blocking lvalues
         this._instPortConnections = [];      // [{instModuleName, portName, localSignalName, line, character, moduleName}]
         this._moduleParamNames = new Map();  // moduleName -> Set<paramName>
+        this._moduleParams = new Map();      // moduleName -> Map<paramName, value> (for cross-param evaluation)
         this._currentModule = null;
         this._inProcedural = false;
         this._inContinuousAssign = false;
@@ -138,6 +140,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // Initialize per-module tracking for signal warnings
         this._moduleSignalRefs.set(info.name, new Set());
         this._moduleParamNames.set(info.name, new Set());
+        this._moduleParams.set(info.name, new Map());
 
         this.visitChildren(ctx);
 
@@ -334,11 +337,199 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 if (info) {
                     const paramNames = this._moduleParamNames.get(this._currentModule.name);
                     if (paramNames) paramNames.add(info.name);
+
+                    // Evaluate the constant_expression for the parameter database
+                    const ceCtx = ctx.constant_expression ? ctx.constant_expression() : null;
+                    const exprText = ceCtx ? ceCtx.getText() : null;
+                    const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
+                    const value = ceCtx ? this._evaluateConstantExpression(ceCtx, moduleParams) : null;
+
+                    // Store evaluated value for subsequent parameters in the same module
+                    if (value !== null && value !== undefined) {
+                        moduleParams.set(info.name, value);
+                    }
+
+                    // The kind ('parameter' or 'localparam') is set by the calling context;
+                    // default here is 'parameter' and visitLocal_parameter_declaration overrides it.
+                    this.parameters.push({
+                        name: info.name,
+                        uri: this.uri,
+                        line: info.line,
+                        character: info.character,
+                        kind: this._currentParamKind || 'parameter',
+                        exprText,
+                        value,
+                        moduleName: this._currentModule.name
+                    });
                 }
             }
         }
-        this.visitChildren(ctx);
+        // Do NOT call visitChildren – the expression is already evaluated above and
+        // we don't want its identifiers counted as signal r-value references.
         return null;
+    }
+
+    // localparam declarations share the same param_assignment structure
+    visitLocal_parameter_declaration(ctx) {
+        if (!this._currentModule) return null;
+        const prev = this._currentParamKind;
+        this._currentParamKind = 'localparam';
+        this.visitChildren(ctx);
+        this._currentParamKind = prev;
+        return null;
+    }
+
+    // Helper: parse a Verilog number literal to a JS number.
+    // Handles non-negative literals only; unary minus is handled by _applyUnary.
+    _parseVerilogNumber(text) {
+        if (!text) return null;
+        // Plain integer (no base prefix)
+        if (/^\d+$/.test(text)) return parseInt(text, 10);
+        // Real number
+        if (/^\d+\.\d+([eE][+-]?\d+)?$/.test(text) || /^\d+[eE][+-]?\d+$/.test(text)) {
+            return parseFloat(text);
+        }
+        // Verilog number with optional size and base: [size]'[s]<base><digits>
+        const match = text.match(/^(\d*)'[sS]?([dDbBhHoO])([0-9a-fA-F_xXzZ?]+)$/);
+        if (!match) return null;
+        const [, , base, digits] = match;
+        const clean = digits.replace(/[_]/g, '');
+        // Reject numbers with unknowns / high-Z
+        if (/[xXzZ?]/.test(clean)) return null;
+        switch (base.toLowerCase()) {
+            case 'd': return parseInt(clean, 10);
+            case 'b': return parseInt(clean, 2);
+            case 'h': return parseInt(clean, 16);
+            case 'o': return parseInt(clean, 8);
+            default:  return null;
+        }
+    }
+
+    // Helper: evaluate a constant_expression context
+    _evaluateConstantExpression(ctx, paramMap) {
+        const exprCtx = ctx.expression ? ctx.expression() : null;
+        return exprCtx ? this._evaluateExpression(exprCtx, paramMap) : null;
+    }
+
+    // Recursively evaluate an expression context; returns a number or null
+    _evaluateExpression(ctx, paramMap) {
+        if (!ctx) return null;
+
+        // STRING literal – not numeric
+        if (ctx.STRING && ctx.STRING()) return null;
+
+        const primaryCtx = ctx.primary ? ctx.primary() : null;
+
+        if (primaryCtx) {
+            const unaryOpCtx = ctx.unary_operator ? ctx.unary_operator() : null;
+            const val = this._evaluatePrimary(primaryCtx, paramMap);
+            if (val === null) return null;
+            if (unaryOpCtx) {
+                const op = unaryOpCtx.getText();
+                return this._applyUnary(op, val);
+            }
+            return val;
+        }
+
+        // Sub-expressions
+        const exprs = ctx.expression ? ctx.expression() : null;
+        const exprsArr = exprs
+            ? (Array.isArray(exprs) ? exprs : [exprs])
+            : [];
+
+        const binaryOpCtx = ctx.binary_operator ? ctx.binary_operator() : null;
+
+        if (binaryOpCtx && exprsArr.length >= 2) {
+            const left  = this._evaluateExpression(exprsArr[0], paramMap);
+            const right = this._evaluateExpression(exprsArr[1], paramMap);
+            if (left === null || right === null) return null;
+            return this._applyBinary(binaryOpCtx.getText(), left, right);
+        }
+
+        // Ternary: condition ? then : else (3 sub-expressions)
+        if (exprsArr.length === 3) {
+            const cond = this._evaluateExpression(exprsArr[0], paramMap);
+            if (cond === null) return null;
+            return cond
+                ? this._evaluateExpression(exprsArr[1], paramMap)
+                : this._evaluateExpression(exprsArr[2], paramMap);
+        }
+
+        return null;
+    }
+
+    // Evaluate a primary context
+    _evaluatePrimary(ctx, paramMap) {
+        if (!ctx) return null;
+
+        // Parenthesised expression
+        const innerExpr = ctx.expression ? ctx.expression() : null;
+        if (innerExpr && !ctx.identifier) {
+            return this._evaluateExpression(innerExpr, paramMap);
+        }
+
+        // Number literal
+        const numCtx = ctx.number ? ctx.number() : null;
+        if (numCtx) {
+            return this._parseVerilogNumber(numCtx.getText());
+        }
+
+        // Identifier (parameter reference)
+        const identCtx = ctx.identifier ? ctx.identifier() : null;
+        if (identCtx) {
+            const token = identCtx.SIMPLE_IDENTIFIER() || identCtx.ESCAPED_IDENTIFIER();
+            if (token) {
+                const name = token.getText();
+                if (paramMap && paramMap.has(name)) return paramMap.get(name);
+            }
+            return null;
+        }
+
+        return null;
+    }
+
+    _applyUnary(op, val) {
+        switch (op) {
+            case '+':  return +val;
+            case '-':  return -val;
+            case '!':  return val === 0 ? 1 : 0;
+            case '~':  return ~val;
+            // Reduction operators (&, |, ^, ~&, ~|) require bit-by-bit evaluation
+            // of multi-bit values – skip for constant folding purposes.
+            case '&':  return null;
+            case '|':  return null;
+            case '^':  return null;
+            default:   return null;
+        }
+    }
+
+    _applyBinary(op, left, right) {
+        switch (op) {
+            case '+':   return left + right;
+            case '-':   return left - right;
+            case '*':   return left * right;
+            case '/':   return right !== 0 ? Math.trunc(left / right) : null;
+            case '%':   return right !== 0 ? left % right : null;
+            case '**':  return Math.pow(left, right);
+            case '<<':  return left << right;
+            case '>>':  return left >> right;
+            case '<<<': return left << right;
+            case '>>>': return left >>> right;
+            case '&':   return left & right;
+            case '|':   return left | right;
+            case '^':   return left ^ right;
+            case '~&':  return ~(left & right);
+            case '~|':  return ~(left | right);
+            case '==':  return left === right ? 1 : 0;
+            case '!=':  return left !== right ? 1 : 0;
+            case '<':   return left <  right ? 1 : 0;
+            case '>':   return left >  right ? 1 : 0;
+            case '<=':  return left <= right ? 1 : 0;
+            case '>=':  return left >= right ? 1 : 0;
+            case '&&':  return (left && right) ? 1 : 0;
+            case '||':  return (left || right) ? 1 : 0;
+            default:    return null;
+        }
     }
 
     // ANSI-style port declaration: input wire [7:0] data_in
@@ -502,9 +693,10 @@ class AntlrVerilogParser {
      *
      * @param {vscode.TextDocument} document
      * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
-     * @returns {{ modules: Array, signals: Array, errors: Array, warnings: Array }}
-     *   modules: [{ name, uri, line, character, ports[] }]
-     *   signals: [{ name, uri, line, character, direction, type, bitWidth, moduleName }]
+     * @returns {{ modules: Array, signals: Array, parameters: Array, errors: Array, warnings: Array }}
+     *   modules:    [{ name, uri, line, character, ports[] }]
+     *   signals:    [{ name, uri, line, character, direction, type, bitWidth, moduleName }]
+     *   parameters: [{ name, uri, line, character, kind, exprText, value, moduleName }]
      *   errors:  syntax errors
      *   warnings: signal usage warnings
      */
@@ -549,8 +741,9 @@ class AntlrVerilogParser {
 
         const warnings = visitor ? this._generateSignalWarnings(modules, signals, visitor, moduleDatabase) : [];
         const instances = visitor ? visitor.instances : [];
+        const parameters = visitor ? visitor.parameters : [];
 
-        return { modules, signals, instances, errors: this.errorListener.getErrors(), warnings };
+        return { modules, signals, instances, parameters, errors: this.errorListener.getErrors(), warnings };
     }
 
     /**

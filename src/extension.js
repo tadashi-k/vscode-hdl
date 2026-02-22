@@ -195,10 +195,85 @@ class ModuleDatabase {
     }
 }
 
+// Parameter database - stores parameter/localparam declarations per module
+class ParameterDatabase {
+    constructor() {
+        // Map of module name -> parameters array
+        this.params = new Map();
+        // Map of file URI -> module names (for cleanup when file changes)
+        this._modulesByUri = new Map();
+    }
+
+    /**
+     * Update parameters for a module
+     * @param {string} moduleName - Module name
+     * @param {string} uri - Document URI (for cleanup tracking)
+     * @param {Array} parameters - Array of parameter objects
+     */
+    updateParameters(moduleName, uri, parameters) {
+        this.params.set(moduleName, parameters);
+        if (!this._modulesByUri.has(uri)) {
+            this._modulesByUri.set(uri, []);
+        }
+        const list = this._modulesByUri.get(uri);
+        if (!list.includes(moduleName)) {
+            list.push(moduleName);
+        }
+    }
+
+    /**
+     * Get parameters for a module
+     * @param {string} moduleName - Module name
+     * @returns {Array} Array of parameter objects
+     */
+    getParameters(moduleName) {
+        return this.params.get(moduleName) || [];
+    }
+
+    /**
+     * Get all parameters from all modules in a file
+     * @param {string} uri - Document URI
+     * @returns {Array} Array of parameter objects
+     */
+    getParametersByUri(uri) {
+        const moduleNames = this._modulesByUri.get(uri) || [];
+        const result = [];
+        for (const name of moduleNames) {
+            result.push(...(this.params.get(name) || []));
+        }
+        return result;
+    }
+
+    /**
+     * Remove parameters for all modules defined in a document
+     * @param {string} uri - Document URI
+     */
+    removeParametersByUri(uri) {
+        const moduleNames = this._modulesByUri.get(uri) || [];
+        for (const name of moduleNames) {
+            this.params.delete(name);
+        }
+        this._modulesByUri.delete(uri);
+    }
+
+    /**
+     * Get all parameters from all modules
+     * @returns {Array} Array of all parameter objects
+     */
+    getAllParameters() {
+        const all = [];
+        for (const params of this.params.values()) {
+            all.push(...params);
+        }
+        return all;
+    }
+}
+
 // Create global database instances
 const signalDatabase = new SignalDatabase();
 const moduleDatabase = new ModuleDatabase();
 const instanceDatabase = new InstanceDatabase();
+const parameterDatabase = new ParameterDatabase();
 const verilogParser = new AntlrVerilogParser();
 
 /**
@@ -211,12 +286,13 @@ function updateDocumentSymbols(document) {
     }
 
     const uri = document.uri.toString();
-    const { modules, signals, instances } = verilogParser.parseSymbols(document);
+    const { modules, signals, instances, parameters } = verilogParser.parseSymbols(document);
 
     // Remove existing entries for this file before adding fresh ones
     signalDatabase.removeSignalsByUri(uri);
     moduleDatabase.removeModulesFromFile(uri);
     instanceDatabase.removeInstancesByUri(uri);
+    parameterDatabase.removeParametersByUri(uri);
 
     // Group signals by module and update the per-module signal database
     const signalsByModule = new Map();
@@ -236,17 +312,28 @@ function updateDocumentSymbols(document) {
         instancesByModule.get(instance.parentModuleName).push(instance);
     }
 
+    // Group parameters by module
+    const paramsByModule = new Map();
+    for (const param of parameters) {
+        if (!paramsByModule.has(param.moduleName)) {
+            paramsByModule.set(param.moduleName, []);
+        }
+        paramsByModule.get(param.moduleName).push(param);
+    }
+
     // Update module database (workspace-wide), signal database (per-module),
-    // and instance database (per-module)
+    // instance database (per-module), and parameter database (per-module)
     for (const module of modules) {
         moduleDatabase.addModule(module);
         const moduleSignals = signalsByModule.get(module.name) || [];
         signalDatabase.updateSignals(module.name, uri, moduleSignals);
         const moduleInstances = instancesByModule.get(module.name) || [];
         instanceDatabase.updateInstances(module.name, uri, moduleInstances);
+        const moduleParams = paramsByModule.get(module.name) || [];
+        parameterDatabase.updateParameters(module.name, uri, moduleParams);
     }
 
-    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals.length} signals, ${instances.length} instances found`);
+    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals.length} signals, ${instances.length} instances, ${parameters.length} parameters found`);
 }
 
 /**
@@ -326,6 +413,16 @@ class VerilogDefinitionProvider {
         if (localSignal) {
             const uri = vscode.Uri.parse(localSignal.uri);
             const pos = new vscode.Position(localSignal.line, localSignal.character || 0);
+            return new vscode.Location(uri, pos);
+        }
+
+        // Check for parameter/localparam definitions in the current document
+        const currentDocParams = parameterDatabase.getParametersByUri(document.uri.toString());
+        const localParam = currentDocParams.find(p => p.name === word);
+
+        if (localParam) {
+            const uri = vscode.Uri.parse(localParam.uri);
+            const pos = new vscode.Position(localParam.line, localParam.character || 0);
             return new vscode.Location(uri, pos);
         }
         
@@ -414,6 +511,7 @@ function activate(context) {
                 signalDatabase.removeSignalsByUri(uri);
                 moduleDatabase.removeModulesFromFile(uri);
                 instanceDatabase.removeInstancesByUri(uri);
+                parameterDatabase.removeParametersByUri(uri);
                 diagnosticCollection.delete(document.uri);
                 console.log(`Removed symbols for ${uri}`);
             }
@@ -491,6 +589,22 @@ function activate(context) {
             provideHover(document, position, token) {
                 const wordRange = document.getWordRangeAtPosition(position);
                 const word = document.getText(wordRange);
+
+                // Check for parameter/localparam first
+                const params = parameterDatabase.getParametersByUri(document.uri.toString());
+                const param = params.find(p => p.name === word);
+
+                if (param) {
+                    let hoverContent = `**${param.name}** (${param.kind})\n\n`;
+                    if (param.exprText !== null && param.exprText !== undefined) {
+                        hoverContent += `= ${param.exprText}`;
+                        if (param.value !== null && param.value !== undefined && String(param.value) !== param.exprText) {
+                            hoverContent += ` = ${param.value}`;
+                        }
+                    }
+                    hoverContent += `\n\nat line ${param.line + 1}`;
+                    return new vscode.Hover(hoverContent);
+                }
 
                 // Fetch signals for the current document from signal database
                 const signals = signalDatabase.getSignalsByUri(document.uri.toString());
