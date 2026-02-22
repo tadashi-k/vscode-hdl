@@ -234,6 +234,59 @@ module err_module (
         }
     }
 
+    // Test 7: Parameterized bit range evaluation in signal definitions
+    {
+        totalTests++;
+        console.log('\nTest 7: Parameterized bit range evaluation');
+        const code = `
+module param_range (
+    input wire clk
+);
+    parameter WIDTH = 8;
+    reg [WIDTH-1:0] internal_count;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'param_range.v');
+        const { signals } = parser.parseSymbols(doc);
+
+        const internalCount = signals.find(s => s.name === 'internal_count');
+
+        // WIDTH=8, so [WIDTH-1:0] should evaluate to [7:0]
+        const pass = internalCount && internalCount.bitWidth === '[7:0]';
+
+        if (pass) {
+            console.log(`  ✓ Test 7 PASSED (internal_count bitWidth: ${internalCount.bitWidth})`);
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 7 FAILED');
+            console.log('  internal_count:', JSON.stringify(internalCount));
+        }
+    }
+
+    // Test 8: counter.v - parameterized bit range evaluated
+    {
+        totalTests++;
+        console.log('\nTest 8: counter.v parameterized bit range');
+        const testPath = path.join(__dirname, '../contents', 'counter.v');
+        const testContent = fs.readFileSync(testPath, 'utf8');
+        const doc = new MockTextDocument(testContent, testPath);
+        const { signals } = parser.parseSymbols(doc);
+
+        const internalCount = signals.find(s => s.name === 'internal_count');
+
+        // counter.v has `parameter WIDTH = 8` and `reg [WIDTH-1:0] internal_count`
+        // so bitWidth should evaluate to [7:0]
+        const pass = internalCount && internalCount.bitWidth === '[7:0]';
+
+        if (pass) {
+            console.log(`  ✓ Test 8 PASSED (internal_count bitWidth: ${internalCount.bitWidth})`);
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 8 FAILED');
+            console.log('  internal_count:', JSON.stringify(internalCount));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
