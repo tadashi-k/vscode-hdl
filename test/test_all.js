@@ -16,7 +16,8 @@ const testFiles = [
   'test_integration.js',
   'test_signal_warnings.js',
   'test_instance_database.js',
-  'test_startup_scan.js'
+  'test_startup_scan.js',
+  'test_parameter_database.js'
 ];
 
 let allPassed = true;

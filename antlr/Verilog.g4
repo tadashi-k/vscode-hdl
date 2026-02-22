@@ -70,6 +70,7 @@ port_identifier
 module_item
     : port_declaration
     | parameter_declaration
+    | local_parameter_declaration
     | net_declaration
     | reg_declaration
     | integer_declaration
@@ -101,6 +102,10 @@ inout_declaration
 // Parameter Declarations
 parameter_declaration
     : PARAMETER range? list_of_param_assignments ';'
+    ;
+
+local_parameter_declaration
+    : LOCALPARAM range? list_of_param_assignments ';'
     ;
 
 list_of_param_assignments
@@ -277,6 +282,7 @@ block_identifier
 
 block_item_declaration
     : parameter_declaration
+    | local_parameter_declaration
     | reg_declaration
     | integer_declaration
     ;
@@ -431,6 +437,7 @@ TRI         : 'tri';
 SUPPLY0     : 'supply0';
 SUPPLY1     : 'supply1';
 PARAMETER   : 'parameter';
+LOCALPARAM  : 'localparam';
 INTEGER     : 'integer';
 ASSIGN      : 'assign';
 DEASSIGN    : 'deassign';
