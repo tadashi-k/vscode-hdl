@@ -394,6 +394,110 @@ endmodule
         }
     }
 
+    // Test 12: conditional_statement (if) parses without errors
+    {
+        totalTests++;
+        console.log('\nTest 12: conditional_statement (if) parses cleanly');
+        const code = `
+module if_test (
+    input wire clk,
+    input wire [7:0] a,
+    input wire [7:0] b,
+    output reg [7:0] out
+);
+    always @(posedge clk) begin
+        if (a > b) begin
+            out = a;
+        end else begin
+            out = b;
+        end
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'if_test.v');
+        const { modules, errors } = parser.parseSymbols(doc);
+
+        const pass = modules.length === 1 && modules[0].name === 'if_test' && errors.length === 0;
+
+        if (pass) {
+            console.log('  ✓ Test 12 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 12 FAILED');
+            console.log('  modules:', modules.map(m => m.name));
+            console.log('  errors:', errors);
+        }
+    }
+
+    // Test 13: _getSignalWidth helper
+    {
+        totalTests++;
+        console.log('\nTest 13: _getSignalWidth helper');
+        const signalWidthTestCode = `
+module sw2_test (
+    input wire [7:0] data_in,
+    output reg [3:0] data_out
+);
+    always @(data_in) begin
+        if (data_in > 8'd100) begin
+            data_out = 4'hF;
+        end else begin
+            data_out = 4'h0;
+        end
+    end
+endmodule
+`;
+        const doc2 = new MockTextDocument(signalWidthTestCode, 'sw2_test.v');
+        const { modules: signalWidthModules, errors: signalWidthErrors } = parser.parseSymbols(doc2);
+
+        const pass = signalWidthModules.length === 1 && signalWidthErrors.length === 0;
+
+        if (pass) {
+            console.log('  ✓ Test 13 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 13 FAILED');
+            console.log('  modules:', signalWidthModules.map(m => m.name));
+            console.log('  errors:', signalWidthErrors);
+        }
+    }
+
+    // Test 14: signal reference in if condition does not produce "undefined signal" warning
+    {
+        totalTests++;
+        console.log('\nTest 14: signal reference in if condition - no spurious warnings');
+        const code = `
+module cond_sig_test (
+    input wire enable,
+    input wire [7:0] val,
+    output reg [7:0] result
+);
+    always @(enable or val) begin
+        if (enable) begin
+            result = val;
+        end else begin
+            result = 8'h00;
+        end
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'cond_sig_test.v');
+        const { modules: mods, errors: errs, warnings: warns } = parser.parseSymbols(doc);
+
+        // There should be no errors and no "undefined signal" warnings for 'enable' or 'val'
+        const undefinedWarns = warns.filter(w => w.message.includes('referenced but not declared'));
+        const pass = mods.length === 1 && errs.length === 0 && undefinedWarns.length === 0;
+
+        if (pass) {
+            console.log('  ✓ Test 14 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 14 FAILED');
+            console.log('  errors:', errs);
+            console.log('  undefined warnings:', undefinedWarns);
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
