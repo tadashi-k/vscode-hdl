@@ -2,6 +2,7 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import AntlrVerilogParser = require('./antlr-parser');
+import { parseHdlIgnore, regexScanModules } from './verilog-scanner';
 
 // Signal database - stores signals (wire/reg) per module
 class SignalDatabase {
@@ -288,6 +289,60 @@ const parameterDatabase = new ParameterDatabase();
 const verilogParser = new AntlrVerilogParser();
 
 /**
+ * Persists the lightweight module entries obtained from the regex scan so
+ * that they can be restored into the module database when a document is
+ * closed (and its ANTLR-parsed symbols are removed).
+ * Key: file URI string  →  Value: array of lightweight module descriptors
+ */
+const regexModuleMap = new Map<string, Array<{ name: string; uri: string; line: number; character: number }>>();
+
+/**
+ * Load .hdlignore files from every workspace folder and return a predicate
+ * that returns true when an absolute file-system path should be excluded
+ * from scanning.
+ */
+async function loadHdlIgnoreFilter(): Promise<(fsPath: string) => boolean> {
+    const filters: Array<{ rootPath: string; test: (relPath: string) => boolean }> = [];
+
+    if (vscode.workspace.workspaceFolders) {
+        for (const folder of vscode.workspace.workspaceFolders) {
+            const hdlIgnoreUri = vscode.Uri.joinPath(folder.uri, '.hdlignore');
+            try {
+                const bytes = await vscode.workspace.fs.readFile(hdlIgnoreUri);
+                const content = Buffer.from(bytes).toString('utf8');
+                filters.push({
+                    rootPath: folder.uri.fsPath.replace(/\\/g, '/'),
+                    test: parseHdlIgnore(content),
+                });
+                console.log(`Loaded .hdlignore from ${folder.uri.fsPath}`);
+            } catch {
+                // .hdlignore not present in this folder – that is fine.
+            }
+        }
+    }
+
+    if (filters.length === 0) {
+        return () => false;
+    }
+
+    return (fsPath: string) => {
+        const normalised = fsPath.replace(/\\/g, '/');
+        for (const { rootPath, test } of filters) {
+            const prefix = rootPath.endsWith('/') ? rootPath : rootPath + '/';
+            if (!normalised.startsWith(prefix)) {
+                // File is not under this workspace folder – skip this filter.
+                continue;
+            }
+            const relPath = normalised.slice(prefix.length);
+            if (test(relPath)) {
+                return true;
+            }
+        }
+        return false;
+    };
+}
+
+/**
  * Update symbols for a document using the ANTLR-based parser.
  * @param {vscode.TextDocument} document 
  */
@@ -381,27 +436,84 @@ class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
 }
 
 /**
- * Scan workspace for all .v files and parse their modules
+ * Scan workspace for all .v files and parse their modules.
+ *
+ * Strategy (to keep startup fast for large projects):
+ * 1. Read .hdlignore and build a filter for excluded paths.
+ * 2. Regex-scan ALL .v files to build a lightweight module-name → location
+ *    index.  This is fast because it uses a simple regex, not a full parse.
+ * 3. ANTLR-parse the currently open files so that their full symbol
+ *    information (signals, instances, parameters, ports) is available.
+ * 4. From the instance lists of those open files, collect the set of
+ *    instantiated module names and ANTLR-parse only the files that define
+ *    those modules (if they are not already open).
+ *
  * @returns {Promise<void>}
  */
 async function scanWorkspaceForModules() {
     console.log('Scanning workspace for Verilog modules...');
-    
-    // Find all .v files in the workspace
+
+    // --- Step 1: build the .hdlignore filter ---
+    const isIgnored = await loadHdlIgnoreFilter();
+
+    // --- Step 2: regex-scan all .v files ---
     const verilogFiles = await vscode.workspace.findFiles('**/*.v', '**/node_modules/**');
-    
-    console.log(`Found ${verilogFiles.length} Verilog files in workspace`);
-    
-    // Parse each file and update symbol database
-    for (const fileUri of verilogFiles) {
+    const filteredFiles = verilogFiles.filter(f => !isIgnored(f.fsPath));
+    console.log(`Found ${filteredFiles.length} Verilog files (after .hdlignore filtering)`);
+
+    regexModuleMap.clear();
+    for (const fileUri of filteredFiles) {
         try {
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            updateDocumentSymbols(document);
+            const bytes = await vscode.workspace.fs.readFile(fileUri);
+            const content = Buffer.from(bytes).toString('utf8');
+            const uri = fileUri.toString();
+            const found = regexScanModules(content, uri);
+            if (found.length > 0) {
+                regexModuleMap.set(uri, found);
+                for (const mod of found) {
+                    // Only add if not already present (ANTLR entry takes priority).
+                    if (!moduleDatabase.getModule(mod.name)) {
+                        moduleDatabase.addModule({ ...mod, ports: [] });
+                    }
+                }
+            }
         } catch (error) {
-            console.error(`Error parsing ${fileUri.toString()}:`, error);
+            console.error(`Error in regex scan of ${fileUri.toString()}:`, error);
         }
     }
-    
+    console.log(`Regex scan complete: ${regexModuleMap.size} files with modules indexed`);
+
+    // --- Step 3: ANTLR-parse currently open Verilog files ---
+    const openUris = new Set<string>();
+    for (const document of vscode.workspace.textDocuments) {
+        if (document.languageId === 'verilog') {
+            updateDocumentSymbols(document);
+            openUris.add(document.uri.toString());
+        }
+    }
+
+    // --- Step 4: resolve instances from open files and ANTLR-parse their deps ---
+    const neededModuleNames = new Set<string>();
+    for (const uri of openUris) {
+        for (const instance of instanceDatabase.getInstancesByUri(uri)) {
+            neededModuleNames.add(instance.moduleName);
+        }
+    }
+
+    for (const moduleName of neededModuleNames) {
+        const mod = moduleDatabase.getModule(moduleName);
+        if (mod && mod.uri && !openUris.has(mod.uri)) {
+            try {
+                const depUri = vscode.Uri.parse(mod.uri);
+                const document = await vscode.workspace.openTextDocument(depUri);
+                updateDocumentSymbols(document);
+                openUris.add(mod.uri);
+            } catch (error) {
+                console.error(`Error parsing dependency ${mod.uri}:`, error);
+            }
+        }
+    }
+
     console.log('Workspace scan complete');
 }
 
@@ -521,6 +633,18 @@ export function activate(context: vscode.ExtensionContext) {
                 instanceDatabase.removeInstancesByUri(uri);
                 parameterDatabase.removeParametersByUri(uri);
                 diagnosticCollection.delete(document.uri);
+
+                // Restore lightweight regex-scanned entries so that
+                // go-to-definition still works for the closed file.
+                const regexEntries = regexModuleMap.get(uri);
+                if (regexEntries) {
+                    for (const mod of regexEntries) {
+                        if (!moduleDatabase.getModule(mod.name)) {
+                            moduleDatabase.addModule({ ...mod, ports: [] });
+                        }
+                    }
+                }
+
                 console.log(`Removed symbols for ${uri}`);
             }
         })

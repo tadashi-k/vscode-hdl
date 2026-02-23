@@ -17,7 +17,8 @@ const testFiles = [
   'test_signal_warnings.ts',
   'test_instance_database.ts',
   'test_startup_scan.ts',
-  'test_parameter_database.ts'
+  'test_parameter_database.ts',
+  'test_hdlignore.ts'
 ];
 
 let allPassed = true;
