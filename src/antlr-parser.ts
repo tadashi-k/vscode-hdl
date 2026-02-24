@@ -93,6 +93,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _instPortConnections: any[];
     _moduleParamNames: Map<any, any>;
     _moduleParams: Map<any, any>;
+    _moduleGenvarNames: Map<any, any>;
     _currentModule: any;
     _inProcedural: boolean;
     _inContinuousAssign: boolean;
@@ -113,6 +114,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._instPortConnections = [];      // [{instModuleName, portName, localSignalName, line, character, moduleName}]
         this._moduleParamNames = new Map();  // moduleName -> Set<paramName>
         this._moduleParams = new Map();      // moduleName -> Map<paramName, value> (for cross-param evaluation)
+        this._moduleGenvarNames = new Map(); // moduleName -> Set<genvarName>
         this._currentModule = null;
         this._inProcedural = false;
         this._inContinuousAssign = false;
@@ -191,6 +193,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._moduleSignalRefs.set(info.name, new Set());
         this._moduleParamNames.set(info.name, new Set());
         this._moduleParams.set(info.name, new Map());
+        this._moduleGenvarNames.set(info.name, new Set());
 
         this.visitChildren(ctx);
 
@@ -885,6 +888,26 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         }
         return null;
     }
+
+    // Genvar declarations: genvar i, j;
+    visitGenvar_declaration(ctx: any) {
+        if (!this._currentModule) return null;
+
+        const rawIds = ctx.list_of_genvar_identifiers
+            ? ctx.list_of_genvar_identifiers().genvar_identifier()
+            : null;
+        const ids = Array.isArray(rawIds) ? rawIds : (rawIds ? [rawIds] : []);
+
+        for (const genvarIdCtx of ids) {
+            const info = this._getIdentifierInfo(genvarIdCtx.identifier());
+            if (!info) continue;
+
+            // Track genvar as a named identifier so it is not flagged as undeclared
+            const genvarNames = this._moduleGenvarNames.get(this._currentModule.name);
+            if (genvarNames) genvarNames.add(info.name);
+        }
+        return null;
+    }
 }
 
 /**
@@ -1001,6 +1024,7 @@ class AntlrVerilogParser {
             const declaredSignals = signals.filter(s => s.moduleName === moduleName);
             const declaredByName = new Map(declaredSignals.map((s: any) => [s.name, s]));
             const paramNames = visitor._moduleParamNames.get(moduleName) || new Set();
+            const genvarNames = visitor._moduleGenvarNames.get(moduleName) || new Set();
             const refNames = visitor._moduleSignalRefs.get(moduleName) || new Set();
 
             // Build sets of signals that are "used" or "assigned" via port connections
@@ -1033,7 +1057,7 @@ class AntlrVerilogParser {
             const reportedUndefined = new Set();
             for (const refEntry of visitor._signalRefList.filter((r: any) => r.moduleName === moduleName)) {
                 const name = refEntry.name;
-                if (!declaredByName.has(name) && !paramNames.has(name) && !reportedUndefined.has(name)) {
+                if (!declaredByName.has(name) && !paramNames.has(name) && !genvarNames.has(name) && !reportedUndefined.has(name)) {
                     reportedUndefined.add(name);
                     warnings.push({
                         line: refEntry.line,

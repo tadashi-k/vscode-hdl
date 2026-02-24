@@ -74,10 +74,12 @@ module_item
     | net_declaration
     | reg_declaration
     | integer_declaration
+    | genvar_declaration
     | continuous_assign
     | module_instantiation
     | always_construct
     | initial_construct
+    | generate_block
     ;
 
 // Port Declarations
@@ -165,6 +167,56 @@ register_identifier
 // Integer Declarations
 integer_declaration
     : INTEGER list_of_register_identifiers ';'
+    ;
+
+// Genvar Declaration
+genvar_declaration
+    : GENVAR list_of_genvar_identifiers ';'
+    ;
+
+list_of_genvar_identifiers
+    : genvar_identifier (',' genvar_identifier)*
+    ;
+
+genvar_identifier
+    : identifier
+    ;
+
+// Generate Block
+generate_block
+    : GENERATE generate_item* ENDGENERATE
+    ;
+
+generate_item
+    : generate_conditional_statement
+    | generate_loop_statement
+    | net_declaration
+    | reg_declaration
+    | integer_declaration
+    | genvar_declaration
+    | continuous_assign
+    | module_instantiation
+    | always_construct
+    | initial_construct
+    | parameter_declaration ';'
+    | local_parameter_declaration
+    ;
+
+generate_conditional_statement
+    : IF '(' constant_expression ')' generate_item_or_block (ELSE generate_item_or_block)?
+    ;
+
+generate_loop_statement
+    : FOR '(' genvar_assignment ';' constant_expression ';' genvar_assignment ')' generate_item_or_block
+    ;
+
+genvar_assignment
+    : genvar_identifier '=' constant_expression
+    ;
+
+generate_item_or_block
+    : generate_item
+    | BEGIN (':' block_identifier)? generate_item* END
     ;
 
 // Continuous Assignment
@@ -463,6 +515,9 @@ REPEAT      : 'repeat';
 POSEDGE     : 'posedge';
 NEGEDGE     : 'negedge';
 OR          : 'or';
+GENERATE    : 'generate';
+ENDGENERATE : 'endgenerate';
+GENVAR      : 'genvar';
 
 // Operators
 EQ      : '==';
