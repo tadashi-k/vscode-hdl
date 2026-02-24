@@ -312,6 +312,15 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return null;
     }
 
+    // Skip signal analysis inside task/function bodies - they have their own scope
+    visitTask_declaration(ctx: any) {
+        return null;
+    }
+
+    visitFunction_declaration(ctx: any) {
+        return null;
+    }
+
     // Track continuous assign context for "assign lvalue is reg" warning
     visitContinuous_assign(ctx: any) {
         if (!this._currentModule) return null;
@@ -419,9 +428,15 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Capture all identifiers used in expressions (r-value signal references)
     visitPrimary(ctx: any) {
         if (this._currentModule && ctx.identifier && ctx.identifier()) {
-            const info = this._getIdentifierInfo(ctx.identifier());
-            if (info) {
-                this._addSignalRef(info.name, info.line, info.character);
+            // Skip function call primaries (identifier followed by '(') - the identifier
+            // is a function name, not a signal reference.
+            const child1 = ctx.getChild(1);
+            const isFunctionCall = child1 && typeof child1.getText === 'function' && child1.getText() === '(';
+            if (!isFunctionCall) {
+                const info = this._getIdentifierInfo(ctx.identifier());
+                if (info) {
+                    this._addSignalRef(info.name, info.line, info.character);
+                }
             }
         }
         this.visitChildren(ctx);
