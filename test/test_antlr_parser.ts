@@ -198,6 +198,75 @@ endmodule
         }
     }
 
+    // Test 5: generate block with if and for
+    {
+        totalTests++;
+        console.log('\nTest 5: generate block with if and for');
+        const code = `
+module gen_test #(parameter N = 4) (
+    output wire [N-1:0] out
+);
+    genvar i;
+    generate
+        if (N == 4) begin
+            assign out = 4'b0;
+        end else begin
+            assign out = {N{1'b0}};
+        end
+    endgenerate
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'test_generate.v');
+        const parser = new AntlrVerilogParser();
+        const errors = parser.parse(doc);
+
+        console.log(`  Found ${errors.length} error(s)`);
+        if (errors.length > 0) {
+            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+        }
+
+        if (errors.length === 0) {
+            console.log('  ✓ Test 5 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 5 FAILED (expected 0 errors for generate/genvar)');
+        }
+    }
+
+    // Test 6: generate for loop with genvar
+    {
+        totalTests++;
+        console.log('\nTest 6: generate for loop with genvar');
+        const code = `
+module gen_for_test #(parameter N = 4) (
+    input wire clk,
+    output wire [N-1:0] out
+);
+    genvar i;
+    generate
+        for (i = 0; i < N; i = i + 1) begin : gen_loop
+            assign out[i] = clk;
+        end
+    endgenerate
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'test_generate_for.v');
+        const parser = new AntlrVerilogParser();
+        const errors = parser.parse(doc);
+
+        console.log(`  Found ${errors.length} error(s)`);
+        if (errors.length > 0) {
+            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+        }
+
+        if (errors.length === 0) {
+            console.log('  ✓ Test 6 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 6 FAILED (expected 0 errors for generate for loop)');
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
