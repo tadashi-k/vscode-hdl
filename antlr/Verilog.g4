@@ -80,6 +80,8 @@ module_item
     | always_construct
     | initial_construct
     | generate_block
+    | task_declaration
+    | function_declaration
     ;
 
 // Port Declarations
@@ -219,6 +221,59 @@ generate_item_or_block
     | BEGIN (':' block_identifier)? generate_item* END
     ;
 
+// Task Declaration
+task_declaration
+    : TASK task_identifier ';'
+      task_item_declaration*
+      statement_or_null
+      ENDTASK
+    ;
+
+task_identifier
+    : identifier
+    ;
+
+task_item_declaration
+    : block_item_declaration
+    | tf_input_declaration ';'
+    | tf_output_declaration ';'
+    | tf_inout_declaration ';'
+    ;
+
+tf_input_declaration
+    : INPUT range? list_of_port_identifiers
+    ;
+
+tf_output_declaration
+    : OUTPUT range? list_of_port_identifiers
+    ;
+
+tf_inout_declaration
+    : INOUT range? list_of_port_identifiers
+    ;
+
+// Function Declaration
+function_declaration
+    : FUNCTION range_or_type? function_identifier ';'
+      function_item_declaration+
+      statement
+      ENDFUNCTION
+    ;
+
+function_identifier
+    : identifier
+    ;
+
+range_or_type
+    : range
+    | INTEGER
+    ;
+
+function_item_declaration
+    : block_item_declaration
+    | tf_input_declaration ';'
+    ;
+
 // Continuous Assignment
 continuous_assign
     : ASSIGN assignment_list ';'
@@ -287,7 +342,11 @@ statement
     | case_statement
     | loop_statement
     | seq_block
+    | par_block
     | event_statement
+    | delay_or_event_control statement_or_null
+    | task_enable
+    | system_task_enable
     | ';'
     ;
 
@@ -331,6 +390,20 @@ loop_statement
 
 seq_block
     : BEGIN (':'  block_identifier)? block_item_declaration* statement* END
+    ;
+
+par_block
+    : FORK (':' block_identifier)? block_item_declaration* statement* JOIN
+    ;
+
+// Task Enable
+task_enable
+    : task_identifier ('(' expression (',' expression)* ')')? ';'
+    ;
+
+// System Task Enable
+system_task_enable
+    : SYSTEM_TASK_IDENTIFIER ('(' expression (',' expression)* ')')? ';'
     ;
 
 block_identifier
@@ -384,6 +457,7 @@ expression
 
 primary
     : number
+    | identifier '(' expression (',' expression)* ')'
     | identifier ('[' expression ']')? ('[' range_expression ']')?
     | concatenation
     | multiple_concatenation
@@ -518,6 +592,12 @@ OR          : 'or';
 GENERATE    : 'generate';
 ENDGENERATE : 'endgenerate';
 GENVAR      : 'genvar';
+TASK        : 'task';
+ENDTASK     : 'endtask';
+FUNCTION    : 'function';
+ENDFUNCTION : 'endfunction';
+FORK        : 'fork';
+JOIN        : 'join';
 
 // Operators
 EQ      : '==';
@@ -542,6 +622,10 @@ SIMPLE_IDENTIFIER
 
 ESCAPED_IDENTIFIER
     : '\\' ~[ \t\r\n]+ [ \t]
+    ;
+
+SYSTEM_TASK_IDENTIFIER
+    : '$' [a-zA-Z_] [a-zA-Z0-9_$]*
     ;
 
 // Numbers
