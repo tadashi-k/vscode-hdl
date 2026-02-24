@@ -1,8 +1,21 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import AntlrVerilogParser = require('./antlr-parser');
 import { parseHdlIgnore, regexScanModules } from './verilog-scanner';
+
+/**
+ * File reader for `include directive expansion in the VS Code extension context.
+ * Returns the file content as a string, or null if the file cannot be read.
+ */
+function fsFileReader(resolvedPath: string): string | null {
+    try {
+        return fs.readFileSync(resolvedPath, 'utf8');
+    } catch (_) {
+        return null;
+    }
+}
 
 // Signal database - stores signals (wire/reg) per module
 class SignalDatabase {
@@ -352,7 +365,7 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
     }
 
     const uri = document.uri.toString();
-    const { modules, signals, instances, parameters } = verilogParser.parseSymbols(document);
+    const { modules, signals, instances, parameters } = verilogParser.parseSymbols(document, null, fsFileReader);
 
     // Remove existing entries for this file before adding fresh ones
     signalDatabase.removeSignalsByUri(uri);
@@ -407,7 +420,7 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
  */
 class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
     provideDocumentSymbols(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.DocumentSymbol[] {
-        const { modules, signals } = verilogParser.parseSymbols(document);
+        const { modules, signals } = verilogParser.parseSymbols(document, null, fsFileReader);
 
         const moduleSymbols = modules.map((module: any) => {
             const line = document.lineAt(module.line);
@@ -572,7 +585,7 @@ function updateDiagnostics(document: vscode.TextDocument, diagnosticCollection: 
         return;
     }
 
-    const errors = verilogParser.parse(document, moduleDatabase);
+    const errors = verilogParser.parse(document, moduleDatabase, fsFileReader);
     const diagnostics: vscode.Diagnostic[] = [];
 
     for (const error of errors) {

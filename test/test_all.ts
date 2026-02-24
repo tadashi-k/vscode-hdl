@@ -18,7 +18,8 @@ const testFiles = [
   'test_instance_database.ts',
   'test_startup_scan.ts',
   'test_parameter_database.ts',
-  'test_hdlignore.ts'
+  'test_hdlignore.ts',
+  'test_preprocessor.ts'
 ];
 
 let allPassed = true;
