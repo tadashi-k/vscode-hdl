@@ -105,11 +105,16 @@ inout_declaration
 
 // Parameter Declarations
 parameter_declaration
-    : PARAMETER range? list_of_param_assignments
+    : PARAMETER (parameter_data_type | range)? list_of_param_assignments
     ;
 
 local_parameter_declaration
-    : LOCALPARAM range? list_of_param_assignments ';'
+    : LOCALPARAM (parameter_data_type | range)? list_of_param_assignments ';'
+    ;
+
+parameter_data_type
+    : INTEGER
+    | REAL
     ;
 
 list_of_param_assignments
@@ -143,6 +148,7 @@ delay
 delay_value
     : unsigned_number
     | parameter_identifier
+    | '(' constant_expression ')'
     ;
 
 list_of_net_identifiers
@@ -386,6 +392,7 @@ loop_statement
     : FOR '(' assignment ';' expression ';' assignment ')' statement
     | WHILE '(' expression ')' statement
     | REPEAT '(' expression ')' statement
+    | FOREVER statement
     ;
 
 seq_block
@@ -570,6 +577,7 @@ SUPPLY1     : 'supply1';
 PARAMETER   : 'parameter';
 LOCALPARAM  : 'localparam';
 INTEGER     : 'integer';
+REAL        : 'real';
 ASSIGN      : 'assign';
 DEASSIGN    : 'deassign';
 ALWAYS      : 'always';
@@ -584,6 +592,7 @@ CASEX       : 'casex';
 ENDCASE     : 'endcase';
 DEFAULT     : 'default';
 FOR         : 'for';
+FOREVER     : 'forever';
 WHILE       : 'while';
 REPEAT      : 'repeat';
 POSEDGE     : 'posedge';
