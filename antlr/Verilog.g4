@@ -69,7 +69,7 @@ port_identifier
 // Module Items
 module_item
     : port_declaration
-    | parameter_declaration
+    | parameter_declaration ';'
     | local_parameter_declaration
     | net_declaration
     | reg_declaration
@@ -101,7 +101,7 @@ inout_declaration
 
 // Parameter Declarations
 parameter_declaration
-    : PARAMETER range? list_of_param_assignments ';'
+    : PARAMETER range? list_of_param_assignments
     ;
 
 local_parameter_declaration
@@ -142,7 +142,7 @@ delay_value
     ;
 
 list_of_net_identifiers
-    : net_identifier (',' net_identifier)*
+    : net_identifier range? ('=' expression)? (',' net_identifier range? ('=' expression)? )*
     ;
 
 net_identifier
@@ -155,7 +155,7 @@ reg_declaration
     ;
 
 list_of_register_identifiers
-    : register_identifier ('=' constant_expression)? (',' register_identifier ('=' constant_expression)?)*
+    : register_identifier range? ('=' constant_expression)? (',' register_identifier range? ('=' constant_expression)?)*
     ;
 
 register_identifier
@@ -187,6 +187,11 @@ module_instantiation
 
 parameter_value_assignment
     : '#' '(' expression (',' expression)* ')'
+    | '#' '(' named_parameter_assignment(',' named_parameter_assignment)* ')'
+    ;
+
+named_parameter_assignment
+    :  '.' parameter_identifier '(' expression ')'
     ;
 
 module_instance
@@ -334,7 +339,7 @@ primary
     ;
 
 lvalue
-    : identifier ('[' expression ']')?
+    : identifier ('[' expression ']')? ('[' range_expression ']')?
     | concatenation
     ;
 
@@ -351,15 +356,15 @@ list_of_port_identifiers
     ;
 
 range
-    : '[' constant_expression ':' constant_expression ']'
+    : '[' constant_expression (':' | '+:' | '-:') constant_expression ']'
     ;
 
 range_expression
-    : expression ':' expression
+    : expression (':' | '+:' | '-:') expression
     ;
 
 constant_range_expression
-    : constant_expression ':' constant_expression
+    : constant_expression (':' | '+:' | '-:') constant_expression
     ;
 
 constant_expression
@@ -526,4 +531,8 @@ COMMENT
 
 BLOCK_COMMENT
     : '/*' .*? '*/' -> skip
+    ;
+
+DIRECTIVE_COMMENT
+    : '(*' .*? '*)' -> skip
     ;
