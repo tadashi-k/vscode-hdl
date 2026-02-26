@@ -118,6 +118,140 @@ export function parseHdlIgnore(content: string): (relPath: string) => boolean {
 }
 
 /**
+ * Preprocess Verilog source text by handling compiler directives.
+ *
+ * Supported directives:
+ *  - `define NAME value  – defines a text macro; subsequent `NAME occurrences
+ *    in the same file are replaced with the value.
+ *  - `include "file"     – the named file is read via fileReader, preprocessed
+ *    recursively, and its content is inlined in place of the directive.
+ *    Both double-quote and angle-bracket forms are accepted.
+ *  - All other directives (`ifdef, `ifndef, `else, `elsif, `endif, `undef,
+ *    `timescale, `default_nettype, `resetall, `celldefine, `endcelldefine,
+ *    `pragma, `line, `begin_keywords, `end_keywords, etc.) are silently
+ *    replaced with a blank line so that ANTLR line numbers remain correct.
+ *
+ * Macro replacement (`NAME) is performed on every non-directive line after
+ * all defines have been collected from earlier lines.
+ *
+ * @param text       - Raw text content of the Verilog file.
+ * @param basePath   - Directory of the file being processed, used for
+ *                     resolving relative `include paths.  May be null when
+ *                     file-system access is unavailable.
+ * @param fileReader - Callback that reads a file given its resolved absolute
+ *                     path and returns its text content, or null if the file
+ *                     cannot be read.  Pass null to disable `include expansion.
+ * @param defines    - Optional pre-populated macro definitions map (modified
+ *                     in-place; pass a new Map() to start with no macros).
+ * @param _visited   - Internal: set of already-included paths (cycle guard).
+ * @returns Preprocessed text with directives resolved.
+ */
+export function preprocessVerilog(
+    text: string,
+    basePath: string | null,
+    fileReader: ((resolvedPath: string) => string | null) | null,
+    defines: Map<string, string> = new Map(),
+    _visited: Set<string> = new Set()
+): string {
+    // Strip block comments first so that directives inside them are ignored.
+    // Preserve line counts by replacing each block comment with the same number
+    // of newlines it contained (inline comments on source lines become empty).
+    text = text.replace(/\/\*[\s\S]*?\*\//g, (match) => {
+        const newlineCount = (match.match(/\n/g) || []).length;
+        return '\n'.repeat(newlineCount);
+    });
+
+    const outputLines: string[] = [];
+    const lines = text.split('\n');
+
+    // Regex matching the start of any compiler directive (backtick followed by identifier)
+    const directiveRe = /^(\s*)`(\w+)(.*)/;
+    // Regex for `define NAME [value]
+    const defineRe = /^`define\s+(\w+)(?:\s+(.*))?$/;
+    // Regex for `include "file" or `include <file>
+    const includeRe = /^`include\s+["<]([^">]+)[">]/;
+    // Regex for `undef NAME
+    const undefRe = /^`undef\s+(\w+)/;
+
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+
+        // Check if this line contains a compiler directive
+        if (!directiveRe.test(trimmed)) {
+            // Regular source line – apply macro substitutions and emit
+            outputLines.push(applyMacros(lines[i], defines));
+            continue;
+        }
+
+        // ------------------------------------------------------------------ //
+        // `define
+        // ------------------------------------------------------------------ //
+        const defMatch = trimmed.match(defineRe);
+        if (defMatch) {
+            const macroName = defMatch[1];
+            const macroValue = defMatch[2] !== undefined ? defMatch[2].trim() : '';
+            defines.set(macroName, macroValue);
+            outputLines.push('');  // blank line preserves line numbering
+            continue;
+        }
+
+        // ------------------------------------------------------------------ //
+        // `undef
+        // ------------------------------------------------------------------ //
+        const undefMatch = trimmed.match(undefRe);
+        if (undefMatch) {
+            defines.delete(undefMatch[1]);
+            outputLines.push('');
+            continue;
+        }
+
+        // ------------------------------------------------------------------ //
+        // `include
+        // ------------------------------------------------------------------ //
+        const incMatch = trimmed.match(includeRe);
+        if (incMatch) {
+            const includeName = incMatch[1];
+            let included = '';
+            if (fileReader && basePath !== null) {
+                const path = require('path') as typeof import('path');
+                const resolvedPath = path.resolve(basePath, includeName);
+                if (!_visited.has(resolvedPath)) {
+                    _visited.add(resolvedPath);
+                    const fileContent = fileReader(resolvedPath);
+                    if (fileContent !== null) {
+                        const includeDir = path.dirname(resolvedPath);
+                        included = preprocessVerilog(fileContent, includeDir, fileReader, defines, _visited);
+                    }
+                }
+            }
+            // Replace the directive line with included content (may be multiple lines)
+            outputLines.push(included);
+            continue;
+        }
+
+        // ------------------------------------------------------------------ //
+        // All other directives – silently ignore (blank line)
+        // ------------------------------------------------------------------ //
+        outputLines.push('');
+    }
+
+    return outputLines.join('\n');
+}
+
+/**
+ * Replace all `MACRO_NAME occurrences in a source line with their defined
+ * values.  Only identifiers that exist in the defines map are substituted.
+ */
+function applyMacros(line: string, defines: Map<string, string>): string {
+    if (defines.size === 0) return line;
+    // Replace backtick-prefixed identifiers that are defined macros.
+    // We match `NAME (backtick + word boundary identifier) but not `" or `0 etc.
+    return line.replace(/`(\w+)/g, (match, name) => {
+        return defines.has(name) ? defines.get(name)! : match;
+    });
+}
+
+/**
  * Lightweight, regex-based scan of a single Verilog source file.
  * Extracts module declarations (name + line number) without a full parse.
  * This is orders of magnitude faster than ANTLR parsing and is suitable

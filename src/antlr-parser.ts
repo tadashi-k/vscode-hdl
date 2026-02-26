@@ -3,6 +3,7 @@
 
 import type * as vsCodeModule from 'vscode';
 import antlr4 from 'antlr4';
+import { preprocessVerilog } from './verilog-scanner';
 import { VerilogLexer } from '../antlr/generated/VerilogLexer';
 import { VerilogParser } from '../antlr/generated/VerilogParser';
 import { VerilogVisitor } from '../antlr/generated/VerilogVisitor';
@@ -943,8 +944,8 @@ class AntlrVerilogParser {
      * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
      * @returns {Array} Array of diagnostic objects (syntax errors + signal warnings)
      */
-    parse(document: any, moduleDatabase: any = null) {
-        const { errors, warnings } = this.parseSymbols(document, moduleDatabase);
+    parse(document: any, moduleDatabase: any = null, fileReader: ((resolvedPath: string) => string | null) | null = null) {
+        const { errors, warnings } = this.parseSymbols(document, moduleDatabase, fileReader);
         return [...errors, ...warnings];
     }
 
@@ -961,11 +962,33 @@ class AntlrVerilogParser {
      *   errors:  syntax errors
      *   warnings: signal usage warnings
      */
-    parseSymbols(document: any, moduleDatabase: any = null) {
+    parseSymbols(document: any, moduleDatabase: any = null, fileReader: ((resolvedPath: string) => string | null) | null = null) {
         this.errorListener.clearErrors();
 
-        const text = document.getText();
+        const rawText = document.getText();
         const uri = document.uri.toString();
+
+        // Resolve the directory of the current file for `include path resolution.
+        let basePath: string | null = null;
+        try {
+            const path = require('path') as typeof import('path');
+            // Convert a VS Code file URI to a filesystem path.
+            // file:///C:/path → C:/path  (Windows)
+            // file:///home/user → /home/user  (Unix)
+            let fsPath = uri;
+            if (uri.startsWith('file:///')) {
+                const decoded = decodeURIComponent(uri.slice('file:///'.length));
+                // Windows drive letter: "C:/path" – keep as-is; Unix: "home/user" – restore leading "/"
+                fsPath = /^[A-Za-z]:\//.test(decoded) ? decoded : '/' + decoded;
+            } else if (uri.startsWith('file://')) {
+                fsPath = decodeURIComponent(uri.slice('file://'.length));
+            }
+            basePath = path.dirname(fsPath);
+        } catch (_) { /* path unavailable */ }
+
+        // Preprocess: expand `define macros and `include directives, strip others.
+        const text = preprocessVerilog(rawText, basePath, fileReader);
+
         let modules: any[] = [];
         let signals: any[] = [];
         let visitor: VerilogSymbolVisitor | null = null;
