@@ -997,6 +997,88 @@ endmodule
         }
     }
 
+    // Test 25: Cross-file resolution for counter.v + full_adder.v (issue scenario)
+    // Simulates opening counter.v when full_adder module ports are in the database.
+    // Signals connected to output ports (enable via .cout) should be "assigned",
+    // and signals connected to input ports (a via .a, b via .b) should be "used".
+    {
+        totalTests++;
+        console.log('\nTest 25: Cross-file counter.v + full_adder.v - no false warnings for port-connected signals');
+
+        // Build moduleDatabase from full_adder.v (simulating workspace scan)
+        const fullAdderCode = `
+module full_adder (
+    input wire a,
+    input wire b,
+    input wire cin,
+    output wire sum,
+    output wire cout
+);
+    assign sum = a ^ b ^ cin;
+    assign cout = (a & b) | (b & cin) | (a & cin);
+endmodule
+`;
+        const fullAdderDoc = new MockTextDocument(fullAdderCode, 'full_adder.v');
+        const fullAdderResult = parser.parseSymbols(fullAdderDoc);
+        const crossDb = new MockModuleDatabase(fullAdderResult.modules);
+
+        // Parse counter.v with the cross-file database
+        const counterCode = `
+module counter (
+    input wire clk,
+    input wire reset,
+    output reg [7:0] count
+);
+parameter WIDTH = 8;
+localparam MAX_COUNT = (1 << WIDTH) - 1;
+
+    wire enable;
+    reg [WIDTH-1:0] internal_count;
+    reg a, b;
+
+    always @(posedge clk or posedge reset) begin
+        if (reset && !enable) begin
+            count <= 8'b0;
+        end else begin
+            count <= count + 1;
+        end
+        internal_count <= internal_count + 4'd1;
+        a <= internal_count[0];
+        b <= internal_count[1];
+    end
+
+    full_adder full_adder_i(
+        .a(a),
+        .b(b),
+        .cin(),
+        .sum(),
+        .cout(enable)
+    );
+
+endmodule
+`;
+        const counterDoc = new MockTextDocument(counterCode, 'counter.v');
+        const { errors: cErrors, warnings: cWarnings } = parser.parseSymbols(counterDoc, crossDb);
+
+        const noEnableNeverAssigned = !cWarnings.some(w =>
+            w.message.includes("'enable'") && w.message.includes('never assigned')
+        );
+        const noANeverUsed = !cWarnings.some(w =>
+            w.message.includes("'a'") && w.message.includes('never used')
+        );
+        const noBNeverUsed = !cWarnings.some(w =>
+            w.message.includes("'b'") && w.message.includes('never used')
+        );
+
+        if (noEnableNeverAssigned && noANeverUsed && noBNeverUsed) {
+            console.log('  ✓ Test 25 PASSED (no false warnings for enable, a, b with cross-file full_adder ports)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 25 FAILED (noEnableNeverAssigned: ${noEnableNeverAssigned}, noANeverUsed: ${noANeverUsed}, noBNeverUsed: ${noBNeverUsed})`);
+            cWarnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);

@@ -416,6 +416,40 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
 }
 
 /**
+ * Ensure that port information for all modules instantiated in the given
+ * document is available in the module database.  When a module only has a
+ * lightweight regex-scanned entry (ports: []), its source file is read and
+ * ANTLR-parsed so that full port information becomes available for
+ * downstream diagnostics (signal warning generation).
+ */
+function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
+    if (document.languageId !== 'verilog') return;
+    const uri = document.uri.toString();
+    const instances = instanceDatabase.getInstancesByUri(uri);
+
+    for (const instance of instances) {
+        const mod = moduleDatabase.getModule(instance.moduleName);
+        if (mod && mod.ports && mod.ports.length === 0 && mod.uri && mod.uri !== uri) {
+            try {
+                const depFsPath = vscode.Uri.parse(mod.uri).fsPath;
+                const content = fs.readFileSync(depFsPath, 'utf8');
+                const depDoc: any = {
+                    getText: () => content,
+                    uri: { toString: () => mod.uri },
+                    languageId: 'verilog'
+                };
+                const result = verilogParser.parseSymbols(depDoc, null, fsFileReader);
+                for (const parsedMod of result.modules) {
+                    moduleDatabase.addModule(parsedMod);
+                }
+            } catch (_) {
+                // File might not be readable; proceed without port info
+            }
+        }
+    }
+}
+
+/**
  * Document Symbol Provider for Verilog
  */
 class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
@@ -624,6 +658,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(document => {
             updateDocumentSymbols(document);
+            ensureInstanceDependenciesParsed(document);
             updateDiagnostics(document, diagnosticCollection);
         })
     );
@@ -632,6 +667,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.workspace.onDidChangeTextDocument(event => {
             updateDocumentSymbols(event.document);
+            ensureInstanceDependenciesParsed(event.document);
             updateDiagnostics(event.document, diagnosticCollection);
         })
     );
