@@ -442,8 +442,8 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
                 for (const parsedMod of result.modules) {
                     moduleDatabase.addModule(parsedMod);
                 }
-            } catch (_) {
-                // File might not be readable; proceed without port info
+            } catch (error) {
+                console.error(`Error parsing dependency ${instance.moduleName} from ${mod.uri}:`, error);
             }
         }
     }
