@@ -563,6 +563,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Helper: evaluate a constant_expression context
     _evaluateConstantExpression(ctx: any, paramMap: any): EvalValue | null {
         const exprCtx = ctx.expression ? ctx.expression() : null;
+        if (Array.isArray(exprCtx)) {
+            // expression() returns an array via getTypedRuleContexts; pick the first
+            return exprCtx.length > 0 ? this._evaluateExpression(exprCtx[0], paramMap) : null;
+        }
         return exprCtx ? this._evaluateExpression(exprCtx, paramMap) : null;
     }
 
@@ -634,13 +638,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _evaluatePrimary(ctx: any, paramMap: any, moduleSignals?: Map<string, any>): EvalValue | null {
         if (!ctx) return null;
 
-        // Parenthesised expression
-        const innerExpr = ctx.expression ? ctx.expression() : null;
-        if (innerExpr && !ctx.identifier()) {
-            return this._evaluateExpression(innerExpr, paramMap, moduleSignals);
-        }
-
-        // Number literal
+        // Number literal — check first to avoid false match on expression()
         const numCtx = ctx.number ? ctx.number() : null;
         if (numCtx) {
             return this._parseVerilogLiteral(numCtx.getText());
@@ -659,6 +657,17 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 }
             }
             return null;
+        }
+
+        // Parenthesised expression: '(' expression ')'
+        // ctx.expression() returns an array via getTypedRuleContexts;
+        // only enter this branch when there is at least one expression child
+        // and no identifier (which would indicate a function call).
+        const innerExprs = ctx.expression ? ctx.expression() : null;
+        const hasInnerExpr = Array.isArray(innerExprs) ? innerExprs.length > 0 : !!innerExprs;
+        if (hasInnerExpr) {
+            const singleExpr = Array.isArray(innerExprs) ? innerExprs[0] : innerExprs;
+            return this._evaluateExpression(singleExpr, paramMap, moduleSignals);
         }
 
         return null;

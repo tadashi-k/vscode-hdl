@@ -465,14 +465,18 @@ expression
 primary
     : number
     | identifier '(' expression (',' expression)* ')'
-    | identifier ('[' expression ']')? ('[' range_expression ']')?
+    | identifier '[' expression ']' ('[' range_expression ']')?
+    | identifier '[' range_expression ']'
+    | identifier
     | concatenation
     | multiple_concatenation
     | '(' expression ')'
     ;
 
 lvalue
-    : identifier ('[' expression ']')? ('[' range_expression ']')?
+    : identifier '[' expression ']' ('[' range_expression ']')?
+    | identifier '[' range_expression ']'
+    | identifier
     | concatenation
     ;
 
