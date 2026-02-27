@@ -4,6 +4,7 @@
  */
 
 import { preprocessVerilog } from '../src/verilog-scanner';
+import * as path from 'path';
 
 function runTests() {
     console.log('Running Verilog Preprocessor Tests...\n');
@@ -134,7 +135,7 @@ function runTests() {
         // Simple include: inline a file's content
         const includeContent = 'wire included_wire;';
         const fileMap: Record<string, string> = {
-            '/base/myinclude.vh': includeContent,
+            [path.resolve('/base', 'myinclude.vh')]: includeContent,
         };
         const fileReader = (p: string) => fileMap[p] ?? null;
 
@@ -147,7 +148,7 @@ function runTests() {
     {
         // include with angle brackets
         const fileMap: Record<string, string> = {
-            '/base/lib.vh': 'wire lib_wire;',
+            [path.resolve('/base', 'lib.vh')]: 'wire lib_wire;',
         };
         const fileReader = (p: string) => fileMap[p] ?? null;
 
@@ -159,7 +160,7 @@ function runTests() {
     {
         // include with defines in the included file
         const fileMap: Record<string, string> = {
-            '/base/defs.vh': '`define DATA_W 16',
+            [path.resolve('/base', 'defs.vh')]: '`define DATA_W 16',
         };
         const fileReader = (p: string) => fileMap[p] ?? null;
 
@@ -171,7 +172,7 @@ function runTests() {
     {
         // Circular include guard: same file included twice should not loop
         const fileMap: Record<string, string> = {
-            '/base/a.vh': '`include "a.vh"\nwire cycle_wire;',
+            [path.resolve('/base', 'a.vh')]: '`include "a.vh"\nwire cycle_wire;',
         };
         const fileReader = (p: string) => fileMap[p] ?? null;
 
