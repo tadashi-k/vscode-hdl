@@ -156,11 +156,21 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Extract top-level identifiers from a concatenation context.
+    // Handles nested concatenations like {a, {b, c}} recursively.
     _getConcatenationIdentifiers(concatCtx: any): any[] {
         const results: any[] = [];
         const expressions = concatCtx.expression ? concatCtx.expression() : null;
         const exprArr = Array.isArray(expressions) ? expressions : (expressions ? [expressions] : []);
         for (const exprCtx of exprArr) {
+            // Check for nested concatenation inside the expression's primary
+            const primaryCtx = exprCtx.primary ? exprCtx.primary() : null;
+            if (primaryCtx) {
+                const nestedConcat = primaryCtx.concatenation ? primaryCtx.concatenation() : null;
+                if (nestedConcat) {
+                    results.push(...this._getConcatenationIdentifiers(nestedConcat));
+                    continue;
+                }
+            }
             const info = this._getPrimaryIdentifier(exprCtx);
             if (info) {
                 results.push(info);

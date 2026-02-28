@@ -1157,15 +1157,19 @@ endmodule
         const code = `
 module twodim (
     input wire clk,
-    output reg [7:0] out
+    output reg out
 );
     reg [7:0] mem [0:3];
+    reg [7:0] tmp;
 
     always @(posedge clk) begin
-        out <= mem[0];
+        tmp <= mem[0];
+        out <= tmp[1];
     end
 
-    assign mem[0] = 8'hFF;
+    always @(posedge clk) begin
+        mem[0] <= 8'hFF;
+    end
 endmodule
 `;
         const doc = new MockTextDocument(code, 'twodim.v');
