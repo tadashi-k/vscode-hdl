@@ -10,7 +10,7 @@ export interface SemanticTokenInfo {
 }
 
 /** Semantic token type identifiers (indices into the legend). */
-export const TOKEN_TYPES = ['hdlReg', 'hdlWire', 'hdlInteger', 'hdlParameter'];
+export const TOKEN_TYPES = ['hdlReg', 'hdlWire', 'hdlInteger', 'hdlParameter', 'hdlModule'];
 export const TOKEN_MODIFIERS = ['declaration', 'hdlPort'];
 
 /** Verilog keywords that should never be highlighted as signal identifiers. */
@@ -51,14 +51,16 @@ function signalTypeToTokenType(signalType: string): string {
  * provided signal and parameter arrays.  Returns an array of token
  * descriptors sorted by (line, character).
  *
- * @param text       Full document text
- * @param signals    Signals from SignalDatabase.getSignalsByUri()
- * @param parameters Parameters from ParameterDatabase.getParametersByUri()
+ * @param text         Full document text
+ * @param signals      Signals from SignalDatabase.getSignalsByUri()
+ * @param parameters   Parameters from ParameterDatabase.getParametersByUri()
+ * @param moduleTokens Module token positions from parser (module declarations, instantiations, instance names)
  */
 export function computeSemanticTokens(
     text: string,
     signals: any[],
     parameters: any[],
+    moduleTokens: any[] = [],
 ): SemanticTokenInfo[] {
     // Build fast lookup maps
     const signalMap = new Map<string, any>();
@@ -68,6 +70,11 @@ export function computeSemanticTokens(
     const paramMap = new Map<string, any>();
     for (const param of parameters) {
         paramMap.set(param.name, param);
+    }
+    // Build position-based lookup for module tokens (line:character -> token info)
+    const moduleTokenMap = new Map<string, any>();
+    for (const mt of moduleTokens) {
+        moduleTokenMap.set(`${mt.line}:${mt.character}`, mt);
     }
 
     const tokens: SemanticTokenInfo[] = [];
@@ -147,6 +154,19 @@ export function computeSemanticTokens(
                 const word = line.substring(start, i);
 
                 if (VERILOG_KEYWORDS.has(word)) continue;
+
+                // Check for module token (module declaration name, instantiated module name, instance name)
+                const moduleToken = moduleTokenMap.get(`${lineNum}:${start}`);
+                if (moduleToken) {
+                    tokens.push({
+                        line: lineNum,
+                        character: start,
+                        length: word.length,
+                        tokenType: 'hdlModule',
+                        tokenModifiers: [],
+                    });
+                    continue;
+                }
 
                 const signal = signalMap.get(word);
                 if (signal) {

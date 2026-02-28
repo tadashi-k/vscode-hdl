@@ -280,6 +280,97 @@ endmodule
         }
     }
 
+    // Test 10: module declaration name gets hdlModule token
+    {
+        totalTests++;
+        console.log('\nTest 10: module declaration name gets hdlModule token');
+
+        const code = `module my_counter (
+    input clk,
+    output reg [7:0] count
+);
+    always @(posedge clk) count <= count + 1;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'test_module_decl.v');
+        const result = parser.parseSymbols(doc);
+
+        const tokens = computeSemanticTokens(code, result.signals, result.parameters, result.moduleTokens);
+        const lines = code.split('\n');
+        const modLine = findLine(code, 'module my_counter');
+        const modChar = lines[modLine].indexOf('my_counter');
+
+        const modToken = tokens.find(t => t.line === modLine && t.character === modChar && t.length === 'my_counter'.length);
+
+        const pass = modToken !== undefined && modToken.tokenType === 'hdlModule';
+
+        if (pass) {
+            console.log('  ✓ Test 10 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 10 FAILED');
+            console.log('  modLine:', modLine, 'modChar:', modChar);
+            console.log('  modToken:', JSON.stringify(modToken));
+            console.log('  all tokens:', JSON.stringify(tokens));
+        }
+    }
+
+    // Test 11: module instantiation name gets hdlModule token
+    {
+        totalTests++;
+        console.log('\nTest 11: module instantiation and instance name get hdlModule token');
+
+        const code = `module child (input clk);
+endmodule
+
+module parent (input clk);
+    child u_child (.clk(clk));
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'test_module_inst.v');
+        const result = parser.parseSymbols(doc);
+
+        const tokens = computeSemanticTokens(code, result.signals, result.parameters, result.moduleTokens);
+        const lines = code.split('\n');
+        const instLine = findLine(code, 'child u_child');
+        const childChar = lines[instLine].indexOf('child');
+        const uChildChar = lines[instLine].indexOf('u_child');
+
+        const childToken = tokens.find(t => t.line === instLine && t.character === childChar && t.length === 'child'.length);
+        const uChildToken = tokens.find(t => t.line === instLine && t.character === uChildChar && t.length === 'u_child'.length);
+
+        const pass = childToken !== undefined && childToken.tokenType === 'hdlModule' &&
+                     uChildToken !== undefined && uChildToken.tokenType === 'hdlModule';
+
+        if (pass) {
+            console.log('  ✓ Test 11 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 11 FAILED');
+            console.log('  instLine:', instLine, 'childChar:', childChar, 'uChildChar:', uChildChar);
+            console.log('  childToken:', JSON.stringify(childToken));
+            console.log('  uChildToken:', JSON.stringify(uChildToken));
+            console.log('  all tokens:', JSON.stringify(tokens));
+        }
+    }
+
+    // Test 12: hdlModule is in TOKEN_TYPES
+    {
+        totalTests++;
+        console.log('\nTest 12: hdlModule is in TOKEN_TYPES');
+
+        const { TOKEN_TYPES } = require('../src/semantic-tokens');
+        const pass = TOKEN_TYPES.includes('hdlModule');
+
+        if (pass) {
+            console.log('  ✓ Test 12 PASSED');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 12 FAILED');
+            console.log('  TOKEN_TYPES:', TOKEN_TYPES);
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);

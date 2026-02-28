@@ -64,7 +64,8 @@
       { "id": "hdlReg", "description": "Verilog register signal", "superType": "variable" },
       { "id": "hdlWire", "description": "Verilog wire signal", "superType": "variable" },
       { "id": "hdlInteger", "description": "Verilog integer signal", "superType": "variable" },
-      { "id": "hdlParameter", "description": "Verilog parameter", "superType": "variable" }
+      { "id": "hdlParameter", "description": "Verilog parameter", "superType": "variable" },
+      { "id": "hdlModule", "description": "Verilog module name", "superType": "type" }
     ],
     "semanticTokenModifiers": [
       { "id": "hdlPort", "description": "Port signal (input/output/inout)" }
@@ -76,7 +77,8 @@
           "hdlReg": ["variable.other.reg.verilog"],
           "hdlWire": ["variable.other.wire.verilog"],
           "hdlInteger": ["variable.other.integer.verilog"],
-          "hdlParameter": ["variable.other.constant.verilog"]
+          "hdlParameter": ["variable.other.constant.verilog"],
+          "hdlModule": ["entity.name.type.module.verilog"]
         }
       }
     ],
