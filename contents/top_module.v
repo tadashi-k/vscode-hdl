@@ -13,7 +13,7 @@ module top_module (
     counter u_counter (
         .clk(clk),
         .reset(reset),
-        .count(counter_value)
+        .count_out(counter_value)
     );
 
     // Signal usage - goto definition should work on these signals

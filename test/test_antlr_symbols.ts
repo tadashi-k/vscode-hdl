@@ -175,7 +175,8 @@ endmodule
         const pass = counterMod &&
             portNames.includes('clk') &&
             portNames.includes('reset') &&
-            portNames.includes('count') &&
+            portNames.includes('count_in') &&
+            portNames.includes('count_out') &&
             // Internal signals should NOT be in ports
             !portNames.includes('enable') &&
             !portNames.includes('internal_count');
