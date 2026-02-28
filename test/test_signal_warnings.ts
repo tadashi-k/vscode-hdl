@@ -1807,6 +1807,230 @@ endmodule
         }
     }
 
+    // Test 45: Bit width mismatch in continuous assign
+    {
+        totalTests++;
+        console.log('\nTest 45: Bit width mismatch in continuous assign');
+
+        const code = `
+module width_mismatch_assign (
+    input wire [7:0] data_in,
+    output wire [3:0] data_out
+);
+    assign data_out = data_in;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'width_mismatch_assign.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch') &&
+            w.message.includes('data_out') &&
+            w.message.includes('4') &&
+            w.message.includes('8')
+        );
+
+        if (hasMismatch) {
+            console.log('  ✓ Test 45 PASSED (bit width mismatch detected in continuous assign)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 45 FAILED (expected bit width mismatch warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 46: Bit width mismatch in blocking assignment
+    {
+        totalTests++;
+        console.log('\nTest 46: Bit width mismatch in blocking assignment');
+
+        const code = `
+module width_mismatch_blocking (
+    input wire clk,
+    input wire [15:0] wide_data,
+    output reg [7:0] narrow_out
+);
+    always @(posedge clk) begin
+        narrow_out = wide_data;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'width_mismatch_blocking.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch') &&
+            w.message.includes('narrow_out') &&
+            w.message.includes('8') &&
+            w.message.includes('16')
+        );
+
+        if (hasMismatch) {
+            console.log('  ✓ Test 46 PASSED (bit width mismatch detected in blocking assignment)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 46 FAILED (expected bit width mismatch warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 47: Bit width mismatch in non-blocking assignment
+    {
+        totalTests++;
+        console.log('\nTest 47: Bit width mismatch in non-blocking assignment');
+
+        const code = `
+module width_mismatch_nonblocking (
+    input wire clk,
+    input wire [3:0] small_data,
+    output reg [7:0] big_out
+);
+    always @(posedge clk) begin
+        big_out <= small_data;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'width_mismatch_nonblocking.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch') &&
+            w.message.includes('big_out') &&
+            w.message.includes('8') &&
+            w.message.includes('4')
+        );
+
+        if (hasMismatch) {
+            console.log('  ✓ Test 47 PASSED (bit width mismatch detected in non-blocking assignment)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 47 FAILED (expected bit width mismatch warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 48: No bit width mismatch when widths match
+    {
+        totalTests++;
+        console.log('\nTest 48: No bit width mismatch when widths match');
+
+        const code = `
+module width_match (
+    input wire [7:0] data_in,
+    output wire [7:0] data_out
+);
+    assign data_out = data_in;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'width_match.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch')
+        );
+
+        if (!hasMismatch) {
+            console.log('  ✓ Test 48 PASSED (no false mismatch when widths match)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 48 FAILED (unexpected bit width mismatch warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 49: Bit width mismatch with sized literal
+    {
+        totalTests++;
+        console.log('\nTest 49: Bit width mismatch with sized literal');
+
+        const code = `
+module width_mismatch_literal (
+    output wire [7:0] data_out
+);
+    assign data_out = 4'hF;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'width_mismatch_literal.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch') &&
+            w.message.includes('data_out') &&
+            w.message.includes('8') &&
+            w.message.includes('4')
+        );
+
+        if (hasMismatch) {
+            console.log('  ✓ Test 49 PASSED (bit width mismatch detected with sized literal)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 49 FAILED (expected bit width mismatch warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 50: No bit width mismatch with unsized literal (width unknown)
+    {
+        totalTests++;
+        console.log('\nTest 50: No bit width mismatch with unsized literal');
+
+        const code = `
+module width_match_unsized (
+    output reg [7:0] data_out,
+    input wire clk
+);
+    always @(posedge clk) begin
+        data_out <= 42;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'width_match_unsized.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch')
+        );
+
+        if (!hasMismatch) {
+            console.log('  ✓ Test 50 PASSED (no mismatch warning with unsized literal)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 50 FAILED (unexpected bit width mismatch warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 51: Bit width mismatch with part-select lvalue
+    {
+        totalTests++;
+        console.log('\nTest 51: Bit width mismatch with part-select lvalue');
+
+        const code = `
+module width_mismatch_partselect (
+    input wire [7:0] data_in,
+    output wire [7:0] data_out
+);
+    assign data_out[3:0] = data_in;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'width_mismatch_partselect.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch') &&
+            w.message.includes('4') &&
+            w.message.includes('8')
+        );
+
+        if (hasMismatch) {
+            console.log('  ✓ Test 51 PASSED (bit width mismatch detected with part-select lvalue)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 51 FAILED (expected bit width mismatch warning for part-select)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);

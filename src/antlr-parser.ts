@@ -100,6 +100,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _inProcedural: boolean;
     _inContinuousAssign: boolean;
     _currentParamKind: any;
+    widthMismatches: any[];
 
     constructor(uri: string) {
         super();
@@ -121,6 +122,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._currentModule = null;
         this._inProcedural = false;
         this._inContinuousAssign = false;
+        this.widthMismatches = [];           // [{lvalName, lvalWidth, exprWidth, line, character, moduleName}]
     }
 
     _addSignalRef(name: any, line: any, character: any) {
@@ -475,6 +477,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
             const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
             this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+            // Check bit width mismatch
+            this._checkWidthMismatch(ctx.lvalue(), exprCtx, moduleParams, moduleSignals);
         }
         this.visitChildren(ctx);
         return null;
@@ -493,6 +497,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
             const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
             this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+            // Check bit width mismatch
+            this._checkWidthMismatch(ctx.lvalue(), exprCtx, moduleParams, moduleSignals);
         }
         this.visitChildren(ctx);
         return null;
@@ -504,6 +510,14 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
         for (const lvalInfo of lvalIdentifiers) {
             this.procLvalues.push({ ...lvalInfo, moduleName: this._currentModule.name });
+        }
+        // Evaluate r-value expression and check bit width mismatch
+        const exprCtx = ctx.expression ? ctx.expression() : null;
+        if (exprCtx) {
+            const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
+            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+            this._checkWidthMismatch(ctx.lvalue(), exprCtx, moduleParams, moduleSignals);
         }
         this.visitChildren(ctx);
         return null;
@@ -691,6 +705,127 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const match = bitWidth.match(/^\[(\d+):(\d+)\]$/);
         if (!match) return null;
         return Math.abs(parseInt(match[1], 10) - parseInt(match[2], 10)) + 1;
+    }
+
+    // Compute the bit width of an lvalue context.
+    // Returns the width as a number, or null if it cannot be determined.
+    _getLvalueWidth(lvalCtx: any, moduleParams: any, moduleSignals: Map<string, any>): number | null {
+        if (!lvalCtx) return null;
+
+        // Concatenation lvalue: width is the sum of each element's expression width
+        const concatCtx = lvalCtx.concatenation ? lvalCtx.concatenation() : null;
+        if (concatCtx) {
+            const expressions = concatCtx.expression ? concatCtx.expression() : null;
+            const exprArr = Array.isArray(expressions) ? expressions : (expressions ? [expressions] : []);
+            let totalWidth = 0;
+            for (const exprCtx of exprArr) {
+                const ev = this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+                if (!ev || ev.width === null) return null;
+                totalWidth += ev.width;
+            }
+            return totalWidth > 0 ? totalWidth : null;
+        }
+
+        // Identifier-based lvalue
+        const identCtx = lvalCtx.identifier ? lvalCtx.identifier() : null;
+        if (!identCtx) return null;
+
+        const token = identCtx.SIMPLE_IDENTIFIER() || identCtx.ESCAPED_IDENTIFIER();
+        if (!token) return null;
+        const name = token.getText();
+
+        // range_expression alternative: identifier '[' range_expression ']'
+        const rangeExprCtx = lvalCtx.range_expression ? lvalCtx.range_expression() : null;
+        if (rangeExprCtx) {
+            const rangeExprs = rangeExprCtx.expression ? rangeExprCtx.expression() : null;
+            const rangeArr = Array.isArray(rangeExprs) ? rangeExprs : (rangeExprs ? [rangeExprs] : []);
+            if (rangeArr.length === 2) {
+                const rangeText = rangeExprCtx.getText();
+                if (rangeText.includes('+:') || rangeText.includes('-:')) {
+                    // indexed part select: [base +: width] or [base -: width]
+                    const widthVal = this._evaluateExpression(rangeArr[1], moduleParams, moduleSignals);
+                    return widthVal && widthVal.value !== null ? widthVal.value : null;
+                }
+                // simple range: [high : low]
+                const hi = this._evaluateExpression(rangeArr[0], moduleParams, moduleSignals);
+                const lo = this._evaluateExpression(rangeArr[1], moduleParams, moduleSignals);
+                if (hi && hi.value !== null && lo && lo.value !== null) {
+                    return Math.abs(hi.value - lo.value) + 1;
+                }
+            }
+            return null;
+        }
+
+        // expression-based alternatives: identifier '[' expression ']' ...
+        const exprChildren = lvalCtx.expression ? lvalCtx.expression() : null;
+        const exprArr = Array.isArray(exprChildren) ? exprChildren : (exprChildren ? [exprChildren] : []);
+        if (exprArr.length === 0) {
+            // Simple identifier with no range: use declared signal width (default 1 for scalars)
+            const sig = moduleSignals.get(name);
+            if (!sig) return null;
+            const w = this._getSignalWidth(sig.bitWidth);
+            return w !== null ? w : 1;
+        }
+        if (exprArr.length === 1) {
+            // Single bit select: identifier[expr] → width is 1
+            return 1;
+        }
+        if (exprArr.length >= 2) {
+            // Part select, e.g.: identifier[expr][high:low] or identifier[expr][base +: width]
+            const fullText = lvalCtx.getText();
+            if (fullText.includes('+:') || fullText.includes('-:')) {
+                const widthVal = this._evaluateExpression(exprArr[exprArr.length - 1], moduleParams, moduleSignals);
+                return widthVal && widthVal.value !== null ? widthVal.value : null;
+            }
+            if (exprArr.length === 3) {
+                // identifier[expr][high:low]
+                const hi = this._evaluateExpression(exprArr[1], moduleParams, moduleSignals);
+                const lo = this._evaluateExpression(exprArr[2], moduleParams, moduleSignals);
+                if (hi && hi.value !== null && lo && lo.value !== null) {
+                    return Math.abs(hi.value - lo.value) + 1;
+                }
+            }
+            return null;
+        }
+        return null;
+    }
+
+    // Check bit width mismatch between lvalue and expression, and record if mismatched.
+    _checkWidthMismatch(lvalCtx: any, exprCtx: any, moduleParams: any, moduleSignals: Map<string, any>) {
+        if (!lvalCtx || !exprCtx || !this._currentModule) return;
+        const lvalWidth = this._getLvalueWidth(lvalCtx, moduleParams, moduleSignals);
+        if (lvalWidth === null) return;
+        const exprVal = this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+        if (!exprVal || exprVal.width === null) return;
+        if (lvalWidth !== exprVal.width) {
+            // Get position from lvalue identifier
+            const identCtx = lvalCtx.identifier ? lvalCtx.identifier() : null;
+            let line = 0, character = 0, length = 1;
+            if (identCtx) {
+                const token = identCtx.SIMPLE_IDENTIFIER() || identCtx.ESCAPED_IDENTIFIER();
+                if (token) {
+                    line = token.symbol.line - 1;
+                    character = token.symbol.column;
+                    length = lvalCtx.getText().length;
+                }
+            } else {
+                // Concatenation: use the lvalue start token position
+                if (lvalCtx.start) {
+                    line = lvalCtx.start.line - 1;
+                    character = lvalCtx.start.column;
+                }
+                length = lvalCtx.getText().length;
+            }
+            this.widthMismatches.push({
+                lvalText: lvalCtx.getText(),
+                lvalWidth,
+                exprWidth: exprVal.width,
+                line,
+                character,
+                length,
+                moduleName: this._currentModule.name
+            });
+        }
     }
 
     // Recursively evaluate an expression context; returns an EvalValue or null
@@ -1460,6 +1595,17 @@ class AntlrVerilogParser {
                     }
                 }
             }
+        }
+
+        // Warning 10: bit width mismatch between lvalue and expression
+        for (const mismatch of visitor.widthMismatches) {
+            warnings.push({
+                line: mismatch.line,
+                character: mismatch.character,
+                length: mismatch.length,
+                message: `Bit width mismatch: '${mismatch.lvalText}' has width ${mismatch.lvalWidth}, but expression has width ${mismatch.exprWidth}`,
+                severity: vscode.DiagnosticSeverity.Warning
+            });
         }
 
         return warnings;
