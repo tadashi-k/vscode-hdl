@@ -87,6 +87,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     signals: any[];
     instances: any[];
     parameters: any[];
+    moduleTokens: any[];
     _moduleSignalRefs: Map<any, any>;
     _signalRefList: any[];
     assignLvalues: any[];
@@ -113,6 +114,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this.assignLvalues = [];             // [{name, moduleName, line, character}] continuous assign lvalues
         this.procLvalues = [];               // [{name, moduleName, line, character}] blocking/non-blocking lvalues
         this._instPortConnections = [];      // [{instModuleName, portName, localSignalName, line, character, moduleName}]
+        this.moduleTokens = [];              // [{name, line, character}] positions for hdlModule semantic tokens
         this._moduleParamNames = new Map();  // moduleName -> Set<paramName>
         this._moduleParams = new Map();      // moduleName -> Map<paramName, value> (for cross-param evaluation)
         this._moduleGenvarNames = new Map(); // moduleName -> Set<genvarName>
@@ -231,6 +233,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             ports: []
         };
 
+        // Track module_identifier for hdlModule semantic token
+        this.moduleTokens.push({ name: info.name, line: info.line, character: info.character });
+
         // Initialize per-module tracking for signal warnings
         this._moduleSignalRefs.set(info.name, new Set());
         this._moduleParamNames.set(info.name, new Set());
@@ -269,6 +274,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (instModInfo) {
             const instModuleName = instModInfo.name;
 
+            // Track module_identifier in instantiation for hdlModule semantic token
+            this.moduleTokens.push({ name: instModuleName, line: instModInfo.line, character: instModInfo.character });
+
             // Collect named port connections for each instance
             const moduleInstances = this._toArray(ctx.module_instance ? ctx.module_instance() : null);
 
@@ -278,6 +286,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 const instNameInfo = nameOfInstCtx
                     ? this._getIdentifierInfo(nameOfInstCtx.identifier())
                     : null;
+
+                // Track instance name for hdlModule semantic token
+                if (instNameInfo) {
+                    this.moduleTokens.push({ name: instNameInfo.name, line: instNameInfo.line, character: instNameInfo.character });
+                }
 
                 const portConnections: any[] = [];
 
@@ -1194,8 +1207,9 @@ class AntlrVerilogParser {
         const warnings = visitor ? this._generateSignalWarnings(modules, signals, visitor, moduleDatabase) : [];
         const instances = visitor ? visitor.instances : [];
         const parameters = visitor ? visitor.parameters : [];
+        const moduleTokens = visitor ? visitor.moduleTokens : [];
 
-        return { modules, signals, instances, parameters, errors: this.errorListener.getErrors(), warnings };
+        return { modules, signals, instances, parameters, moduleTokens, errors: this.errorListener.getErrors(), warnings };
     }
 
     /**

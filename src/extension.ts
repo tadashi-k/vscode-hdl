@@ -295,11 +295,33 @@ class ParameterDatabase {
     }
 }
 
+// Module token database - stores module token positions per file URI
+class ModuleTokenDatabase {
+    _tokensByUri: Map<string, any[]>;
+
+    constructor() {
+        this._tokensByUri = new Map();
+    }
+
+    updateTokens(uri: string, tokens: any[]) {
+        this._tokensByUri.set(uri, tokens);
+    }
+
+    getTokensByUri(uri: string) {
+        return this._tokensByUri.get(uri) || [];
+    }
+
+    removeTokensByUri(uri: string) {
+        this._tokensByUri.delete(uri);
+    }
+}
+
 // Create global database instances
 const signalDatabase = new SignalDatabase();
 const moduleDatabase = new ModuleDatabase();
 const instanceDatabase = new InstanceDatabase();
 const parameterDatabase = new ParameterDatabase();
+const moduleTokenDatabase = new ModuleTokenDatabase();
 const verilogParser = new AntlrVerilogParser();
 
 /**
@@ -366,13 +388,17 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
     }
 
     const uri = document.uri.toString();
-    const { modules, signals, instances, parameters } = verilogParser.parseSymbols(document, null, fsFileReader);
+    const { modules, signals, instances, parameters, moduleTokens } = verilogParser.parseSymbols(document, null, fsFileReader);
 
     // Remove existing entries for this file before adding fresh ones
     signalDatabase.removeSignalsByUri(uri);
     moduleDatabase.removeModulesFromFile(uri);
     instanceDatabase.removeInstancesByUri(uri);
     parameterDatabase.removeParametersByUri(uri);
+    moduleTokenDatabase.removeTokensByUri(uri);
+
+    // Store module tokens (positions for hdlModule semantic tokens)
+    moduleTokenDatabase.updateTokens(uri, moduleTokens);
 
     // Group signals by module and update the per-module signal database
     const signalsByModule = new Map<string, any[]>();
@@ -632,7 +658,8 @@ class VerilogSemanticTokensProvider implements vscode.DocumentSemanticTokensProv
         const uri = document.uri.toString();
         const signals = signalDatabase.getSignalsByUri(uri);
         const params = parameterDatabase.getParametersByUri(uri);
-        const tokenData = computeSemanticTokens(document.getText(), signals, params);
+        const modTokens = moduleTokenDatabase.getTokensByUri(uri);
+        const tokenData = computeSemanticTokens(document.getText(), signals, params, modTokens);
 
         const builder = new vscode.SemanticTokensBuilder(semanticTokensLegend);
         for (const t of tokenData) {
