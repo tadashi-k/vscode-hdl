@@ -16,13 +16,13 @@
       "include": "#signal-declarations"
     },
     {
-      "include": "#module-instantiation"
-    },
-    {
       "include": "#blocks"
     },
     {
       "include": "#keywords"
+    },
+    {
+      "include": "#module-instantiation"
     },
     {
       "include": "#numbers"
