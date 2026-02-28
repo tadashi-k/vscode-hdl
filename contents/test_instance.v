@@ -16,11 +16,22 @@ end
 counter #(
     .WIDTH(8)
 )
-counter_i (
+counter_i_1 (
     .clk(clk),
     .reset(reset),
     .count_in({init_h, init_l}),
     .count_out({count_h, count_l})
+);
+
+// need .count_out otherwise show warning at counter_i_2
+// .reset() is OK because it means unconnected port obviously
+counter #(
+    .WIDTH(8)
+)
+counter_i_2 (
+    .clk(clk),
+    .reset(),
+    .count_in({init_l, init_h})
 );
 
 endmodule
