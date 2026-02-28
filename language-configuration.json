@@ -6,7 +6,9 @@
   "brackets": [
     ["{", "}"],
     ["[", "]"],
-    ["(", ")"]
+    ["(", ")"],
+    ["begin", "end"],
+    ["module", "endmodule"]
   ],
   "autoClosingPairs": [
     { "open": "{", "close": "}" },
