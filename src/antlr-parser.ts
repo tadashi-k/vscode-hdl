@@ -771,8 +771,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             return 1;
         }
         if (exprArr.length >= 2) {
-            // Part select: identifier[expr][expr2 :+:/-: expr3]
-            // The second and third expressions define the range
+            // Part select, e.g.: identifier[expr][high:low] or identifier[expr][base +: width]
             const fullText = lvalCtx.getText();
             if (fullText.includes('+:') || fullText.includes('-:')) {
                 const widthVal = this._evaluateExpression(exprArr[exprArr.length - 1], moduleParams, moduleSignals);
@@ -810,8 +809,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     length = lvalCtx.getText().length;
                 }
             } else {
-                // Concatenation: use the lvalue text position
-                const startToken = lvalCtx.start || (lvalCtx.getSourceInterval && lvalCtx.parentCtx && lvalCtx.parentCtx.start);
+                // Concatenation: use the lvalue start token position
                 if (lvalCtx.start) {
                     line = lvalCtx.start.line - 1;
                     character = lvalCtx.start.column;
