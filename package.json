@@ -52,7 +52,32 @@
         "command": "verilog.showSymbols",
         "title": "Verilog: Show Symbols Database"
       }
-    ]
+    ],
+    "semanticTokenTypes": [
+      { "id": "hdlReg", "description": "Verilog register signal", "superType": "variable" },
+      { "id": "hdlWire", "description": "Verilog wire signal", "superType": "variable" },
+      { "id": "hdlInteger", "description": "Verilog integer signal", "superType": "variable" },
+      { "id": "hdlParameter", "description": "Verilog parameter", "superType": "variable" }
+    ],
+    "semanticTokenModifiers": [
+      { "id": "hdlPort", "description": "Port signal (input/output/inout)" }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "verilog",
+        "scopes": {
+          "hdlReg": ["variable.other.register.verilog"],
+          "hdlWire": ["variable.other.wire.verilog"],
+          "hdlInteger": ["variable.other.integer.verilog"],
+          "hdlParameter": ["variable.other.constant.verilog"]
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "[verilog]": {
+        "editor.semanticHighlighting.enabled": true
+      }
+    }
   },
   "dependencies": {
     "antlr4": "^4.8.0"

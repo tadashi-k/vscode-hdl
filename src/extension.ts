@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import AntlrVerilogParser = require('./antlr-parser');
 import { parseHdlIgnore, regexScanModules } from './verilog-scanner';
+import { computeSemanticTokens, TOKEN_TYPES, TOKEN_MODIFIERS } from './semantic-tokens';
 
 /**
  * File reader for `include directive expansion in the VS Code extension context.
@@ -610,6 +611,45 @@ class VerilogDefinitionProvider implements vscode.DefinitionProvider {
 }
 
 /**
+ * Semantic Token Provider for Verilog
+ *
+ * Uses the signal and parameter databases to provide semantic tokens for
+ * identifiers, enabling color-coding based on signal type (reg, wire,
+ * integer) rather than relying solely on regex-based TextMate grammars.
+ */
+const semanticTokensLegend = new vscode.SemanticTokensLegend(TOKEN_TYPES, TOKEN_MODIFIERS);
+
+class VerilogSemanticTokensProvider implements vscode.DocumentSemanticTokensProvider {
+    private _onDidChangeSemanticTokens = new vscode.EventEmitter<void>();
+    readonly onDidChangeSemanticTokens = this._onDidChangeSemanticTokens.event;
+
+    /** Notify VS Code that semantic tokens may have changed. */
+    notifyChanged() {
+        this._onDidChangeSemanticTokens.fire();
+    }
+
+    provideDocumentSemanticTokens(document: vscode.TextDocument): vscode.SemanticTokens {
+        const uri = document.uri.toString();
+        const signals = signalDatabase.getSignalsByUri(uri);
+        const params = parameterDatabase.getParametersByUri(uri);
+        const tokenData = computeSemanticTokens(document.getText(), signals, params);
+
+        const builder = new vscode.SemanticTokensBuilder(semanticTokensLegend);
+        for (const t of tokenData) {
+            builder.push(
+                new vscode.Range(
+                    new vscode.Position(t.line, t.character),
+                    new vscode.Position(t.line, t.character + t.length),
+                ),
+                t.tokenType,
+                t.tokenModifiers,
+            );
+        }
+        return builder.build();
+    }
+}
+
+/**
  * Update diagnostics for a document by parsing for syntax errors
  * @param {vscode.TextDocument} document 
  * @param {vscode.DiagnosticCollection} diagnosticCollection 
@@ -654,12 +694,16 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Verilog extension is active!');
     });
 
+    // Create semantic token provider (needs to be referenced from event handlers)
+    const semanticTokensProvider = new VerilogSemanticTokensProvider();
+
     // Listen for document open events
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(document => {
             updateDocumentSymbols(document);
             ensureInstanceDependenciesParsed(document);
             updateDiagnostics(document, diagnosticCollection);
+            semanticTokensProvider.notifyChanged();
         })
     );
 
@@ -669,6 +713,7 @@ export function activate(context: vscode.ExtensionContext) {
             updateDocumentSymbols(event.document);
             ensureInstanceDependenciesParsed(event.document);
             updateDiagnostics(event.document, diagnosticCollection);
+            semanticTokensProvider.notifyChanged();
         })
     );
 
@@ -712,6 +757,15 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.languages.registerDefinitionProvider(
             { language: 'verilog' },
             new VerilogDefinitionProvider()
+        )
+    );
+
+    // Register semantic token provider for Verilog
+    context.subscriptions.push(
+        vscode.languages.registerDocumentSemanticTokensProvider(
+            { language: 'verilog' },
+            semanticTokensProvider,
+            semanticTokensLegend
         )
     );
 
