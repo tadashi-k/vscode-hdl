@@ -128,10 +128,10 @@ export function computeSemanticTokens(
                 continue;
             }
 
-            // --- Identifier ---
+            // --- Identifier --- may start period for named port connection
             const ch = line.charCodeAt(i);
-            if ((ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch === 95) {
-                // A-Z, a-z, _
+            if ((ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch === 95 || ch === 46) {
+                // A-Z, a-z, _, .
                 const start = i;
                 i++;
                 while (i < line.length) {
