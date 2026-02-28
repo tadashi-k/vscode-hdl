@@ -2,7 +2,7 @@
   "name": "hdl-support",
   "displayName": "Verilog Language Support",
   "description": "",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "tadashi",
   "repository": {
     "type": "git",
@@ -24,7 +24,7 @@
     "clean:antlr": "rm -rf antlr/generated",
     "build": "tsc -p tsconfig.json",
     "test": "node -r ts-node/register test/test_all.ts",
-    "pack": "vsce pack"
+    "pack": "vsce package"
   },
   "contributes": {
     "languages": [
