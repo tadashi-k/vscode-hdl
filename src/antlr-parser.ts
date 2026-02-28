@@ -344,8 +344,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                             });
                             // Track for undeclared-identifier checking (Warning 1)
                             // without adding to _moduleSignalRefs (preserves Warning 2
-                            // behaviour: output-port connections must not count as "used").
-                            this._signalRefList.push({ name: localSignalInfo.name, moduleName: this._currentModule.name, line: localSignalInfo.line, character: localSignalInfo.character });
+                            // behavior: output-port connections must not count as "used").
+                            this._signalRefList.push({
+                                name: localSignalInfo.name, moduleName: this._currentModule.name,
+                                line: localSignalInfo.line, character: localSignalInfo.character
+                            });
                         } else if (exprCtx) {
                             // Check for concatenation: .port({sig_a, sig_b})
                             // Each identifier in the concat must be tracked via _instPortConnections
@@ -370,7 +373,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                         moduleName: this._currentModule.name
                                     });
                                     // Track for undeclared-identifier checking (Warning 1)
-                                    this._signalRefList.push({ name: localSignalInfo.name, moduleName: this._currentModule.name, line: localSignalInfo.line, character: localSignalInfo.character });
+                                    this._signalRefList.push({
+                                        name: localSignalInfo.name, moduleName: this._currentModule.name,
+                                        line: localSignalInfo.line, character: localSignalInfo.character
+                                    });
                                 }
                             } else {
                                 // Complex expression (not a simple identifier or concatenation): visit
