@@ -138,6 +138,47 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return this._getIdentifierInfo(identCtx);
     }
 
+    // Extract all identifier infos from a lvalue, handling both simple identifiers and concatenations.
+    _getLvalueIdentifiers(lvalCtx: any): any[] {
+        if (!lvalCtx) return [];
+        // Simple identifier lvalue
+        const identCtx = lvalCtx.identifier ? lvalCtx.identifier() : null;
+        if (identCtx) {
+            const info = this._getIdentifierInfo(identCtx);
+            return info ? [info] : [];
+        }
+        // Concatenation lvalue: {a, b, c}
+        const concatCtx = lvalCtx.concatenation ? lvalCtx.concatenation() : null;
+        if (concatCtx) {
+            return this._getConcatenationIdentifiers(concatCtx);
+        }
+        return [];
+    }
+
+    // Extract top-level identifiers from a concatenation context.
+    // Handles nested concatenations like {a, {b, c}} recursively.
+    _getConcatenationIdentifiers(concatCtx: any): any[] {
+        const results: any[] = [];
+        const expressions = concatCtx.expression ? concatCtx.expression() : null;
+        const exprArr = Array.isArray(expressions) ? expressions : (expressions ? [expressions] : []);
+        for (const exprCtx of exprArr) {
+            // Check for nested concatenation inside the expression's primary
+            const primaryCtx = exprCtx.primary ? exprCtx.primary() : null;
+            if (primaryCtx) {
+                const nestedConcat = primaryCtx.concatenation ? primaryCtx.concatenation() : null;
+                if (nestedConcat) {
+                    results.push(...this._getConcatenationIdentifiers(nestedConcat));
+                    continue;
+                }
+            }
+            const info = this._getPrimaryIdentifier(exprCtx);
+            if (info) {
+                results.push(info);
+            }
+        }
+        return results;
+    }
+
     _getIdentifierInfo(identCtx: any) {
         const token = identCtx.SIMPLE_IDENTIFIER() || identCtx.ESCAPED_IDENTIFIER();
         if (!token) return null;
@@ -335,8 +376,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Capture lvalue of continuous assign (assignment rule) or FOR loop (in procedural)
     visitAssignment(ctx: any) {
         if (!this._currentModule) return null;
-        const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
-        if (lvalInfo) {
+        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
+        for (const lvalInfo of lvalIdentifiers) {
             const entry = { ...lvalInfo, moduleName: this._currentModule.name };
             if (this._inContinuousAssign) {
                 this.assignLvalues.push(entry);
@@ -358,8 +399,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Capture lvalue of blocking assignment (always/initial body)
     visitBlocking_assignment(ctx: any) {
         if (!this._currentModule) return null;
-        const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
-        if (lvalInfo) {
+        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
+        for (const lvalInfo of lvalIdentifiers) {
             this.procLvalues.push({ ...lvalInfo, moduleName: this._currentModule.name });
         }
         // Evaluate r-value expression
@@ -376,8 +417,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Capture lvalue of non-blocking assignment (always/initial body)
     visitNon_blocking_assignment(ctx: any) {
         if (!this._currentModule) return null;
-        const lvalInfo = this._getLvalueIdentifierInfo(ctx.lvalue());
-        if (lvalInfo) {
+        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
+        for (const lvalInfo of lvalIdentifiers) {
             this.procLvalues.push({ ...lvalInfo, moduleName: this._currentModule.name });
         }
         this.visitChildren(ctx);
@@ -448,6 +489,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // but do NOT add the l-value identifier itself to _moduleSignalRefs.
     // Being the target of an assignment does not constitute "using" the signal.
     visitLvalue(ctx: any) {
+        // For concatenation lvalues, skip visiting children to avoid adding
+        // concatenation member identifiers to signal refs (they are lvalue targets,
+        // not r-value references). The assignment visitors handle extracting identifiers.
+        const concatCtx = ctx.concatenation ? ctx.concatenation() : null;
+        if (concatCtx) {
+            return null;
+        }
         this.visitChildren(ctx);
         return null;
     }
@@ -868,6 +916,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const rawIds = netIdsCtx.net_identifier();
         const ids = Array.isArray(rawIds) ? rawIds : (rawIds ? [rawIds] : []);
 
+        // Detect which net identifiers have initial values (e.g., wire a = 1;)
+        const idsWithInit = this._identifiersWithInitialValue(netIdsCtx, ids);
+
         for (const netIdCtx of ids) {
             const info = this._getIdentifierInfo(netIdCtx.identifier());
             if (!info) continue;
@@ -882,6 +933,14 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 bitWidth,
                 moduleName: this._currentModule.name
             });
+
+            // Mark as assigned if it has an initial value
+            if (idsWithInit.has(netIdCtx)) {
+                this.assignLvalues.push({
+                    ...info,
+                    moduleName: this._currentModule.name
+                });
+            }
         }
         return null;
     }
@@ -895,6 +954,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const regIdsCtx = ctx.list_of_register_identifiers();
         const rawIds = regIdsCtx.register_identifier();
         const ids = Array.isArray(rawIds) ? rawIds : (rawIds ? [rawIds] : []);
+
+        // Detect which register identifiers have initial values (e.g., reg a = 1;)
+        const idsWithInit = this._identifiersWithInitialValue(regIdsCtx, ids);
 
         for (const regIdCtx of ids) {
             const info = this._getIdentifierInfo(regIdCtx.identifier());
@@ -910,8 +972,37 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 bitWidth,
                 moduleName: this._currentModule.name
             });
+
+            // Mark as assigned if it has an initial value
+            if (idsWithInit.has(regIdCtx)) {
+                this.procLvalues.push({
+                    ...info,
+                    moduleName: this._currentModule.name
+                });
+            }
         }
         return null;
+    }
+
+    // Helper: determine which identifier contexts in a list have initial values ('=' expr).
+    // Iterates through the parent context's children to find '=' tokens following each identifier.
+    _identifiersWithInitialValue(listCtx: any, idCtxs: any[]): Set<any> {
+        const result = new Set<any>();
+        const children = listCtx.children;
+        if (!children) return result;
+        let lastIdCtx: any = null;
+        const idSet = new Set(idCtxs);
+        for (const child of children) {
+            if (idSet.has(child)) {
+                lastIdCtx = child;
+            } else if (lastIdCtx && typeof child.getText === 'function' && child.getText() === '=') {
+                result.add(lastIdCtx);
+                lastIdCtx = null;
+            } else if (typeof child.getText === 'function' && child.getText() === ',') {
+                lastIdCtx = null;
+            }
+        }
+        return result;
     }
 
     // Genvar declarations: genvar i, j;
