@@ -11,7 +11,7 @@ const vscode = {
 (global as any).vscode = vscode;
 
 import { computeSemanticTokens } from '../src/semantic-tokens';
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 
 const parser = new AntlrVerilogParser();
 

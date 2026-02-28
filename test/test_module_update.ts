@@ -14,7 +14,7 @@ const vscode = {
 };
 (global as any).vscode = vscode;
 
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
 
 class MockUri {
@@ -52,14 +52,14 @@ class SignalDatabase {
         this._modulesByUri = new Map<string, any>();
     }
 
-    updateSignals(moduleName, uri, signals) {
+    updateSignals(moduleName: any, uri: any, signals: any) {
         this.signals.set(moduleName, signals);
         if (!this._modulesByUri.has(uri)) this._modulesByUri.set(uri, []);
         const list = this._modulesByUri.get(uri);
         if (!list.includes(moduleName)) list.push(moduleName);
     }
 
-    removeSignalsByUri(uri) {
+    removeSignalsByUri(uri: any) {
         const names = this._modulesByUri.get(uri) || [];
         for (const name of names) this.signals.delete(name);
         this._modulesByUri.delete(uri);
@@ -72,15 +72,15 @@ class ModuleDatabase {
         this.modules = new Map<string, any>();
     }
 
-    addModule(module) {
+    addModule(module: any) {
         this.modules.set(module.name, module);
     }
 
-    getModule(name) {
+    getModule(name: any) {
         return this.modules.get(name);
     }
 
-    removeModulesFromFile(uri) {
+    removeModulesFromFile(uri: any) {
         for (const [name, module] of this.modules.entries()) {
             if (module.uri === uri) {
                 this.modules.delete(name);
@@ -93,7 +93,7 @@ class ModuleDatabase {
     }
 }
 
-function updateDocumentSymbols(document, signalDB, moduleDB) {
+function updateDocumentSymbols(document: any, signalDB: any, moduleDB: any) {
     const uri = document.uri.toString();
     const { modules, signals } = parser.parseSymbols(document);
 

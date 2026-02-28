@@ -30,7 +30,7 @@ class MockTextDocument {
 }
 
 (global as any).vscode = vscode;
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 
 function runTests() {
     console.log('Running Module Instantiation Database Tests...\n');
@@ -99,7 +99,7 @@ endmodule
         const doc = new MockTextDocument(code, 'top.v');
         const { instances } = parser.parseSymbols(doc);
 
-        const inst = instances.find(i => i.instanceName === 'u_counter');
+        const inst = instances.find((i: any) => i.instanceName === 'u_counter');
         const pass = inst &&
             inst.moduleName === 'counter' &&
             inst.parentModuleName === 'top' &&
@@ -138,9 +138,9 @@ endmodule
         const doc = new MockTextDocument(code, 'top.v');
         const { instances } = parser.parseSymbols(doc);
 
-        const inst = instances.find(i => i.instanceName === 'u_counter');
-        const clkConn = inst && inst.portConnections.find(p => p.portName === 'clk');
-        const cntConn = inst && inst.portConnections.find(p => p.portName === 'count');
+        const inst = instances.find((i: any) => i.instanceName === 'u_counter');
+        const clkConn = inst && inst.portConnections.find((p: any) => p.portName === 'clk');
+        const cntConn = inst && inst.portConnections.find((p: any) => p.portName === 'count');
 
         const pass = clkConn && clkConn.localSignalName === 'clk' &&
             cntConn && cntConn.localSignalName === 'cnt';
@@ -186,8 +186,8 @@ endmodule
         const doc = new MockTextDocument(code, 'top2.v');
         const { instances } = parser.parseSymbols(doc);
 
-        const ha1 = instances.find(i => i.instanceName === 'ha1');
-        const ha2 = instances.find(i => i.instanceName === 'ha2');
+        const ha1 = instances.find((i: any) => i.instanceName === 'ha1');
+        const ha2 = instances.find((i: any) => i.instanceName === 'ha2');
 
         const pass = ha1 && ha2 &&
             ha1.moduleName === 'half_adder' &&
@@ -200,7 +200,7 @@ endmodule
             passedTests++;
         } else {
             console.log('  ✗ Test 4 FAILED');
-            console.log('  instances:', JSON.stringify(instances.map(i => ({
+            console.log('  instances:', JSON.stringify(instances.map((i: any) => ({
                 moduleName: i.moduleName,
                 instanceName: i.instanceName,
                 parentModuleName: i.parentModuleName
@@ -224,8 +224,8 @@ endmodule
         const doc = new MockTextDocument(code, 'multi.v');
         const { instances } = parser.parseSymbols(doc);
 
-        const instA = instances.find(i => i.parentModuleName === 'mod_a');
-        const instB = instances.find(i => i.parentModuleName === 'mod_b');
+        const instA = instances.find((i: any) => i.parentModuleName === 'mod_a');
+        const instB = instances.find((i: any) => i.parentModuleName === 'mod_b');
 
         const pass = instA && instA.moduleName === 'dff' &&
             instB && instB.moduleName === 'buf_mod';
@@ -235,7 +235,7 @@ endmodule
             passedTests++;
         } else {
             console.log('  ✗ Test 5 FAILED');
-            console.log('  instances:', JSON.stringify(instances.map(i => ({
+            console.log('  instances:', JSON.stringify(instances.map((i: any) => ({
                 moduleName: i.moduleName,
                 instanceName: i.instanceName,
                 parentModuleName: i.parentModuleName
@@ -281,7 +281,7 @@ endmodule
                 this.instances = new Map<string, any>();
                 this._modulesByUri = new Map<string, any>();
             }
-            updateInstances(parentModuleName, uri, instances) {
+            updateInstances(parentModuleName: any, uri: any, instances: any) {
                 this.instances.set(parentModuleName, instances);
                 if (!this._modulesByUri.has(uri)) {
                     this._modulesByUri.set(uri, []);
@@ -291,10 +291,10 @@ endmodule
                     list.push(parentModuleName);
                 }
             }
-            getInstances(parentModuleName) {
+            getInstances(parentModuleName: any) {
                 return this.instances.get(parentModuleName) || [];
             }
-            getInstancesByUri(uri) {
+            getInstancesByUri(uri: any) {
                 const moduleNames = this._modulesByUri.get(uri) || [];
                 const result = [];
                 for (const name of moduleNames) {
@@ -302,7 +302,7 @@ endmodule
                 }
                 return result;
             }
-            removeInstancesByUri(uri) {
+            removeInstancesByUri(uri: any) {
                 const moduleNames = this._modulesByUri.get(uri) || [];
                 for (const name of moduleNames) {
                     this.instances.delete(name);

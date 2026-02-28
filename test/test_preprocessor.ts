@@ -14,7 +14,7 @@ function runTests() {
     let passedTests = 0;
 
     // Helper
-    function assert(condition, testName, detail?) {
+    function assert(condition: any, testName: any, detail?: any) {
         totalTests++;
         if (condition) {
             console.log(`  ✓ ${testName} PASSED`);

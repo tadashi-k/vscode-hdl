@@ -14,7 +14,7 @@ const vscode = {
 };
 (global as any).vscode = vscode;
 
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
 
 class MockTextDocument {
@@ -41,7 +41,7 @@ class SignalDatabase {
         this._modulesByUri = new Map<string, any>();
     }
 
-    updateSignals(moduleName, uri, signals) {
+    updateSignals(moduleName: any, uri: any, signals: any) {
         this.signals.set(moduleName, signals);
         if (!this._modulesByUri.has(uri)) {
             this._modulesByUri.set(uri, []);
@@ -52,11 +52,11 @@ class SignalDatabase {
         }
     }
 
-    getSignals(moduleName) {
+    getSignals(moduleName: any) {
         return this.signals.get(moduleName) || [];
     }
 
-    getSignalsByUri(uri) {
+    getSignalsByUri(uri: any) {
         const moduleNames = this._modulesByUri.get(uri) || [];
         const result = [];
         for (const name of moduleNames) {
@@ -65,7 +65,7 @@ class SignalDatabase {
         return result;
     }
 
-    removeSignalsByUri(uri) {
+    removeSignalsByUri(uri: any) {
         const moduleNames = this._modulesByUri.get(uri) || [];
         for (const name of moduleNames) {
             this.signals.delete(name);
@@ -89,15 +89,15 @@ class ModuleDatabase {
         this.modules = new Map<string, any>();
     }
 
-    addModule(module) {
+    addModule(module: any) {
         this.modules.set(module.name, module);
     }
 
-    getModule(name) {
+    getModule(name: any) {
         return this.modules.get(name);
     }
 
-    removeModulesFromFile(uri) {
+    removeModulesFromFile(uri: any) {
         for (const [name, module] of this.modules.entries()) {
             if (module.uri === uri) {
                 this.modules.delete(name);
@@ -111,7 +111,7 @@ class ModuleDatabase {
 }
 
 // Helper to update databases from a parsed document
-function updateDatabases(signalDB, moduleDB, doc) {
+function updateDatabases(signalDB: any, moduleDB: any, doc: any) {
     const uri = doc.uri.toString();
     const { modules, signals } = parser.parseSymbols(doc);
 
@@ -173,8 +173,8 @@ function runTests() {
     const topSignals = signalDB.getSignals('top_module');
 
     if (counterSignals.length >= 3 && topSignals.length >= 3) {
-        console.log(`✓ counter module has ${counterSignals.length} signals: ${counterSignals.map(s => s.name).join(', ')}`);
-        console.log(`  top_module module has ${topSignals.length} signals: ${topSignals.map(s => s.name).join(', ')}`);
+        console.log(`✓ counter module has ${counterSignals.length} signals: ${counterSignals.map((s: any) => s.name).join(', ')}`);
+        console.log(`  top_module module has ${topSignals.length} signals: ${topSignals.map((s: any) => s.name).join(', ')}`);
         passed++;
     } else {
         console.log(`✗ Expected at least 3 signals in each module`);
@@ -195,8 +195,8 @@ function runTests() {
 
     // Test 4: Verify signals are isolated per module
     console.log('\nTest 4: Signals in one module do not appear in another module\'s signal list');
-    const counterSignalNames = counterSignals.map(s => s.name);
-    const topSignalNames = topSignals.map(s => s.name);
+    const counterSignalNames = counterSignals.map((s: any) => s.name);
+    const topSignalNames = topSignals.map((s: any) => s.name);
 
     // 'ready' is only in top_module, should not be in counter signals
     // 'enable' is only in counter, should not be in top_module signals
@@ -232,7 +232,7 @@ function runTests() {
     console.log('\nTest 6: Module object includes ports list');
     const topModule = moduleDB.getModule('top_module');
     if (topModule && Array.isArray(topModule.ports) && topModule.ports.length >= 2) {
-        console.log(`✓ top_module has ${topModule.ports.length} ports: ${topModule.ports.map(p => p.name).join(', ')}`);
+        console.log(`✓ top_module has ${topModule.ports.length} ports: ${topModule.ports.map((p: any) => p.name).join(', ')}`);
         passed++;
     } else {
         console.log(`✗ Expected top_module to have ports list`);

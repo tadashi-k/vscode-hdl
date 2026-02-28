@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+export {};
 // Test script for parameter/localparam database
 const vscode = {
     DiagnosticSeverity: {
@@ -26,7 +27,7 @@ class MockTextDocument {
 }
 
 (global as any).vscode = vscode;
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 
 function runTests() {
     console.log('Running Parameter Database Tests...\n');
@@ -54,8 +55,8 @@ endmodule
 
         const pass = Array.isArray(result.parameters) &&
             result.parameters.length === 2 &&
-            result.parameters.some(p => p.name === 'WIDTH') &&
-            result.parameters.some(p => p.name === 'DEPTH');
+            result.parameters.some((p: any) => p.name === 'WIDTH') &&
+            result.parameters.some((p: any) => p.name === 'DEPTH');
 
         if (pass) {
             console.log('  ✓ Test 1 PASSED');
@@ -81,8 +82,8 @@ endmodule
         const doc = new MockTextDocument(code, 'test.v');
         const { parameters } = parser.parseSymbols(doc);
 
-        const param = parameters.find(p => p.name === 'PARAM');
-        const local = parameters.find(p => p.name === 'LOCAL');
+        const param = parameters.find((p: any) => p.name === 'PARAM');
+        const local = parameters.find((p: any) => p.name === 'LOCAL');
 
         const pass = param && param.kind === 'parameter' &&
                      local && local.kind === 'localparam';
@@ -113,9 +114,9 @@ endmodule
         const doc = new MockTextDocument(code, 'test.v');
         const { parameters } = parser.parseSymbols(doc);
 
-        const a = parameters.find(p => p.name === 'A');
-        const b = parameters.find(p => p.name === 'B');
-        const c = parameters.find(p => p.name === 'C');
+        const a = parameters.find((p: any) => p.name === 'A');
+        const b = parameters.find((p: any) => p.name === 'B');
+        const c = parameters.find((p: any) => p.name === 'C');
 
         const pass = a && a.value === 42 &&
                      b && b.value === 255 &&
@@ -149,9 +150,9 @@ endmodule
         const doc = new MockTextDocument(code, 'test.v');
         const { parameters } = parser.parseSymbols(doc);
 
-        const max   = parameters.find(p => p.name === 'MAX');
-        const dbl   = parameters.find(p => p.name === 'DOUBLE');
-        const half  = parameters.find(p => p.name === 'HALF');
+        const max   = parameters.find((p: any) => p.name === 'MAX');
+        const dbl   = parameters.find((p: any) => p.name === 'DOUBLE');
+        const half  = parameters.find((p: any) => p.name === 'HALF');
 
         const pass = max  && max.value  === 7  &&
                      dbl  && dbl.value  === 16 &&
@@ -181,7 +182,7 @@ endmodule
         const doc = new MockTextDocument(code, 'location_test.v');
         const { parameters } = parser.parseSymbols(doc);
 
-        const p = parameters.find(x => x.name === 'PARAM_A');
+        const p = parameters.find((x: any) => x.name === 'PARAM_A');
 
         const pass = p &&
             p.uri === 'location_test.v' &&
@@ -213,8 +214,8 @@ endmodule
         const doc = new MockTextDocument(code, 'two_mods.v');
         const { parameters } = parser.parseSymbols(doc);
 
-        const pa = parameters.find(p => p.name === 'P' && p.moduleName === 'mod_a');
-        const pb = parameters.find(p => p.name === 'P' && p.moduleName === 'mod_b');
+        const pa = parameters.find((p: any) => p.name === 'P' && p.moduleName === 'mod_a');
+        const pb = parameters.find((p: any) => p.name === 'P' && p.moduleName === 'mod_b');
 
         const pass = pa && pa.value === 1 &&
                      pb && pb.value === 2;
@@ -243,8 +244,8 @@ endmodule
         const doc = new MockTextDocument(code, 'expr.v');
         const { parameters } = parser.parseSymbols(doc);
 
-        const base = parameters.find(p => p.name === 'BASE');
-        const calc = parameters.find(p => p.name === 'CALC');
+        const base = parameters.find((p: any) => p.name === 'BASE');
+        const calc = parameters.find((p: any) => p.name === 'CALC');
 
         const pass = base && base.exprText === '4' &&
                      calc && typeof calc.exprText === 'string' && calc.exprText.length > 0 &&
@@ -275,8 +276,8 @@ endmodule
         const doc = new MockTextDocument(code, 'counter.v');
         const { parameters } = parser.parseSymbols(doc);
 
-        const width    = parameters.find(p => p.name === 'WIDTH');
-        const maxCount = parameters.find(p => p.name === 'MAX_COUNT');
+        const width    = parameters.find((p: any) => p.name === 'WIDTH');
+        const maxCount = parameters.find((p: any) => p.name === 'MAX_COUNT');
 
         const pass = width    && width.value    === 8   &&
                      maxCount && maxCount.value  === 255;
@@ -353,7 +354,7 @@ endmodule
             passedTests++;
         } else {
             console.log('  ✗ Test 10 FAILED');
-            console.log('  modules:', modules.map(m => m.name));
+            console.log('  modules:', modules.map((m: any) => m.name));
             console.log('  errors:', errors.length);
         }
     }
@@ -374,9 +375,9 @@ endmodule
         const doc = new MockTextDocument(code, 'bw_arith.v');
         const { signals, parameters } = parser.parseSymbols(doc);
 
-        const width      = parameters.find(p => p.name === 'WIDTH');
-        const addrWidth  = parameters.find(p => p.name === 'ADDR_WIDTH');
-        const mem        = signals.find(s => s.name === 'mem');
+        const width      = parameters.find((p: any) => p.name === 'WIDTH');
+        const addrWidth  = parameters.find((p: any) => p.name === 'ADDR_WIDTH');
+        const mem        = signals.find((s: any) => s.name === 'mem');
 
         // WIDTH = 8 (from 8'h08), ADDR_WIDTH = 7, mem bitWidth = [7:0]
         const pass = width     && width.value     === 8 &&
@@ -424,7 +425,7 @@ endmodule
             passedTests++;
         } else {
             console.log('  ✗ Test 12 FAILED');
-            console.log('  modules:', modules.map(m => m.name));
+            console.log('  modules:', modules.map((m: any) => m.name));
             console.log('  errors:', errors);
         }
     }
@@ -457,7 +458,7 @@ endmodule
             passedTests++;
         } else {
             console.log('  ✗ Test 13 FAILED');
-            console.log('  modules:', signalWidthModules.map(m => m.name));
+            console.log('  modules:', signalWidthModules.map((m: any) => m.name));
             console.log('  errors:', signalWidthErrors);
         }
     }
@@ -485,7 +486,7 @@ endmodule
         const { modules: mods, errors: errs, warnings: warns } = parser.parseSymbols(doc);
 
         // There should be no errors and no "undefined signal" warnings for 'enable' or 'val'
-        const undefinedWarns = warns.filter(w => w.message.includes('referenced but not declared'));
+        const undefinedWarns = warns.filter((w: any) => w.message.includes('referenced but not declared'));
         const pass = mods.length === 1 && errs.length === 0 && undefinedWarns.length === 0;
 
         if (pass) {

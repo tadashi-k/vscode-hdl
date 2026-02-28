@@ -10,7 +10,7 @@ const vscode = {
 };
 (global as any).vscode = vscode;
 
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
 
 class MockTextDocument {
@@ -43,8 +43,8 @@ function runTests() {
     const { modules: modules1, signals: signals1 } = parser.parseSymbols(test1Doc);
 
     const moduleCount = modules1.length;
-    const wireCount = signals1.filter(s => s.type === 'wire').length;
-    const regCount = signals1.filter(s => s.type === 'reg').length;
+    const wireCount = signals1.filter((s: any) => s.type === 'wire').length;
+    const regCount = signals1.filter((s: any) => s.type === 'reg').length;
 
     console.log(`Found ${modules1.length} modules, ${signals1.length} signals:`);
     console.log(`  - Modules: ${moduleCount}`);
@@ -67,15 +67,15 @@ function runTests() {
     const { modules: modules2, signals: signals2 } = parser.parseSymbols(test2Doc);
 
     const module2Count = modules2.length;
-    const wire2Count = signals2.filter(s => s.type === 'wire').length;
-    const reg2Count = signals2.filter(s => s.type === 'reg').length;
+    const wire2Count = signals2.filter((s: any) => s.type === 'wire').length;
+    const reg2Count = signals2.filter((s: any) => s.type === 'reg').length;
 
     console.log(`Found ${modules2.length} modules, ${signals2.length} signals:`);
     console.log(`  - Modules: ${module2Count}`);
     console.log(`  - Wires: ${wire2Count}`);
     console.log(`  - Regs: ${reg2Count}`);
 
-    signals2.forEach(s => {
+    signals2.forEach((s: any) => {
         let displayName = s.name;
         if (s.bitWidth) {
             displayName = `${s.name}${s.bitWidth}`;

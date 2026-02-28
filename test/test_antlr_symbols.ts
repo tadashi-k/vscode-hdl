@@ -31,7 +31,7 @@ class MockTextDocument {
 }
 
 (global as any).vscode = vscode;
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 
 function runTests() {
     console.log('Running ANTLR Symbol Extraction Tests...\n');
@@ -62,8 +62,8 @@ endmodule
         console.log(`  Modules: ${modules.length}, Signals: ${signals.length}, Errors: ${errors.length}`);
 
         const mod = modules[0];
-        const portNames = mod ? mod.ports.map(p => p.name) : [];
-        const signalNames = signals.map(s => s.name);
+        const portNames = mod ? mod.ports.map((p: any) => p.name) : [];
+        const signalNames = signals.map((s: any) => s.name);
 
         const pass = modules.length === 1 &&
             mod.name === 'test_module' &&
@@ -79,7 +79,7 @@ endmodule
             passedTests++;
         } else {
             console.log('  ✗ Test 1 FAILED');
-            console.log('  modules:', JSON.stringify(modules.map(m => ({ name: m.name, ports: m.ports.map(p => p.name) }))));
+            console.log('  modules:', JSON.stringify(modules.map((m: any) => ({ name: m.name, ports: m.ports.map((p: any) => p.name) }))));
             console.log('  signals:', signalNames);
         }
     }
@@ -99,22 +99,22 @@ endmodule
         const doc = new MockTextDocument(code, 'two_modules.v');
         const { modules, signals } = parser.parseSymbols(doc);
 
-        const aSignals = signals.filter(s => s.moduleName === 'mod_a');
-        const bSignals = signals.filter(s => s.moduleName === 'mod_b');
+        const aSignals = signals.filter((s: any) => s.moduleName === 'mod_a');
+        const bSignals = signals.filter((s: any) => s.moduleName === 'mod_b');
 
         const pass = modules.length === 2 &&
-            aSignals.some(s => s.name === 'x') &&
-            aSignals.some(s => s.name === 'internal_a') &&
-            bSignals.some(s => s.name === 'y') &&
-            bSignals.some(s => s.name === 'internal_b');
+            aSignals.some((s: any) => s.name === 'x') &&
+            aSignals.some((s: any) => s.name === 'internal_a') &&
+            bSignals.some((s: any) => s.name === 'y') &&
+            bSignals.some((s: any) => s.name === 'internal_b');
 
         if (pass) {
             console.log('  ✓ Test 2 PASSED');
             passedTests++;
         } else {
             console.log('  ✗ Test 2 FAILED');
-            console.log('  mod_a signals:', aSignals.map(s => s.name));
-            console.log('  mod_b signals:', bSignals.map(s => s.name));
+            console.log('  mod_a signals:', aSignals.map((s: any) => s.name));
+            console.log('  mod_b signals:', bSignals.map((s: any) => s.name));
         }
     }
 
@@ -135,11 +135,11 @@ endmodule
         const doc = new MockTextDocument(code, 'field_test.v');
         const { signals } = parser.parseSymbols(doc);
 
-        const data = signals.find(s => s.name === 'data');
-        const q = signals.find(s => s.name === 'q');
-        const bus = signals.find(s => s.name === 'bus');
-        const internal = signals.find(s => s.name === 'internal');
-        const flag = signals.find(s => s.name === 'flag');
+        const data = signals.find((s: any) => s.name === 'data');
+        const q = signals.find((s: any) => s.name === 'q');
+        const bus = signals.find((s: any) => s.name === 'bus');
+        const internal = signals.find((s: any) => s.name === 'internal');
+        const flag = signals.find((s: any) => s.name === 'flag');
 
         const pass = data && data.direction === 'input' && data.type === 'wire' && data.bitWidth === '[7:0]' &&
             q && q.direction === 'output' && q.type === 'reg' && q.bitWidth === null &&
@@ -169,8 +169,8 @@ endmodule
         const doc = new MockTextDocument(testContent, testPath);
         const { modules, signals } = parser.parseSymbols(doc);
 
-        const counterMod = modules.find(m => m.name === 'counter');
-        const portNames = counterMod ? counterMod.ports.map(p => p.name) : [];
+        const counterMod = modules.find((m: any) => m.name === 'counter');
+        const portNames = counterMod ? counterMod.ports.map((p: any) => p.name) : [];
 
         const pass = counterMod &&
             portNames.includes('clk') &&
@@ -200,12 +200,12 @@ endmodule
         const { modules, signals, errors } = parser.parseSymbols(doc);
 
         const pass = modules.length === 2 &&
-            modules.some(m => m.name === 'full_adder') &&
-            modules.some(m => m.name === 'dff') &&
+            modules.some((m: any) => m.name === 'full_adder') &&
+            modules.some((m: any) => m.name === 'dff') &&
             errors.length === 0;
 
         if (pass) {
-            console.log(`  ✓ Test 5 PASSED (modules: ${modules.map(m => m.name).join(', ')})`);
+            console.log(`  ✓ Test 5 PASSED (modules: ${modules.map((m: any) => m.name).join(', ')})`);
             passedTests++;
         } else {
             console.log(`  ✗ Test 5 FAILED (got ${modules.length} modules, ${errors.length} errors)`);
@@ -228,7 +228,7 @@ module err_module (
 
         const pass = errors.length > 0 &&
             modules.length >= 1 &&
-            signals.some(s => s.name === 'clk');
+            signals.some((s: any) => s.name === 'clk');
 
         if (pass) {
             console.log(`  ✓ Test 6 PASSED (${errors.length} errors, ${modules.length} modules)`);
@@ -253,7 +253,7 @@ endmodule
         const doc = new MockTextDocument(code, 'param_range.v');
         const { signals } = parser.parseSymbols(doc);
 
-        const internalCount = signals.find(s => s.name === 'internal_count');
+        const internalCount = signals.find((s: any) => s.name === 'internal_count');
 
         // WIDTH=8, so [WIDTH-1:0] should evaluate to [7:0]
         const pass = internalCount && internalCount.bitWidth === '[7:0]';
@@ -276,7 +276,7 @@ endmodule
         const doc = new MockTextDocument(testContent, testPath);
         const { signals } = parser.parseSymbols(doc);
 
-        const internalCount = signals.find(s => s.name === 'internal_count');
+        const internalCount = signals.find((s: any) => s.name === 'internal_count');
 
         // counter.v has `parameter WIDTH = 8` and `reg [WIDTH-1:0] internal_count`
         // so bitWidth should evaluate to [7:0]

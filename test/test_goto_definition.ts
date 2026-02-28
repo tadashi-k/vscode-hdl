@@ -10,7 +10,7 @@ const vscode = {
 };
 (global as any).vscode = vscode;
 
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
 
 class MockTextDocument {
@@ -27,7 +27,7 @@ class MockTextDocument {
         return this.text;
     }
 
-    lineAt(lineNum) {
+    lineAt(lineNum: any) {
         const lines = this.text.split('\n');
         return {
             text: lines[lineNum] || '',
@@ -47,7 +47,7 @@ class SymbolDatabase {
         this._modulesByUri = new Map<string, any>();   // uri -> moduleNames[]
     }
 
-    update(doc) {
+    update(doc: any) {
         const uri = doc.uri.toString();
         const { modules, signals } = parser.parseSymbols(doc);
 
@@ -72,7 +72,7 @@ class SymbolDatabase {
         }
     }
 
-    getSignalsByUri(uri) {
+    getSignalsByUri(uri: any) {
         const names = this._modulesByUri.get(uri) || [];
         const result = [];
         for (const n of names) result.push(...(this.signals.get(n) || []));
@@ -136,8 +136,8 @@ function runTests() {
 
     // Test 3: Check if signals are found
     console.log('\nTest 3: Signal detection in top_module.v');
-    const counterValueWire = topSignals.find(s => s.name === 'counter_value' && s.type === 'wire');
-    const readyReg = topSignals.find(s => s.name === 'ready' && s.type === 'reg');
+    const counterValueWire = topSignals.find((s: any) => s.name === 'counter_value' && s.type === 'wire');
+    const readyReg = topSignals.find((s: any) => s.name === 'ready' && s.type === 'reg');
 
     if (counterValueWire && readyReg) {
         console.log(`✓ Found wire 'counter_value' and reg 'ready'`);

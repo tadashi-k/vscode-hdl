@@ -15,7 +15,7 @@ const vscode = {
     Position: class {
         line: any;
         character: any;
-        constructor(line, character) {
+        constructor(line: any, character: any) {
             this.line = line;
             this.character = character;
         }
@@ -23,7 +23,7 @@ const vscode = {
     Range: class {
         start: any;
         end: any;
-        constructor(start, end) {
+        constructor(start: any, end: any) {
             this.start = start;
             this.end = end;
         }
@@ -47,12 +47,12 @@ class MockTextDocument {
         return this.text;
     }
 
-    positionAt(offset) {
+    positionAt(offset: any) {
         const lines = this.text.substring(0, offset).split('\n');
         return { line: lines.length - 1 };
     }
 
-    lineAt(line) {
+    lineAt(line: any) {
         return {
             text: this.lines[line] || '',
             firstNonWhitespaceCharacterIndex: (this.lines[line] || '').search(/\S/),
@@ -63,7 +63,7 @@ class MockTextDocument {
 // Load AntlrVerilogParser class from src/antlr-parser.js
 // Mock vscode module for the parser
 (global as any).vscode = vscode;
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 
 function runTests() {
     console.log('Running Verilog Parser Tests...\n');
@@ -101,7 +101,7 @@ endmodule
         
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
         
         if (errors.length === 0) {
@@ -127,7 +127,7 @@ module test_module (
         const errors = parser.parse(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
-        const hasEndmoduleError = errors.some(e => e.message.includes('endmodule'));
+        const hasEndmoduleError = errors.some((e: any) => e.message.includes('endmodule'));
         
         if (hasEndmoduleError) {
             console.log('  ✓ Test 2 PASSED');
@@ -152,7 +152,7 @@ endmodule
         const errors = parser.parse(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
-        const hasReservedError = errors.some(e => 
+        const hasReservedError = errors.some((e: any) =>
             e.message.includes('reserved keyword') || 
             e.message.includes('mismatched input \'wire\'')
         );
@@ -182,7 +182,7 @@ endmodule
         const errors = parser.parse(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
-        const hasBracketError = errors.some(e => 
+        const hasBracketError = errors.some((e: any) =>
             e.message.toLowerCase().includes('bracket') || 
             e.message.includes('missing \')\'')
         );
@@ -208,7 +208,7 @@ endmodule
             const errors = parser.parse(doc);
             
             console.log(`  Found ${errors.length} error(s):`);
-            errors.forEach(e => {
+            errors.forEach((e: any) => {
                 const severity = e.severity === vscode.DiagnosticSeverity.Error ? 'ERROR' : 'WARNING';
                 console.log(`    - Line ${e.line + 1} [${severity}]: ${e.message}`);
             });
@@ -239,7 +239,7 @@ endmodule
             
             console.log(`  Found ${errors.length} error(s)`);
             if (errors.length > 0) {
-                errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+                errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
             }
             
             // full_adder.v should have no syntax errors

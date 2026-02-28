@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+export {};
 /**
  * Test for verifying the startup scan behavior:
  * Module database must be built from all workspace .v files BEFORE
@@ -15,7 +16,7 @@ const vscode = {
 };
 (global as any).vscode = vscode;
 
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 
 class MockTextDocument {
     text: any;
@@ -35,13 +36,13 @@ class ModuleDatabase {
     constructor() {
         this.modules = new Map<string, any>();
     }
-    addModule(module) {
+    addModule(module: any) {
         this.modules.set(module.name, module);
     }
-    getModule(name) {
+    getModule(name: any) {
         return this.modules.get(name);
     }
-    removeModulesFromFile(uri) {
+    removeModulesFromFile(uri: any) {
         for (const [name, module] of this.modules.entries()) {
             if (module.uri === uri) {
                 this.modules.delete(name);
@@ -105,18 +106,18 @@ endmodule
 
         // Without the module database, port connections to 'counter' are unknown,
         // so signals connected to its output ports may incorrectly appear "never assigned"
-        const neverAssignedWarnings = warnings.filter(w => w.message.includes('never assigned'));
+        const neverAssignedWarnings = warnings.filter((w: any) => w.message.includes('never assigned'));
 
         // cnt is connected to counter's output (.count(cnt)), but without the DB
         // the parser doesn't know if 'count' is an output, so cnt may be warned
-        const cntWarned = neverAssignedWarnings.some(w => w.message.includes('cnt'));
+        const cntWarned = neverAssignedWarnings.some((w: any) => w.message.includes('cnt'));
 
         if (cntWarned) {
             console.log('  ✓ Test 1 PASSED (without DB: cnt falsely appears never-assigned - expected false positive)');
             passedTests++;
         } else {
             console.log('  ✗ Test 1 FAILED (expected cnt to appear unassigned without module DB)');
-            console.log('  warnings:', warnings.map(w => w.message));
+            console.log('  warnings:', warnings.map((w: any) => w.message));
         }
     }
 
@@ -141,15 +142,15 @@ endmodule
 
         // Step 3: Run diagnostics on the open top file WITH the complete module database
         const { warnings } = parser.parseSymbols(topDoc, moduleDB);
-        const neverAssignedWarnings = warnings.filter(w => w.message.includes('never assigned'));
-        const cntWarned = neverAssignedWarnings.some(w => w.message.includes('cnt'));
+        const neverAssignedWarnings = warnings.filter((w: any) => w.message.includes('never assigned'));
+        const cntWarned = neverAssignedWarnings.some((w: any) => w.message.includes('cnt'));
 
         if (!cntWarned) {
             console.log('  ✓ Test 2 PASSED (with DB: cnt correctly identified as assigned via counter output port)');
             passedTests++;
         } else {
             console.log('  ✗ Test 2 FAILED (cnt should not be warned as never-assigned when module DB is available)');
-            console.log('  warnings:', warnings.map(w => w.message));
+            console.log('  warnings:', warnings.map((w: any) => w.message));
         }
     }
 
@@ -176,15 +177,15 @@ endmodule
         console.log('\nTest 4: Module in database has correct port information');
 
         const counterMod = moduleDB.getModule('counter');
-        const hasClkPort = counterMod && counterMod.ports.some(p => p.name === 'clk' && p.direction === 'input');
-        const hasCountPort = counterMod && counterMod.ports.some(p => p.name === 'count' && p.direction === 'output');
+        const hasClkPort = counterMod && counterMod.ports.some((p: any) => p.name === 'clk' && p.direction === 'input');
+        const hasCountPort = counterMod && counterMod.ports.some((p: any) => p.name === 'count' && p.direction === 'output');
 
         if (hasClkPort && hasCountPort) {
             console.log('  ✓ Test 4 PASSED (counter has correct ports: clk=input, count=output)');
             passedTests++;
         } else {
             console.log('  ✗ Test 4 FAILED');
-            console.log('  ports:', counterMod ? JSON.stringify(counterMod.ports.map(p => ({name: p.name, direction: p.direction}))) : 'no module');
+            console.log('  ports:', counterMod ? JSON.stringify(counterMod.ports.map((p: any) => ({name: p.name, direction: p.direction}))) : 'no module');
         }
     }
 
@@ -201,7 +202,7 @@ endmodule
 
         // Simulate OLD behavior: run diagnostics BEFORE scanning library files
         const { warnings: warningsBefore } = freshParser.parseSymbols(topDoc, emptyDB);
-        const cntWarnedBefore = warningsBefore.some(w => w.message.includes('cnt') && w.message.includes('never assigned'));
+        const cntWarnedBefore = warningsBefore.some((w: any) => w.message.includes('cnt') && w.message.includes('never assigned'));
 
         // Now add counter to DB (simulates workspace scan completing)
         const counterDoc = new MockTextDocument(counterCode, 'counter.v');
@@ -212,7 +213,7 @@ endmodule
 
         // Simulate NEW behavior: run diagnostics AFTER scanning library files
         const { warnings: warningsAfter } = freshParser.parseSymbols(topDoc, emptyDB);
-        const cntWarnedAfter = warningsAfter.some(w => w.message.includes('cnt') && w.message.includes('never assigned'));
+        const cntWarnedAfter = warningsAfter.some((w: any) => w.message.includes('cnt') && w.message.includes('never assigned'));
 
         if (cntWarnedBefore && !cntWarnedAfter) {
             console.log('  ✓ Test 5 PASSED (running diagnostics after DB scan avoids false warning for cnt)');
@@ -220,8 +221,8 @@ endmodule
         } else {
             console.log('  ✗ Test 5 FAILED');
             console.log(`  cntWarnedBefore=${cntWarnedBefore}, cntWarnedAfter=${cntWarnedAfter}`);
-            console.log('  warningsBefore:', warningsBefore.map(w => w.message));
-            console.log('  warningsAfter:', warningsAfter.map(w => w.message));
+            console.log('  warningsBefore:', warningsBefore.map((w: any) => w.message));
+            console.log('  warningsAfter:', warningsAfter.map((w: any) => w.message));
         }
     }
 

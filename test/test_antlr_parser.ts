@@ -15,7 +15,7 @@ const vscode = {
     Position: class {
         line: any;
         character: any;
-        constructor(line, character) {
+        constructor(line: any, character: any) {
             this.line = line;
             this.character = character;
         }
@@ -23,7 +23,7 @@ const vscode = {
     Range: class {
         start: any;
         end: any;
-        constructor(start, end) {
+        constructor(start: any, end: any) {
             this.start = start;
             this.end = end;
         }
@@ -47,12 +47,12 @@ class MockTextDocument {
         return this.text;
     }
 
-    positionAt(offset) {
+    positionAt(offset: any) {
         const lines = this.text.substring(0, offset).split('\n');
         return { line: lines.length - 1 };
     }
 
-    lineAt(line) {
+    lineAt(line: any) {
         return {
             text: this.lines[line] || '',
             firstNonWhitespaceCharacterIndex: (this.lines[line] || '').search(/\S/),
@@ -63,7 +63,7 @@ class MockTextDocument {
 // Load AntlrVerilogParser class from src/antlr-parser.js
 // Mock vscode module for the parser
 (global as any).vscode = vscode;
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 
 function runTests() {
     console.log('Running ANTLR Verilog Parser Tests...\n');
@@ -101,7 +101,7 @@ endmodule
         
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
         
         if (errors.length === 0) {
@@ -128,7 +128,7 @@ module test_module (
         
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
         
         // ANTLR should detect syntax error for missing endmodule
@@ -158,7 +158,7 @@ endmodule
         
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
         
         if (errors.length > 0) {
@@ -183,7 +183,7 @@ endmodule
             
             console.log(`  Found ${errors.length} error(s)`);
             if (errors.length > 0) {
-                errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+                errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
             }
             
             // full_adder.v should have no syntax errors
@@ -222,7 +222,7 @@ endmodule
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
 
         if (errors.length === 0) {
@@ -256,7 +256,7 @@ endmodule
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
 
         if (errors.length === 0) {
@@ -296,7 +296,7 @@ endmodule
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
 
         if (errors.length === 0) {
@@ -332,7 +332,7 @@ endmodule
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
 
         if (errors.length === 0) {
@@ -366,7 +366,7 @@ endmodule
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
 
         if (errors.length === 0) {
@@ -399,7 +399,7 @@ endmodule
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
 
         if (errors.length === 0) {
@@ -431,7 +431,7 @@ endmodule
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
 
         if (errors.length === 0) {
@@ -469,7 +469,7 @@ endmodule
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
-            errors.forEach(e => console.log(`    - Line ${e.line + 1}: ${e.message}`));
+            errors.forEach((e: any) => console.log(`    - Line ${e.line + 1}: ${e.message}`));
         }
 
         if (errors.length === 0) {
