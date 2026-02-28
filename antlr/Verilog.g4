@@ -465,7 +465,7 @@ expression
 primary
     : number
     | identifier '(' expression (',' expression)* ')'
-    | identifier '[' expression ']' ('[' range_expression ']')?
+    | identifier '[' expression ']' ('[' expression ((':' | '+:' | '-:') expression)? ']')?
     | identifier '[' range_expression ']'
     | identifier
     | concatenation
@@ -474,7 +474,7 @@ primary
     ;
 
 lvalue
-    : identifier '[' expression ']' ('[' range_expression ']')?
+    : identifier '[' expression ']' ('[' expression ((':' | '+:' | '-:') expression)? ']')?
     | identifier '[' range_expression ']'
     | identifier
     | concatenation

@@ -1079,6 +1079,230 @@ endmodule
         }
     }
 
+    // Test 26: Wire assignment with initial value - 'a' should be treated as 'assigned'
+    {
+        totalTests++;
+        console.log('\nTest 26: Wire with initial value treated as assigned');
+        const code = `
+module wire_init (
+    input wire clk
+);
+    wire a = 1'b1;
+
+    always @(posedge clk) begin
+        if (a) begin
+            ;
+        end
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'wire_init.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noNeverAssigned = !warnings.some(w =>
+            w.message.includes("'a'") && w.message.includes('never assigned')
+        );
+        const noNeverUsed = !warnings.some(w =>
+            w.message.includes("'a'") && w.message.includes('never used')
+        );
+
+        if (noNeverAssigned && noNeverUsed && errors.length === 0) {
+            console.log('  ✓ Test 26 PASSED (wire with initial value correctly treated as assigned and used)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 26 FAILED (noNeverAssigned: ${noNeverAssigned}, noNeverUsed: ${noNeverUsed}, errors: ${errors.length})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+            errors.forEach(e => console.log(`    ERROR: Line ${e.line + 1}: ${e.message}`));
+        }
+    }
+
+    // Test 27: Reg assignment with initial value - 'r' should be treated as 'assigned'
+    {
+        totalTests++;
+        console.log('\nTest 27: Reg with initial value treated as assigned');
+        const code = `
+module reg_init (
+    input wire clk
+);
+    reg r = 1'b0;
+
+    always @(posedge clk) begin
+        if (r) begin
+            ;
+        end
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'reg_init.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noNeverAssigned = !warnings.some(w =>
+            w.message.includes("'r'") && w.message.includes('never assigned')
+        );
+
+        if (noNeverAssigned && errors.length === 0) {
+            console.log('  ✓ Test 27 PASSED (reg with initial value correctly treated as assigned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 27 FAILED (noNeverAssigned: ${noNeverAssigned}, errors: ${errors.length})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+            errors.forEach(e => console.log(`    ERROR: Line ${e.line + 1}: ${e.message}`));
+        }
+    }
+
+    // Test 28: Two-dimensional array access a[0][1] parses without errors
+    {
+        totalTests++;
+        console.log('\nTest 28: Two-dimensional array access a[0][1]');
+        const code = `
+module twodim (
+    input wire clk,
+    output reg [7:0] out
+);
+    reg [7:0] mem [0:3];
+
+    always @(posedge clk) begin
+        out <= mem[0];
+    end
+
+    assign mem[0] = 8'hFF;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'twodim.v');
+        const { errors } = parser.parseSymbols(doc);
+
+        if (errors.length === 0) {
+            console.log('  ✓ Test 28 PASSED (two-dimensional array access parses without errors)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 28 FAILED (errors: ${errors.length})`);
+            errors.forEach(e => console.log(`    ERROR: Line ${e.line + 1}: ${e.message}`));
+        }
+    }
+
+    // Test 29: Concatenation lvalue - signals treated as 'assigned'
+    {
+        totalTests++;
+        console.log('\nTest 29: Concatenation lvalue treated as assigned');
+        const code = `
+module concat_assign (
+    input wire clk,
+    input wire [9:0] data_in,
+    output reg [3:0] a,
+    output reg [2:0] b,
+    output reg [2:0] c
+);
+    always @(posedge clk) begin
+        {a, b, c} <= data_in;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'concat_assign.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noANeverAssigned = !warnings.some(w =>
+            w.message.includes("'a'") && w.message.includes('never assigned')
+        );
+        const noBNeverAssigned = !warnings.some(w =>
+            w.message.includes("'b'") && w.message.includes('never assigned')
+        );
+        const noCNeverAssigned = !warnings.some(w =>
+            w.message.includes("'c'") && w.message.includes('never assigned')
+        );
+
+        if (noANeverAssigned && noBNeverAssigned && noCNeverAssigned && errors.length === 0) {
+            console.log('  ✓ Test 29 PASSED (concatenation lvalue members correctly treated as assigned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 29 FAILED (a: ${noANeverAssigned}, b: ${noBNeverAssigned}, c: ${noCNeverAssigned}, errors: ${errors.length})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+            errors.forEach(e => console.log(`    ERROR: Line ${e.line + 1}: ${e.message}`));
+        }
+    }
+
+    // Test 30: Concatenation rvalue - signals treated as 'used'
+    {
+        totalTests++;
+        console.log('\nTest 30: Concatenation rvalue treated as used');
+        const code = `
+module concat_ref (
+    input wire clk,
+    output reg [9:0] sum
+);
+    wire [3:0] a;
+    wire [2:0] b;
+    wire [2:0] c;
+
+    assign a = 4'b0;
+    assign b = 3'b0;
+    assign c = 3'b0;
+
+    always @(posedge clk) begin
+        sum <= {a, b, c};
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'concat_ref.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noANeverUsed = !warnings.some(w =>
+            w.message.includes("'a'") && w.message.includes('never used')
+        );
+        const noBNeverUsed = !warnings.some(w =>
+            w.message.includes("'b'") && w.message.includes('never used')
+        );
+        const noCNeverUsed = !warnings.some(w =>
+            w.message.includes("'c'") && w.message.includes('never used')
+        );
+
+        if (noANeverUsed && noBNeverUsed && noCNeverUsed && errors.length === 0) {
+            console.log('  ✓ Test 30 PASSED (concatenation rvalue members correctly treated as used)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 30 FAILED (a: ${noANeverUsed}, b: ${noBNeverUsed}, c: ${noCNeverUsed}, errors: ${errors.length})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+            errors.forEach(e => console.log(`    ERROR: Line ${e.line + 1}: ${e.message}`));
+        }
+    }
+
+    // Test 31: Continuous assign with concatenation lvalue
+    {
+        totalTests++;
+        console.log('\nTest 31: Continuous assign with concatenation lvalue');
+        const code = `
+module concat_cont_assign (
+    input wire [9:0] data_in
+);
+    wire [3:0] x;
+    wire [2:0] y;
+    wire [2:0] z;
+
+    assign {x, y, z} = data_in;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'concat_cont.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noXNeverAssigned = !warnings.some(w =>
+            w.message.includes("'x'") && w.message.includes('never assigned')
+        );
+        const noYNeverAssigned = !warnings.some(w =>
+            w.message.includes("'y'") && w.message.includes('never assigned')
+        );
+        const noZNeverAssigned = !warnings.some(w =>
+            w.message.includes("'z'") && w.message.includes('never assigned')
+        );
+
+        if (noXNeverAssigned && noYNeverAssigned && noZNeverAssigned && errors.length === 0) {
+            console.log('  ✓ Test 31 PASSED (continuous assign with concat lvalue correctly treated as assigned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 31 FAILED (x: ${noXNeverAssigned}, y: ${noYNeverAssigned}, z: ${noZNeverAssigned}, errors: ${errors.length})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+            errors.forEach(e => console.log(`    ERROR: Line ${e.line + 1}: ${e.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
