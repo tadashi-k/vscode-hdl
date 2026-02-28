@@ -19,7 +19,8 @@ const testFiles = [
   'test_startup_scan.ts',
   'test_parameter_database.ts',
   'test_hdlignore.ts',
-  'test_preprocessor.ts'
+  'test_preprocessor.ts',
+  'test_semantic_tokens.ts'
 ];
 
 let allPassed = true;
