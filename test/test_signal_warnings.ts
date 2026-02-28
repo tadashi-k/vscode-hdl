@@ -1307,6 +1307,81 @@ endmodule
         }
     }
 
+    // Test 32: Wire declaration with assignment - RHS signals should be treated as "used"
+    {
+        totalTests++;
+        console.log('\nTest 32: Wire declaration with assignment - RHS expression signals treated as used');
+        const code = `
+module top_module (
+    input wire clk,
+    input wire reset,
+    input wire setup,
+    output wire [7:0] count_out
+);
+    wire [7:0] counter_value;
+    wire counter_in = setup & (counter_value == 0);
+
+    assign count_out = counter_in;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'wire_assign_expr.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noSetupNeverUsed = !warnings.some(w =>
+            w.message.includes("'setup'") && w.message.includes('never used')
+        );
+        const noCounterValueNeverUsed = !warnings.some(w =>
+            w.message.includes("'counter_value'") && w.message.includes('never used')
+        );
+
+        if (noSetupNeverUsed && noCounterValueNeverUsed && errors.length === 0) {
+            console.log('  ✓ Test 32 PASSED (RHS signals in wire declaration assignment correctly treated as used)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 32 FAILED (setup: ${noSetupNeverUsed}, counter_value: ${noCounterValueNeverUsed}, errors: ${errors.length})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+            errors.forEach(e => console.log(`    ERROR: Line ${e.line + 1}: ${e.message}`));
+        }
+    }
+
+    // Test 33: Reg declaration with assignment - RHS signals should be treated as "used"
+    {
+        totalTests++;
+        console.log('\nTest 33: Reg declaration with assignment - RHS expression signals treated as used');
+        const code = `
+module reg_assign (
+    input wire clk,
+    input wire a,
+    input wire b,
+    output reg out
+);
+    reg r = a & b;
+
+    always @(posedge clk) begin
+        out <= r;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'reg_assign_expr.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const noANeverUsed = !warnings.some(w =>
+            w.message.includes("'a'") && w.message.includes('never used')
+        );
+        const noBNeverUsed = !warnings.some(w =>
+            w.message.includes("'b'") && w.message.includes('never used')
+        );
+
+        if (noANeverUsed && noBNeverUsed && errors.length === 0) {
+            console.log('  ✓ Test 33 PASSED (RHS signals in reg declaration assignment correctly treated as used)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 33 FAILED (a: ${noANeverUsed}, b: ${noBNeverUsed}, errors: ${errors.length})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+            errors.forEach(e => console.log(`    ERROR: Line ${e.line + 1}: ${e.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);

@@ -959,6 +959,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 });
             }
         }
+        this.visitChildren(ctx);
         return null;
     }
 
@@ -998,6 +999,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 });
             }
         }
+        this.visitChildren(ctx);
         return null;
     }
 
@@ -1036,6 +1038,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 });
             }
         }
+        this.visitChildren(ctx);
         return null;
     }
 
