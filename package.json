@@ -47,6 +47,13 @@
         "path": "./syntaxes/verilog.tmLanguage.json"
       }
     ],
+    "themes": [
+      {
+        "label": "Verilog HDL",
+        "uiTheme": "vs-dark",
+        "path": "./themes/verilog-hdl.json"
+      }
+    ],
     "commands": [
       {
         "command": "verilog.showSymbols",

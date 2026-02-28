@@ -1,0 +1,35 @@
+{
+  "name": "Verilog HDL",
+  "type": "dark",
+  "colors": {},
+  "tokenColors": [
+    {
+      "scope": "variable.other.wire.verilog",
+      "settings": {
+        "foreground": "#4EC9B0",
+        "fontStyle": ""
+      }
+    },
+    {
+      "scope": "variable.other.reg.verilog",
+      "settings": {
+        "foreground": "#CE9178",
+        "fontStyle": ""
+      }
+    },
+    {
+      "scope": "variable.other.integer.verilog",
+      "settings": {
+        "foreground": "#B5CEA8",
+        "fontStyle": ""
+      }
+    },
+    {
+      "scope": "variable.other.instance.verilog",
+      "settings": {
+        "foreground": "#9CDCFE",
+        "fontStyle": ""
+      }
+    }
+  ]
+}
