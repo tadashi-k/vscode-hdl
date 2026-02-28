@@ -1382,6 +1382,185 @@ endmodule
         }
     }
 
+    // Test 34: Named port/parameter names should NOT be flagged as undeclared
+    {
+        totalTests++;
+        console.log('\nTest 34: Named port/parameter names not flagged as undeclared');
+        const code = `
+module top;
+    wire clk, reset;
+    wire [7:0] count_in, count_out;
+
+    counter #(
+        .WIDTH(8)
+    )
+    counter_i (
+        .clk(clk),
+        .reset(reset),
+        .count_in(count_in),
+        .count_out(count_out)
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'named_port_no_warn.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        // Named port names (.WIDTH, .clk, .reset, .count_in, .count_out) must NOT
+        // produce "referenced but not declared" warnings.
+        const namedPortWarning = warnings.some(w =>
+            w.message.includes('referenced but not declared') &&
+            (w.message.includes("'WIDTH'") || w.message.includes("'clk'") ||
+             w.message.includes("'reset'") || w.message.includes("'count_in'") ||
+             w.message.includes("'count_out'"))
+        );
+
+        if (!namedPortWarning && errors.length === 0) {
+            console.log('  ✓ Test 34 PASSED (no undeclared warning for named port/parameter names)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 34 FAILED');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+            errors.forEach(e => console.log(`    ERROR: Line ${e.line + 1}: ${e.message}`));
+        }
+    }
+
+    // Test 35: Undeclared identifiers in port connection expressions ARE warned
+    {
+        totalTests++;
+        console.log('\nTest 35: Undeclared identifiers in port connection expressions warned');
+        const code = `
+module top;
+    counter counter_i (
+        .clk(undeclared_clk),
+        .reset(undeclared_reset)
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'port_expr_warn.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasUndeclaredClk = warnings.some(w =>
+            w.message.includes("'undeclared_clk'") &&
+            w.message.includes('referenced but not declared')
+        );
+        const hasUndeclaredReset = warnings.some(w =>
+            w.message.includes("'undeclared_reset'") &&
+            w.message.includes('referenced but not declared')
+        );
+
+        if (hasUndeclaredClk && hasUndeclaredReset) {
+            console.log('  ✓ Test 35 PASSED (undeclared port connection expressions warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 35 FAILED (undeclared_clk: ${hasUndeclaredClk}, undeclared_reset: ${hasUndeclaredReset})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 36: Undeclared identifiers in concatenation port expressions ARE warned
+    {
+        totalTests++;
+        console.log('\nTest 36: Undeclared identifiers in concatenation port connection warned');
+        const code = `
+module top;
+    wire declared_h;
+
+    counter counter_i (
+        .count_out({declared_h, undeclared_l})
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'concat_port_warn.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasUndeclaredL = warnings.some(w =>
+            w.message.includes("'undeclared_l'") &&
+            w.message.includes('referenced but not declared')
+        );
+        const noDeclaredHWarning = !warnings.some(w =>
+            w.message.includes("'declared_h'") &&
+            w.message.includes('referenced but not declared')
+        );
+
+        if (hasUndeclaredL && noDeclaredHWarning) {
+            console.log('  ✓ Test 36 PASSED (undeclared concat member warned, declared member not warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 36 FAILED (undeclared_l: ${hasUndeclaredL}, no declared_h warning: ${noDeclaredHWarning})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 37: Undeclared identifier in parameter expression warned
+    {
+        totalTests++;
+        console.log('\nTest 37: Undeclared identifier in parameter expression warned');
+        const code = `
+module top;
+    wire [7:0] data;
+
+    counter #(
+        .WIDTH(UNDEF_PARAM)
+    )
+    counter_i (
+        .data(data)
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'param_expr_warn.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasUndefParam = warnings.some(w =>
+            w.message.includes("'UNDEF_PARAM'") &&
+            w.message.includes('referenced but not declared')
+        );
+        // .WIDTH itself must NOT be warned
+        const noWidthWarning = !warnings.some(w =>
+            w.message.includes("'WIDTH'") &&
+            w.message.includes('referenced but not declared')
+        );
+
+        if (hasUndefParam && noWidthWarning) {
+            console.log('  ✓ Test 37 PASSED (undeclared param expression warned, param name not warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 37 FAILED (UNDEF_PARAM warned: ${hasUndefParam}, no WIDTH warning: ${noWidthWarning})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 38: Ordered (positional) port connection identifiers checked for undeclared
+    {
+        totalTests++;
+        console.log('\nTest 38: Ordered port connection undeclared identifiers warned');
+        const code = `
+module top;
+    wire clk;
+
+    counter counter_i (clk, undeclared_sig);
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'ordered_port_warn.v');
+        const { errors, warnings } = parser.parseSymbols(doc);
+
+        const hasUndeclaredSig = warnings.some(w =>
+            w.message.includes("'undeclared_sig'") &&
+            w.message.includes('referenced but not declared')
+        );
+        const noClkWarning = !warnings.some(w =>
+            w.message.includes("'clk'") &&
+            w.message.includes('referenced but not declared')
+        );
+
+        if (hasUndeclaredSig && noClkWarning) {
+            console.log('  ✓ Test 38 PASSED (undeclared ordered port expr warned, declared not warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 38 FAILED (undeclared_sig: ${hasUndeclaredSig}, no clk warning: ${noClkWarning})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);

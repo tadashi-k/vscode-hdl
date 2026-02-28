@@ -299,6 +299,20 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     : null;
 
                 if (portConnsCtx) {
+                    // Handle ordered (positional) port connections: visit their
+                    // expressions so identifiers are tracked for undeclared checks.
+                    const orderedConns = this._toArray(
+                        portConnsCtx.ordered_port_connection
+                            ? portConnsCtx.ordered_port_connection()
+                            : null
+                    );
+                    for (const opc of orderedConns) {
+                        const opcExpr = opc.expression ? opc.expression() : null;
+                        if (opcExpr) {
+                            this.visit(opcExpr);
+                        }
+                    }
+
                     const namedConns = this._toArray(
                         portConnsCtx.named_port_connection
                             ? portConnsCtx.named_port_connection()
@@ -328,6 +342,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 character: localSignalInfo.character,
                                 moduleName: this._currentModule.name
                             });
+                            // Track for undeclared-identifier checking (Warning 1)
+                            // without adding to _moduleSignalRefs (preserves Warning 2
+                            // behaviour: output-port connections must not count as "used").
+                            this._signalRefList.push({ name: localSignalInfo.name, moduleName: this._currentModule.name, line: localSignalInfo.line, character: localSignalInfo.character });
                         } else if (exprCtx) {
                             // Check for concatenation: .port({sig_a, sig_b})
                             // Each identifier in the concat must be tracked via _instPortConnections
@@ -351,6 +369,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                         character: localSignalInfo.character,
                                         moduleName: this._currentModule.name
                                     });
+                                    // Track for undeclared-identifier checking (Warning 1)
+                                    this._signalRefList.push({ name: localSignalInfo.name, moduleName: this._currentModule.name, line: localSignalInfo.line, character: localSignalInfo.character });
                                 }
                             } else {
                                 // Complex expression (not a simple identifier or concatenation): visit
@@ -372,6 +392,15 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     portConnections,
                     parentModuleName: this._currentModule.name
                 });
+            }
+
+            // Visit parameter_value_assignment expressions so identifiers inside
+            // #(.PARAM(expr)) or #(expr) are tracked for undeclared checks.
+            // Named parameter names (parameter_identifier) are NOT primary nodes,
+            // so they will not be added to signal refs.
+            const paramValAssign = ctx.parameter_value_assignment ? ctx.parameter_value_assignment() : null;
+            if (paramValAssign) {
+                this.visit(paramValAssign);
             }
         }
 
