@@ -2,17 +2,20 @@
 module top_module (
     input wire clk,
     input wire reset,
+    input wire setup,
     output wire [7:0] count_out,
     output wire valid
 );
 
     wire [7:0] counter_value;
     reg ready;
+    wire counter_in = setup & (counter_value == 0);
 
     // Instantiate counter module - goto definition should work on "counter"
     counter u_counter (
         .clk(clk),
         .reset(reset),
+        .count_in(counter_in),
         .count_out(counter_value)
     );
 
