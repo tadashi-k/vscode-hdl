@@ -73,7 +73,7 @@
       {
         "language": "verilog",
         "scopes": {
-          "hdlReg": ["variable.other.register.verilog"],
+          "hdlReg": ["variable.other.reg.verilog"],
           "hdlWire": ["variable.other.wire.verilog"],
           "hdlInteger": ["variable.other.integer.verilog"],
           "hdlParameter": ["variable.other.constant.verilog"]
