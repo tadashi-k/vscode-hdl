@@ -1,34 +1,36 @@
 // Counter module definition   
-module counter (
-    input wire clk,
-    input wire reset,
-    output reg [7:0] count
+module counter #(
+    parameter WIDTH = 8
+)
+(
+    input clk,
+    input reset,
+    input[WIDTH-1:0] count_in,
+    output reg [WIDTH-1:0] count_out
 );
 
-parameter WIDTH = 8;
 localparam MAX_COUNT = (1 << WIDTH) - 1;
 
-    wire enable;
-    reg [WIDTH-1:0] internal_count;
-    reg a, b;
+wire enable = (count_out == MAX_COUNT) ? 0 : 1;
+reg [WIDTH-1:0] internal_count;
+reg a, b;
+integer cnt;
 
-    always @(posedge clk or posedge reset) begin
-        if (reset && !enable) begin
-            count <= 8'b0;
-        end else begin
-            count <= count + 1;
-        end
-        internal_count <= internal_count + 4'd1;
-        a <= internal_count[0];
-        b <= internal_count[1];
+always @(posedge clk or posedge reset) begin
+    if (reset) begin
+        count_out <= 0;
+    end else if (enable) begin
+        count_out <= count_in;
+    end else begin
+        count_out <= count_out + 1;
     end
 
-    full_adder full_adder_i(
-        .a(a),
-        .b(b),
-        .cin(),
-        .sum(),
-        .cout(enable)
-    );
+    if (a && b) begin
+        internal_count <= 0;
+    end else begin
+        internal_count <= internal_count + 4'd1;
+    end
+    {a,b} <= internal_count[1:0];
+end
 
 endmodule

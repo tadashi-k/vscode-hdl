@@ -545,6 +545,7 @@ binary_operator
     | SR
     | ASL
     | ASR
+    | POW
     ;
 
 number
@@ -627,6 +628,7 @@ ASL     : '<<<';
 ASR     : '>>>';
 NAND    : '~&';
 NOR     : '~|';
+POW     : '**';
 
 // Identifiers
 SIMPLE_IDENTIFIER

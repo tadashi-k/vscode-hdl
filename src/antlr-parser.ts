@@ -255,6 +255,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return this._getIdentifierInfo(identCtx);
     }
 
+    /**
+     * If exprCtx is a concatenation expression like {sig_a, sig_b}, return an array
+     * of identifier infos for all simple-identifier members (recursively handles nested
+     * concatenations). Returns null if the expression is not a concatenation.
+     */
     // Track module instantiations for port-connection warnings
     visitModule_instantiation(ctx: any) {
         if (!this._currentModule) return null;
@@ -311,12 +316,37 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 moduleName: this._currentModule.name
                             });
                         } else if (exprCtx) {
-                            // Complex expression (not a simple identifier): visit it so its
-                            // identifiers are tracked as r-value references in _moduleSignalRefs.
-                            // Simple identifier connections are handled via _instPortConnections /
-                            // usedViaPortInput and must NOT be added to _moduleSignalRefs here,
-                            // because connections to output ports should not count as "used".
-                            this.visit(exprCtx);
+                            // Check for concatenation: .port({sig_a, sig_b})
+                            // Each identifier in the concat must be tracked via _instPortConnections
+                            // (not as an r-value ref) so output-port assignments are detected.
+                            const _exprPrimary = exprCtx.primary ? exprCtx.primary() : null;
+                            const _concatCtx = _exprPrimary?.concatenation ? _exprPrimary.concatenation() : null;
+                            const concatIdents = _concatCtx ? this._getConcatenationIdentifiers(_concatCtx) : null;
+                            if (concatIdents && concatIdents.length > 0) {
+                                for (const localSignalInfo of concatIdents) {
+                                    portConnections.push({
+                                        portName: portInfo.name,
+                                        localSignalName: localSignalInfo.name,
+                                        line: localSignalInfo.line,
+                                        character: localSignalInfo.character
+                                    });
+                                    this._instPortConnections.push({
+                                        instModuleName,
+                                        portName: portInfo.name,
+                                        localSignalName: localSignalInfo.name,
+                                        line: localSignalInfo.line,
+                                        character: localSignalInfo.character,
+                                        moduleName: this._currentModule.name
+                                    });
+                                }
+                            } else {
+                                // Complex expression (not a simple identifier or concatenation): visit
+                                // it so its identifiers are tracked as r-value refs in _moduleSignalRefs.
+                                // Simple identifier connections are handled via _instPortConnections /
+                                // usedViaPortInput and must NOT be added to _moduleSignalRefs here,
+                                // because connections to output ports should not count as "used".
+                                this.visit(exprCtx);
+                            }
                         }
                     }
                 }
