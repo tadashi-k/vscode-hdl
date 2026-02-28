@@ -15,13 +15,13 @@ const vscode = {
 };
 (global as any).vscode = vscode;
 
-import AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
 
 class MockPosition {
     line: any;
     character: any;
-    constructor(line, character) {
+    constructor(line: any, character: any) {
         this.line = line;
         this.character = character;
     }
@@ -30,7 +30,7 @@ class MockPosition {
 class MockRange {
     start: any;
     end: any;
-    constructor(start, end) {
+    constructor(start: any, end: any) {
         this.start = start;
         this.end = end;
     }
@@ -39,7 +39,7 @@ class MockRange {
 class MockLocation {
     uri: any;
     range: any;
-    constructor(uri, position) {
+    constructor(uri: any, position: any) {
         this.uri = uri;
         this.range = new MockRange(position, position);
     }
@@ -47,7 +47,7 @@ class MockLocation {
 
 class MockUri {
     fsPath: any;
-    constructor(filePath) {
+    constructor(filePath: any) {
         this.fsPath = filePath;
     }
 
@@ -55,7 +55,7 @@ class MockUri {
         return this.fsPath;
     }
 
-    static parse(str) {
+    static parse(str: any) {
         return new MockUri(str);
     }
 }
@@ -74,7 +74,7 @@ class MockTextDocument {
         return this.text;
     }
 
-    lineAt(lineNum) {
+    lineAt(lineNum: any) {
         const lines = this.text.split('\n');
         return {
             text: lines[lineNum] || '',
@@ -83,7 +83,7 @@ class MockTextDocument {
         };
     }
 
-    getWordRangeAtPosition(position) {
+    getWordRangeAtPosition(position: any) {
         const line = this.lineAt(position.line);
         const lineText = line.text;
 
@@ -114,7 +114,7 @@ class SymbolDatabase {
         this._modulesByUri = new Map<string, any>();  // uri -> moduleNames[]
     }
 
-    update(doc) {
+    update(doc: any) {
         const uri = doc.uri.toString();
         const { modules, signals } = parser.parseSymbols(doc);
 
@@ -138,25 +138,25 @@ class SymbolDatabase {
         }
     }
 
-    getSignalsByUri(uri) {
+    getSignalsByUri(uri: any) {
         const names = this._modulesByUri.get(uri) || [];
         const result = [];
         for (const n of names) result.push(...(this.signals.get(n) || []));
         return result;
     }
 
-    getModule(name) {
+    getModule(name: any) {
         return this.modules.get(name);
     }
 }
 
 class VerilogDefinitionProvider {
     symbolDatabase: any;
-    constructor(symbolDatabase) {
+    constructor(symbolDatabase: any) {
         this.symbolDatabase = symbolDatabase;
     }
 
-    provideDefinition(document, position, token) {
+    provideDefinition(document: any, position: any, token: any) {
         const wordRange = document.getWordRangeAtPosition(position);
         if (!wordRange) return null;
 
@@ -164,7 +164,7 @@ class VerilogDefinitionProvider {
 
         // Check for signal definitions in all modules of the current document
         const currentDocSignals = this.symbolDatabase.getSignalsByUri(document.uri.toString());
-        const localSignal = currentDocSignals.find(s => s.name === word);
+        const localSignal = currentDocSignals.find((s: any) => s.name === word);
 
         if (localSignal) {
             const uri = MockUri.parse(localSignal.uri);
@@ -208,20 +208,20 @@ function runTests() {
 
     // Test 1: Find definition of local signal "ready" in top_module.v
     console.log('Test 1: Local signal definition (ready in top_module.v)');
-    const readyRefPosition = new MockPosition(20, 23); // assign valid = ready;
+    const readyRefPosition = new MockPosition(23, 23); // assign valid = ready;
     const readyDefinition = definitionProvider.provideDefinition(topDoc, readyRefPosition, null);
 
-    if (readyDefinition && readyDefinition.range.start.line === 9) {
+    if (readyDefinition && readyDefinition.range.start.line === 10) {
         console.log(`✓ Found definition at line ${readyDefinition.range.start.line + 1}, char ${readyDefinition.range.start.character}`);
         passed++;
     } else {
-        console.log(`✗ Expected definition at line 10, got ${readyDefinition ? readyDefinition.range.start.line + 1 : 'null'}`);
+        console.log(`✗ Expected definition at line 11, got ${readyDefinition ? readyDefinition.range.start.line + 1 : 'null'}`);
         failed++;
     }
 
     // Test 2: Find definition of module "counter" in top_module.v
     console.log('\nTest 2: Cross-file module definition (counter in top_module.v)');
-    const counterRefPosition = new MockPosition(12, 4);
+    const counterRefPosition = new MockPosition(14, 4);
     const counterDefinition = definitionProvider.provideDefinition(topDoc, counterRefPosition, null);
 
     if (counterDefinition &&
@@ -241,10 +241,10 @@ function runTests() {
 
     // Test 3: Find definition of "enable" signal in counter.v
     console.log('\nTest 3: Local signal definition (enable in counter.v)');
-    const enableDefPosition = new MockPosition(7, 9);
+    const enableDefPosition = new MockPosition(12, 9);
     const enableDefinition = definitionProvider.provideDefinition(counterDoc, enableDefPosition, null);
 
-    if (enableDefinition && enableDefinition.range.start.line === 7) {
+    if (enableDefinition && enableDefinition.range.start.line === 12) {
         console.log(`✓ Found definition at line ${enableDefinition.range.start.line + 1}, char ${enableDefinition.range.start.character}`);
         passed++;
     } else {
