@@ -293,7 +293,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 }
 
                 const portConnections: any[] = [];
-                let namedPortNames: string[] = [];
+                const namedPortNames: string[] = [];
 
                 const portConnsCtx = inst.list_of_port_connections
                     ? inst.list_of_port_connections()
@@ -321,7 +321,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     );
 
                     // Track all named port names (including empty connections like .reset())
-                    namedPortNames = [];
 
                     for (const conn of namedConns) {
                         const portIdCtx = conn.port_identifier ? conn.port_identifier() : null;
