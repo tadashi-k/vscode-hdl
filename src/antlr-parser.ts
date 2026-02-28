@@ -293,6 +293,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 }
 
                 const portConnections: any[] = [];
+                let namedPortNames: string[] = [];
 
                 const portConnsCtx = inst.list_of_port_connections
                     ? inst.list_of_port_connections()
@@ -319,11 +320,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                             : null
                     );
 
+                    // Track all named port names (including empty connections like .reset())
+                    namedPortNames = [];
+
                     for (const conn of namedConns) {
                         const portIdCtx = conn.port_identifier ? conn.port_identifier() : null;
                         if (!portIdCtx) continue;
                         const portInfo = this._getIdentifierInfo(portIdCtx.identifier());
                         if (!portInfo) continue;
+
+                        namedPortNames.push(portInfo.name);
 
                         const exprCtx = conn.expression ? conn.expression() : null;
                         const localSignalInfo = this._getPrimaryIdentifier(exprCtx);
@@ -396,6 +402,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     line: instNameInfo ? instNameInfo.line : instModInfo.line,
                     character: instNameInfo ? instNameInfo.character : instModInfo.character,
                     portConnections,
+                    namedPortNames,
                     parentModuleName: this._currentModule.name
                 });
             }
@@ -1411,6 +1418,47 @@ class AntlrVerilogParser {
                         message: `Signal '${signal.name}' is never assigned`,
                         severity: vscode.DiagnosticSeverity.Warning
                     });
+                }
+            }
+
+            // Warning 8: missing port in named port connection
+            // When using named port connections, if some ports of the instantiated module
+            // are not listed at all (not even as empty .port()), warn about them.
+            for (const inst of visitor.instances.filter((i: any) => i.parentModuleName === moduleName)) {
+                const instModPorts = modulePortMap.get(inst.moduleName);
+                if (!instModPorts) continue;
+                if (!inst.namedPortNames || inst.namedPortNames.length === 0) continue;
+                const namedSet = new Set(inst.namedPortNames);
+                const missingPorts: string[] = [];
+                for (const [portName] of instModPorts) {
+                    if (!namedSet.has(portName)) {
+                        missingPorts.push(portName);
+                    }
+                }
+                if (missingPorts.length > 0) {
+                    const message = missingPorts.map(p => `'${p}' unconnected`).join('\n');
+                    warnings.push({
+                        line: inst.line,
+                        character: inst.character,
+                        length: (inst.instanceName || inst.moduleName).length,
+                        message,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
+
+            // Warning 9: module name of instantiation not found in module database
+            if (moduleDatabase) {
+                for (const inst of visitor.instances.filter((i: any) => i.parentModuleName === moduleName)) {
+                    if (!modulePortMap.has(inst.moduleName)) {
+                        warnings.push({
+                            line: inst.line,
+                            character: inst.character,
+                            length: (inst.instanceName || inst.moduleName).length,
+                            message: `Module '${inst.moduleName}' is not defined`,
+                            severity: vscode.DiagnosticSeverity.Warning
+                        });
+                    }
                 }
             }
         }
