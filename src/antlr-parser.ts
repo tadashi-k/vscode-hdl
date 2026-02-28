@@ -77,7 +77,7 @@ class EvalValue {
  * Module entry: { name, uri, line, character, ports[] }
  * Signal entry: { name, uri, line, character, direction, type, bitWidth, moduleName }
  *   direction: 'input' | 'output' | 'inout' | null
- *   type:      'wire' | 'reg' | 'tri' | 'supply0' | 'supply1'
+ *   type:      'wire' | 'reg' | 'integer' | 'tri' | 'supply0' | 'supply1'
  */
 const DEFAULT_NET_TYPE = 'wire';
 
@@ -1014,6 +1014,44 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return null;
     }
 
+    // Internal integer declarations: integer i, j;
+    // Treated the same as reg (stored in signal database, subject to never-assigned/never-used warnings).
+    visitInteger_declaration(ctx: any) {
+        if (!this._currentModule) return null;
+
+        const intIdsCtx = ctx.list_of_register_identifiers();
+        const rawIds = intIdsCtx.register_identifier();
+        const ids = Array.isArray(rawIds) ? rawIds : (rawIds ? [rawIds] : []);
+
+        // Detect which integer identifiers have initial values (e.g., integer i = 0;)
+        const idsWithInit = this._identifiersWithInitialValue(intIdsCtx, ids);
+
+        for (const intIdCtx of ids) {
+            const info = this._getIdentifierInfo(intIdCtx.identifier());
+            if (!info) continue;
+
+            this.signals.push({
+                name: info.name,
+                uri: this.uri,
+                line: info.line,
+                character: info.character,
+                direction: null,
+                type: 'integer',
+                bitWidth: '32',
+                moduleName: this._currentModule.name
+            });
+
+            // Mark as assigned if it has an initial value
+            if (idsWithInit.has(intIdCtx)) {
+                this.procLvalues.push({
+                    ...info,
+                    moduleName: this._currentModule.name
+                });
+            }
+        }
+        return null;
+    }
+
     // Helper: determine which identifier contexts in a list have initial values ('=' expr).
     // Iterates through the parent context's children to find '=' tokens following each identifier.
     _identifiersWithInitialValue(listCtx: any, idCtxs: any[]): Set<any> {
@@ -1265,13 +1303,13 @@ class AntlrVerilogParser {
             for (const lval of visitor.assignLvalues.filter((l: any) => l.moduleName === moduleName)) {
                 if (reportedAssignReg.has(lval.name)) continue;
                 const sig = declaredByName.get(lval.name);
-                if (sig && sig.type === 'reg') {
+                if (sig && (sig.type === 'reg' || sig.type === 'integer')) {
                     reportedAssignReg.add(lval.name);
                     warnings.push({
                         line: lval.line,
                         character: lval.character,
                         length: lval.name.length,
-                        message: `Assign statement l-value '${lval.name}' is a reg`,
+                        message: `Assign statement l-value '${lval.name}' is a ${sig.type}`,
                         severity: vscode.DiagnosticSeverity.Warning
                     });
                 }
@@ -1320,7 +1358,7 @@ class AntlrVerilogParser {
                 if (!instPort || (instPort.direction !== 'output' && instPort.direction !== 'inout')) continue;
 
                 if (!reportedOutputPortReg.has(conn.localSignalName) &&
-                    declaredSignals.some((s: any) => s.name === conn.localSignalName && s.type === 'reg')) {
+                    declaredSignals.some((s: any) => s.name === conn.localSignalName && (s.type === 'reg' || s.type === 'integer'))) {
                     reportedOutputPortReg.add(conn.localSignalName);
                     const dirLabel = instPort.direction.charAt(0).toUpperCase() + instPort.direction.slice(1);
                     warnings.push({
