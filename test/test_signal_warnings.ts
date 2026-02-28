@@ -1561,6 +1561,252 @@ endmodule
         }
     }
 
+    // Test 39: Missing port in named port connection warns
+    {
+        totalTests++;
+        console.log('\nTest 39: Missing port in named port connection warns');
+
+        const counterModule = {
+            name: 'counter',
+            uri: 'counter.v',
+            line: 0,
+            character: 0,
+            ports: [
+                { name: 'clk', direction: 'input', type: 'wire' },
+                { name: 'reset', direction: 'input', type: 'wire' },
+                { name: 'count_in', direction: 'input', type: 'wire' },
+                { name: 'count_out', direction: 'output', type: 'reg' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([counterModule]);
+
+        const code = `
+module test_instance (
+    input clk,
+    input reset,
+    output reg[7:0] count_out
+);
+
+reg[3:0] init_h, init_l;
+wire[3:0] count_h, count_l;
+
+always @(posedge clk) begin
+    {init_h,init_l} <= 8'h45;
+    count_out <= {count_h, count_l};
+end
+
+counter #(.WIDTH(8))
+counter_i_1 (
+    .clk(clk),
+    .reset(reset),
+    .count_in({init_h, init_l}),
+    .count_out({count_h, count_l})
+);
+
+counter #(.WIDTH(8))
+counter_i_2 (
+    .clk(clk),
+    .reset(),
+    .count_in({init_l, init_h})
+);
+
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'test_instance.v');
+        const { warnings, instances } = parser.parseSymbols(doc, mockDb);
+
+        // counter_i_1 has all 4 ports → no missing port warning
+        const ci1 = instances.find(i => i.instanceName === 'counter_i_1');
+        const ci1MissingWarn = warnings.some(w =>
+            w.message.includes('unconnected') && ci1 && w.line === ci1.line
+        );
+
+        // counter_i_2 misses count_out → warning expected
+        const ci2MissingWarn = warnings.some(w =>
+            w.message.includes("'count_out' unconnected")
+        );
+
+        if (!ci1MissingWarn && ci2MissingWarn) {
+            console.log('  ✓ Test 39 PASSED (counter_i_2 missing count_out warned, counter_i_1 not warned)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 39 FAILED (ci1MissingWarn: ${ci1MissingWarn}, ci2MissingWarn: ${ci2MissingWarn})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 40: Multiple missing ports produce multi-line warning
+    {
+        totalTests++;
+        console.log('\nTest 40: Multiple missing ports produce multi-line warning');
+
+        const extModule = {
+            name: 'ext_mod',
+            uri: 'ext.v',
+            line: 0,
+            character: 0,
+            ports: [
+                { name: 'clk', direction: 'input', type: 'wire' },
+                { name: 'data_in', direction: 'input', type: 'wire' },
+                { name: 'data_out', direction: 'output', type: 'wire' },
+                { name: 'status', direction: 'output', type: 'wire' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([extModule]);
+
+        const code = `
+module top (input clk);
+    ext_mod u1 (
+        .clk(clk)
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'multi_missing.v');
+        const { warnings } = parser.parseSymbols(doc, mockDb);
+
+        const missingWarn = warnings.find(w => w.message.includes('unconnected'));
+        const hasDataIn = missingWarn && missingWarn.message.includes("'data_in' unconnected");
+        const hasDataOut = missingWarn && missingWarn.message.includes("'data_out' unconnected");
+        const hasStatus = missingWarn && missingWarn.message.includes("'status' unconnected");
+        const isMultiLine = missingWarn && missingWarn.message.includes('\n');
+
+        if (hasDataIn && hasDataOut && hasStatus && isMultiLine) {
+            console.log('  ✓ Test 40 PASSED (multiple missing ports in multi-line warning)');
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 40 FAILED (dataIn: ${hasDataIn}, dataOut: ${hasDataOut}, status: ${hasStatus}, multiLine: ${isMultiLine})`);
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 41: Empty named port (.reset()) does not trigger missing port warning
+    {
+        totalTests++;
+        console.log('\nTest 41: Empty named port does not trigger missing port warning');
+
+        const extModule = {
+            name: 'ext_mod',
+            uri: 'ext.v',
+            line: 0,
+            character: 0,
+            ports: [
+                { name: 'clk', direction: 'input', type: 'wire' },
+                { name: 'reset', direction: 'input', type: 'wire' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([extModule]);
+
+        const code = `
+module top (input clk);
+    ext_mod u1 (
+        .clk(clk),
+        .reset()
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'empty_port.v');
+        const { warnings } = parser.parseSymbols(doc, mockDb);
+
+        const hasMissingWarn = warnings.some(w => w.message.includes('unconnected'));
+
+        if (!hasMissingWarn) {
+            console.log('  ✓ Test 41 PASSED (empty named port .reset() does not trigger missing warning)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 41 FAILED (unexpected missing port warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 42: Module name not defined in module database warns
+    {
+        totalTests++;
+        console.log('\nTest 42: Module name not defined in module database warns');
+
+        const mockDb = new MockModuleDatabase([]);
+
+        const code = `
+module top (input clk);
+    wire q;
+    unknown_module u1 (.clk(clk), .q(q));
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'undef_module.v');
+        const { warnings } = parser.parseSymbols(doc, mockDb);
+
+        const hasUndefWarn = warnings.some(w =>
+            w.message.includes("'unknown_module'") && w.message.includes('not defined')
+        );
+
+        if (hasUndefWarn) {
+            console.log('  ✓ Test 42 PASSED (unknown module warned as not defined)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 42 FAILED (expected "not defined" warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 43: Module defined locally does not trigger "not defined" warning
+    {
+        totalTests++;
+        console.log('\nTest 43: Locally defined module does not trigger "not defined" warning');
+
+        const mockDb = new MockModuleDatabase([]);
+
+        const code = `
+module sub_mod (input clk, output reg q);
+    always @(posedge clk) q <= ~q;
+endmodule
+
+module top (input clk);
+    wire q;
+    sub_mod u1 (.clk(clk), .q(q));
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'local_module.v');
+        const { warnings } = parser.parseSymbols(doc, mockDb);
+
+        const hasUndefWarn = warnings.some(w =>
+            w.message.includes("'sub_mod'") && w.message.includes('not defined')
+        );
+
+        if (!hasUndefWarn) {
+            console.log('  ✓ Test 43 PASSED (locally defined module not warned)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 43 FAILED (unexpected "not defined" warning for local module)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 44: No "not defined" warning without moduleDatabase (single-file mode)
+    {
+        totalTests++;
+        console.log('\nTest 44: No "not defined" warning without moduleDatabase');
+
+        const code = `
+module top (input clk);
+    wire q;
+    ext_mod u1 (.clk(clk), .q(q));
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'no_db.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasUndefWarn = warnings.some(w =>
+            w.message.includes('not defined')
+        );
+
+        if (!hasUndefWarn) {
+            console.log('  ✓ Test 44 PASSED (no "not defined" without moduleDatabase)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 44 FAILED (unexpected "not defined" warning without database)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
