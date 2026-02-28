@@ -596,32 +596,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return null;
     }
 
-    // Helper: parse a Verilog number literal to a JS number.
-    // Handles non-negative literals only; unary minus is handled by _applyUnary.
-    _parseVerilogNumber(text: any) {
-        if (!text) return null;
-        // Plain integer (no base prefix)
-        if (/^\d+$/.test(text)) return parseInt(text, 10);
-        // Real number
-        if (/^\d+\.\d+([eE][+-]?\d+)?$/.test(text) || /^\d+[eE][+-]?\d+$/.test(text)) {
-            return parseFloat(text);
-        }
-        // Verilog number with optional size and base: [size]'[s]<base><digits>
-        const match = text.match(/^(\d*)'[sS]?([dDbBhHoO])([0-9a-fA-F_xXzZ?]+)$/);
-        if (!match) return null;
-        const [, , base, digits] = match;
-        const clean = digits.replace(/[_]/g, '');
-        // Reject numbers with unknowns / high-Z
-        if (/[xXzZ?]/.test(clean)) return null;
-        switch (base.toLowerCase()) {
-            case 'd': return parseInt(clean, 10);
-            case 'b': return parseInt(clean, 2);
-            case 'h': return parseInt(clean, 16);
-            case 'o': return parseInt(clean, 8);
-            default:  return null;
-        }
-    }
-
     // Helper: parse a Verilog number literal to an EvalValue with both value and width.
     // Width is extracted from the size prefix (e.g. 8 from 8'hFF); plain integers have null width.
     _parseVerilogLiteral(text: any): EvalValue | null {

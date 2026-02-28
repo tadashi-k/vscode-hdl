@@ -32,10 +32,24 @@
       }
     },
     {
+      "scope": "variable.other.constant.verilog",
+      "settings": {
+        "foreground": "#9CDCFE",
+        "fontStyle": ""
+      }
+    },
+    {
+      "scope": "entity.name.type.module.verilog",
+      "settings": {
+        "foreground": "#4EC9B0",
+        "fontStyle": ""
+      }
+    },
+    {
       "scope": "keyword.control.verilog",
       "settings": {
         "foreground": "#569CD6",
-        "fontStyle": ""
+        "fontStyle": "bold"
       }
     },
     {
@@ -56,14 +70,14 @@
       "scope": "comment.line.double-slash.verilog",
       "settings": {
         "foreground": "#6A9955",
-        "fontStyle": "italic"
+        "fontStyle": ""
       }
     },
     {
       "scope": "comment.block.verilog",
       "settings": {
         "foreground": "#6A9955",
-        "fontStyle": "italic"
+        "fontStyle": ""
       }
     }
   ]
