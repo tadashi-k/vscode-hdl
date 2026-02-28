@@ -44,16 +44,29 @@ function runTests() {
     const counterSignals = counterResult.signals;
     const counterParams = counterResult.parameters;
 
+    // Helper: find a 0-based line number by matching line content
+    function findLine(text: string, pattern: string): number {
+        const lines = text.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(pattern)) return i;
+        }
+        return -1;
+    }
+
     // Test 1: Both identifiers in "reg a, b;" get hdlReg token type at declaration
     {
         totalTests++;
         console.log('\nTest 1: reg a, b; - both identifiers get hdlReg token at declaration');
 
         const tokens = computeSemanticTokens(counterContent, counterSignals, counterParams);
-        // Line 15 (0-based): "reg a, b;" — a at char 4, b at char 7
-        const line15Tokens = tokens.filter(t => t.line === 15);
-        const aDecl = line15Tokens.find(t => t.character === 4 && t.length === 1);
-        const bDecl = line15Tokens.find(t => t.character === 7 && t.length === 1);
+        const declLine = findLine(counterContent, 'reg a, b;');
+        const lines = counterContent.split('\n');
+        const aChar = lines[declLine].indexOf('a', lines[declLine].indexOf('reg') + 3);
+        const bChar = lines[declLine].indexOf('b', aChar + 1);
+
+        const line15Tokens = tokens.filter(t => t.line === declLine);
+        const aDecl = line15Tokens.find(t => t.character === aChar && t.length === 1);
+        const bDecl = line15Tokens.find(t => t.character === bChar && t.length === 1);
 
         const pass = aDecl !== undefined && aDecl.tokenType === 'hdlReg' &&
                      bDecl !== undefined && bDecl.tokenType === 'hdlReg' &&
@@ -65,7 +78,8 @@ function runTests() {
             passedTests++;
         } else {
             console.log('  ✗ Test 1 FAILED');
-            console.log('  line 15 tokens:', JSON.stringify(line15Tokens));
+            console.log('  declLine:', declLine, 'aChar:', aChar, 'bChar:', bChar);
+            console.log('  tokens on line:', JSON.stringify(line15Tokens));
         }
     }
 
@@ -75,11 +89,12 @@ function runTests() {
         console.log('\nTest 2: {a,b} usage - same hdlReg token type (no declaration modifier)');
 
         const tokens = computeSemanticTokens(counterContent, counterSignals, counterParams);
+        const usageLine = findLine(counterContent, '{a,b}');
         const lines = counterContent.split('\n');
-        // Line 32 (0-based): "    {a,b} <= internal_count[1:0];"
-        const line32Tokens = tokens.filter(t => t.line === 32);
-        const aUsage = line32Tokens.find(t => t.length === 1 && lines[32].charAt(t.character) === 'a');
-        const bUsage = line32Tokens.find(t => t.length === 1 && lines[32].charAt(t.character) === 'b');
+
+        const lineTokens = tokens.filter(t => t.line === usageLine);
+        const aUsage = lineTokens.find(t => t.length === 1 && lines[usageLine].charAt(t.character) === 'a');
+        const bUsage = lineTokens.find(t => t.length === 1 && lines[usageLine].charAt(t.character) === 'b');
 
         const pass = aUsage !== undefined && aUsage.tokenType === 'hdlReg' &&
                      bUsage !== undefined && bUsage.tokenType === 'hdlReg' &&
@@ -91,7 +106,8 @@ function runTests() {
             passedTests++;
         } else {
             console.log('  ✗ Test 2 FAILED');
-            console.log('  line 32 tokens:', JSON.stringify(line32Tokens));
+            console.log('  usageLine:', usageLine);
+            console.log('  tokens on line:', JSON.stringify(lineTokens));
         }
     }
 

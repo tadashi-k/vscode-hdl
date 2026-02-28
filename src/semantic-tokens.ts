@@ -23,6 +23,12 @@ const VERILOG_KEYWORDS = new Set([
     'tri', 'supply0', 'supply1', 'fork', 'join', 'repeat', 'forever',
     'wait', 'disable', 'force', 'release', 'casex', 'casez',
     'specify', 'endspecify', 'table', 'endtable', 'primitive', 'endprimitive',
+    'signed', 'unsigned', 'real', 'time', 'realtime', 'event', 'defparam',
+    'automatic', 'nand', 'nor', 'xor', 'xnor', 'buf', 'bufif0', 'bufif1',
+    'notif0', 'notif1', 'pullup', 'pulldown', 'cmos', 'nmos', 'pmos',
+    'rcmos', 'rnmos', 'rpmos', 'tran', 'tranif0', 'tranif1', 'rtran',
+    'rtranif0', 'rtranif1', 'wand', 'wor', 'trior', 'triand', 'tri0',
+    'tri1', 'trireg', 'scalared', 'vectored', 'macromodule',
 ]);
 
 /** Map a signal type string to a semantic token type. */
