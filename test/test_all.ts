@@ -27,6 +27,7 @@ const testFiles = [
 
 const total = testFiles.length;
 const failedTests: string[] = [];
+const failedOutputs: { stdout: string; stderr: string }[] = [];
 let failedCount = 0;
 
 // ANSI escape sequences
@@ -79,6 +80,10 @@ for (let i = 0; i < testFiles.length; i++) {
     // Test failed: overwrite line with failure marker and move to a new line
     process.stdout.write(CLEAR_LINE + '\r' + `${RED}${BOLD}\u2717 ${file} FAILED${RESET}\n`);
     failedTests.push(file);
+    failedOutputs.push({
+      stdout: result.stdout ? result.stdout.toString() : '',
+      stderr: result.stderr ? result.stderr.toString() : ''
+    });
     failedCount++;
   }
   // If test passed, the "Running:" line will be overwritten by the next iteration
@@ -96,8 +101,15 @@ if (failedTests.length === 0) {
   process.exit(0);
 } else {
   process.stdout.write(`${RED}${BOLD}Failed tests:${RESET}\n`);
-  for (const f of failedTests) {
-    process.stdout.write(`  ${RED}\u2717 ${f}${RESET}\n`);
+  for (let i = 0; i < failedTests.length; i++) {
+    process.stdout.write(`  ${RED}\u2717 ${failedTests[i]}${RESET}\n`);
+    const output = failedOutputs[i];
+    if (output.stderr) {
+      process.stderr.write(output.stderr);
+    }
+    if (output.stdout) {
+      process.stdout.write(output.stdout);
+    }
   }
   process.exit(1);
 }
