@@ -1523,8 +1523,12 @@ class AntlrVerilogParser {
                 } else {
                     const right = parseShift();
                     if (right === null) return null;
-                    left = op === '*' ? left * right : (right !== 0 ? Math.floor(left / right) : null) as any;
-                    if (left === null) return null;
+                    if (op === '*') {
+                        left = left * right;
+                    } else {
+                        if (right === 0) return null;
+                        left = Math.floor(left / right);
+                    }
                 }
             }
             return left;
@@ -1953,11 +1957,12 @@ class AntlrVerilogParser {
 
             // Warning 12: bit width mismatch between connected signal and instantiated module port
             const moduleParams = visitor._moduleParams.get(moduleName) || new Map();
-            // Build a lookup of instModuleName+line -> instance for parameter override access
+            // Build a lookup of connection position -> instance for parameter override access
+            const connKey = (modName: string, line: number, char: number) => `${modName}:${line}:${char}`;
             const instanceLookup = new Map<string, any>();
             for (const inst of visitor.instances.filter((i: any) => i.parentModuleName === moduleName)) {
                 for (const pc of inst.portConnections) {
-                    instanceLookup.set(`${inst.moduleName}:${pc.line}:${pc.character}`, inst);
+                    instanceLookup.set(connKey(inst.moduleName, pc.line, pc.character), inst);
                 }
             }
             for (const conn of visitor._instPortConnections.filter((c: any) => c.moduleName === moduleName)) {
@@ -1967,7 +1972,7 @@ class AntlrVerilogParser {
                 if (!instPort) continue;
                 // Evaluate port width with parameter overrides if available
                 let portWidth: number | null = null;
-                const inst = instanceLookup.get(`${conn.instModuleName}:${conn.line}:${conn.character}`);
+                const inst = instanceLookup.get(connKey(conn.instModuleName, conn.line, conn.character));
                 if (inst && inst.parameterOverrides && instPort.bitWidthRaw) {
                     // Use the visitor's parsed parameters as defaults for the instantiated module,
                     // and the parameter database if available (for cross-file modules)

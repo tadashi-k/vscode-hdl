@@ -891,25 +891,28 @@ export function activate(context: vscode.ExtensionContext) {
                         const uri = document.uri.toString();
                         const instances = instanceDatabase.getInstancesByUri(uri);
                         for (const inst of instances) {
-                            // Check if this port name is in the instance's named port list
-                            if (inst.namedPortNames && inst.namedPortNames.includes(word)) {
-                                // Check if the position is within this instance's range
-                                const mod = moduleDatabase.getModule(inst.moduleName);
-                                if (mod && mod.ports) {
-                                    const port = mod.ports.find((p: any) => p.name === word);
-                                    if (port) {
-                                        // Evaluate port width with parameter overrides
-                                        const instModParams = parameterDatabase.getParameters(inst.moduleName);
-                                        const portWidth = verilogParser.evaluatePortWidth(port, instModParams, inst.parameterOverrides);
-                                        const widthStr = portWidth !== null && portWidth > 1
-                                            ? `[${portWidth - 1}:0]`
-                                            : (portWidth === 1 ? '' : (port.bitWidth || ''));
-                                        const dirStr = port.direction || '';
-                                        let hoverContent = `**${port.name}**\n\n`;
-                                        hoverContent += `${dirStr}${widthStr ? widthStr : ''}\n`;
-                                        hoverContent += `module ${inst.moduleName}`;
-                                        return new vscode.Hover(hoverContent);
-                                    }
+                            if (!inst.namedPortNames || !inst.namedPortNames.includes(word)) continue;
+                            // Use port connection line position to match the correct instance
+                            // when multiple instances have the same port name
+                            const connOnLine = inst.portConnections.some((pc: any) =>
+                                pc.portName === word && pc.line === position.line);
+                            const emptyConn = !inst.portConnections.some((pc: any) => pc.portName === word);
+                            if (!connOnLine && !emptyConn) continue;
+                            const mod = moduleDatabase.getModule(inst.moduleName);
+                            if (mod && mod.ports) {
+                                const port = mod.ports.find((p: any) => p.name === word);
+                                if (port) {
+                                    // Evaluate port width with parameter overrides
+                                    const instModParams = parameterDatabase.getParameters(inst.moduleName);
+                                    const portWidth = verilogParser.evaluatePortWidth(port, instModParams, inst.parameterOverrides);
+                                    const widthStr = portWidth !== null && portWidth > 1
+                                        ? `[${portWidth - 1}:0]`
+                                        : (portWidth === 1 ? '' : (port.bitWidth || ''));
+                                    const dirStr = port.direction || '';
+                                    let hoverContent = `**${port.name}**\n\n`;
+                                    hoverContent += `${dirStr}${widthStr ? widthStr : ''}\n`;
+                                    hoverContent += `module ${inst.moduleName}`;
+                                    return new vscode.Hover(hoverContent);
                                 }
                             }
                         }
