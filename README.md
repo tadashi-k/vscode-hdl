@@ -105,11 +105,8 @@ This extension provides syntax highlighting for all Verilog reserved words inclu
 
 ## Installation
 
-1. Copy this extension to your VS Code extensions directory:
-   - Windows: `%USERPROFILE%\.vscode\extensions`
-   - macOS/Linux: `~/.vscode/extensions`
-
-2. Reload VS Code
+- execute 'npm run pack' or download from release
+- select 'Install from VSIX...' in Extension side panel
 
 ## Usage
 
