@@ -33,4 +33,15 @@ counter u_counter (
     .count_out()
 );
 
+wire [15:0] counter_out_16;
+
+counter #(
+    .WIDTH(16)
+) u_counter_16 (
+    .clk(clk),
+    .reset(reset),
+    .count_in(counter_int), // should not warn because counter module's count_in has 16 bits width
+    .count_out(counter_out_16)
+);
+
 endmodule
