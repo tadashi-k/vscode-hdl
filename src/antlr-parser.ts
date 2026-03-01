@@ -349,7 +349,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 localSignalName: localSignalInfo.name,
                                 line: localSignalInfo.line,
                                 character: localSignalInfo.character,
-                                moduleName: this._currentModule.name
+                                moduleName: this._currentModule.name,
+                                exprCtx
                             });
                             // Track for undeclared-identifier checking (Warning 1)
                             // without adding to _moduleSignalRefs (preserves Warning 2
@@ -1685,15 +1686,27 @@ class AntlrVerilogParser {
             }
 
             // Warning 12: bit width mismatch between connected signal and instantiated module port
+            const moduleParams = visitor._moduleParams.get(moduleName) || new Map();
             for (const conn of visitor._instPortConnections.filter((c: any) => c.moduleName === moduleName)) {
                 const instModPorts = modulePortMap.get(conn.instModuleName);
                 if (!instModPorts) continue;
                 const instPort = instModPorts.get(conn.portName);
                 if (!instPort) continue;
-                const localSig = declaredByName.get(conn.localSignalName);
-                if (!localSig) continue;
-                const localWidth = visitor._getSignalWidth(localSig.bitWidth) ?? 1;
                 const portWidth = visitor._getSignalWidth(instPort.bitWidth) ?? 1;
+                let localWidth: number | null = null;
+                // Evaluate the actual expression bit width (handles part-selects like signal[7:0])
+                if (conn.exprCtx) {
+                    const exprVal = visitor._evaluateExpression(conn.exprCtx, moduleParams, declaredByName);
+                    if (exprVal && exprVal.width !== null) {
+                        localWidth = exprVal.width;
+                    }
+                }
+                // Fall back to the declared signal width when expression evaluation fails
+                if (localWidth === null) {
+                    const localSig = declaredByName.get(conn.localSignalName);
+                    if (!localSig) continue;
+                    localWidth = visitor._getSignalWidth(localSig.bitWidth) ?? 1;
+                }
                 if (localWidth !== portWidth) {
                     warnings.push({
                         line: conn.line,

@@ -2390,6 +2390,86 @@ endmodule
         }
     }
 
+    // Test 62: Part-select in port connection matches port width - no warning
+    {
+        totalTests++;
+        console.log('\nTest 62: Part-select in port connection matches port width - no warning');
+
+        const subModule = {
+            name: 'sub_8bit',
+            uri: 'sub_8bit.v',
+            ports: [
+                { name: 'count_in', direction: 'input', type: 'wire', bitWidth: '[7:0]' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([subModule]);
+
+        const code = `
+module top_partsel_ok (
+    input wire [9:0] counter_int
+);
+    sub_8bit u1 (
+        .count_in(counter_int[7:0])
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'top_partsel_ok.v');
+        const { warnings } = parser.parseSymbols(doc, mockDb);
+
+        const hasPortWidthWarn = warnings.some(w =>
+            w.message.includes("Port 'count_in'") && w.message.includes('width')
+        );
+
+        if (!hasPortWidthWarn) {
+            console.log('  ✓ Test 62 PASSED (part-select [7:0] correctly evaluated as 8 bits - no spurious warning)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 62 FAILED (unexpected port width warning for part-select expression)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 63: Part-select in port connection does not match port width - warns
+    {
+        totalTests++;
+        console.log('\nTest 63: Part-select in port connection does not match port width - warns');
+
+        const subModule = {
+            name: 'sub_8bit2',
+            uri: 'sub_8bit2.v',
+            ports: [
+                { name: 'count_in', direction: 'input', type: 'wire', bitWidth: '[7:0]' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([subModule]);
+
+        const code = `
+module top_partsel_mismatch (
+    input wire [9:0] counter_int
+);
+    sub_8bit2 u1 (
+        .count_in(counter_int[9:0])
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'top_partsel_mismatch.v');
+        const { warnings } = parser.parseSymbols(doc, mockDb);
+
+        const hasPortWidthWarn = warnings.some(w =>
+            w.message.includes("Port 'count_in'") &&
+            w.message.includes('8') &&
+            w.message.includes('10')
+        );
+
+        if (hasPortWidthWarn) {
+            console.log('  ✓ Test 63 PASSED (part-select [9:0] correctly evaluated as 10 bits - mismatch warned)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 63 FAILED (expected width mismatch warning for part-select [9:0] vs 8-bit port)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
