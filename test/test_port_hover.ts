@@ -458,6 +458,83 @@ endmodule
         }
     }
 
+    // Test 12: Two instances of same module - parameter overrides evaluated per instance
+    // Bug fix: earlier instances must NOT inherit overrides from a later instance
+    {
+        totalTests++;
+        console.log('\nTest 12: Two instances - parameter overrides evaluated per instance, not per module');
+        const code = `
+module counter #(
+    parameter WIDTH = 8
+)
+(
+    input clk,
+    input reset,
+    input[WIDTH-1:0] count_in,
+    output reg [WIDTH-1:0] count_out
+);
+endmodule
+
+module test_bitwidth(
+    input wire clk,
+    input wire reset
+);
+    reg [15:0] counter_int;
+    wire [15:0] counter_out_16;
+
+    counter u_counter (
+        .clk(clk),
+        .reset(reset),
+        .count_in(counter_int),
+        .count_out()
+    );
+
+    counter #(
+        .WIDTH(16)
+    ) u_counter_16 (
+        .clk(clk),
+        .reset(reset),
+        .count_in(counter_int),
+        .count_out(counter_out_16)
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'test12.v');
+        const { instances, warnings } = parser.parseSymbols(doc);
+
+        const uCounter = instances.find((i: any) => i.instanceName === 'u_counter');
+        const uCounter16 = instances.find((i: any) => i.instanceName === 'u_counter_16');
+
+        // u_counter has no parameter override -> parameterOverrides must be null
+        const uCounterHasNoOverrides = uCounter && uCounter.parameterOverrides === null;
+        // u_counter_16 has .WIDTH(16) -> parameterOverrides.WIDTH must be 16
+        const uCounter16HasOverride = uCounter16 &&
+            uCounter16.parameterOverrides &&
+            uCounter16.parameterOverrides.WIDTH === 16;
+
+        // Only u_counter should produce a count_in width warning:
+        // counter_int is [15:0] (16 bits), count_in with default WIDTH=8 is [7:0] (8 bits) -> warn
+        // counter_int is [15:0] (16 bits), count_in with WIDTH=16 is [15:0] (16 bits) -> no warn
+        const countInWarnings = warnings.filter((w: any) =>
+            w.message && w.message.includes("Port 'count_in'") &&
+            w.message.includes('counter_int'));
+
+        // Exactly one warning, and it reports port width 8 (default, for u_counter)
+        const pass = uCounterHasNoOverrides && uCounter16HasOverride &&
+            countInWarnings.length === 1 &&
+            countInWarnings[0].message.includes('width 8');
+
+        if (pass) {
+            console.log('  ✓ Test 12 PASSED (u_counter uses default WIDTH=8, u_counter_16 uses WIDTH=16)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 12 FAILED');
+            console.log('  u_counter overrides:', JSON.stringify(uCounter ? uCounter.parameterOverrides : null));
+            console.log('  u_counter_16 overrides:', JSON.stringify(uCounter16 ? uCounter16.parameterOverrides : null));
+            console.log('  count_in warnings:', countInWarnings.map((w: any) => w.message));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
