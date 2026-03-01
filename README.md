@@ -26,6 +26,133 @@ A Visual Studio Code extension that provides syntax highlighting, symbol extract
 
 The extension includes a comprehensive Verilog parser that performs real-time syntax checking. Errors are displayed directly in the editor with squiggly underlines and detailed error messages.
 
+## Warning Conditions
+
+The extension performs semantic analysis beyond syntax checking and generates warnings for the following typical conditions:
+
+### Never Used / Never Assigned Signal
+
+- **Never used**: A signal is declared but never appears as an r-value in any expression or port connection.
+
+```verilog
+module example (
+    input wire clk,
+    output reg [7:0] data_out
+);
+    wire unused_signal;  // Warning: 'unused_signal' is declared but never used
+    reg [7:0] count;
+
+    always @(posedge clk)
+        data_out <= count;
+endmodule
+```
+
+- **Never assigned**: An output port or internal signal is never given a value (never appears as an l-value).
+
+```verilog
+module example (
+    input wire clk,
+    output reg [7:0] data_out
+);
+    wire undriven;       // Warning: 'undriven' is never assigned
+    reg [7:0] count;     // Warning: 'count' is never assigned
+
+    always @(posedge clk)
+        data_out <= 8'b0;
+endmodule
+```
+
+### Not Declared Signal
+
+A signal is referenced in an expression but has not been declared in the module.
+
+```verilog
+module example (
+    input wire clk,
+    output reg [7:0] count
+);
+    always @(posedge clk)
+        count <= undeclared_signal;  // Warning: 'undeclared_signal' is referenced but not declared
+endmodule
+```
+
+### Bit Width Mismatch
+
+The extension detects bit width mismatches in assignments and port connections.
+
+- **Assignment mismatch**: The left-hand side and right-hand side of an assignment have different bit widths.
+
+```verilog
+module example (
+    input wire [7:0] data_in,
+    output reg [7:0] data_out
+);
+    wire valid;
+    assign valid = data_in[0];       // OK: both sides are 1 bit
+
+    always @(*) begin
+        // Warning: 'data_out' has width 8, but expression has width 9
+        data_out <= {valid, data_in};
+    end
+endmodule
+```
+
+- **Port connection mismatch**: A signal connected to a module port has a different bit width than the port.
+
+```verilog
+module top (
+    input wire clk,
+    input wire reset
+);
+    wire [15:0] wide_signal;
+
+    counter u_counter (
+        .clk(clk),
+        .reset(reset),
+        // Warning: Port 'count_in' has width 8, but connected signal 'wide_signal' has width 16
+        .count_in(wide_signal),
+        .count_out()
+    );
+endmodule
+```
+
+### Not Defined Module
+
+A module instantiation refers to a module name that is not found anywhere in the workspace.
+
+```verilog
+module top (
+    input wire clk
+);
+    // Warning: Module 'undefined_module' is not defined
+    undefined_module u_inst (
+        .clk(clk)
+    );
+endmodule
+```
+
+### Unconnected Port
+
+When using named port connections (`.port(signal)` style), if a port of the instantiated module is not listed at all, the extension warns about the omitted port.  An explicit empty connection (`.port()`) is recognised as an intentionally unconnected port and does **not** trigger a warning.
+
+```verilog
+module top (
+    input wire clk,
+    input wire reset
+);
+    reg [7:0] init_val;
+
+    // Warning on counter_i: 'count_out' unconnected
+    // (.reset() is an explicit empty connection, so no warning for reset)
+    counter counter_i (
+        .clk(clk),
+        .reset(),
+        .count_in(init_val)
+        // .count_out is missing entirely → warning
+    );
+endmodule
+```
+
 ## Verilog Symbol Database
 
 The extension maintains two separate internal databases for Verilog symbols:
