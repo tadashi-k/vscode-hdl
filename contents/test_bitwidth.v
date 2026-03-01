@@ -6,7 +6,7 @@ module test_bitwidth(
     output reg [7:0] data_out
 );
 
-reg [15:0] counter;
+reg [15:0] counter_int;
 
 always @(posedge clk) begin
     if (reset) begin
@@ -17,9 +17,20 @@ always @(posedge clk) begin
         data_out <= data_in + 8'b0;
     end
 
-    counter[9:0] <= {data_in, data_out}; // need to warn bit width mismatch: from 16 bits to 10 bits
+    // need to warn bit width mismatch: from 3 bits to 1 bit
+    // because expression of conditional_statement and loop_statement should have 1 bit width
+    if (data_out[2:0]) begin
+        counter_int[9:0] <= {data_in, data_out}; // need to warn bit width mismatch: from 16 bits to 10 bits
+    end
 end
 
 assign valid = data_in[0]; // should not warn because both bits are 1 bit
+
+counter u_counter (
+    .clk(clk),
+    .reset(reset),
+    .count_in(counter_int), // need to warn bit width mismatch: from 16 bits to 8 bits because counter module's count_in has 8 bits width
+    .count_out()
+);
 
 endmodule
