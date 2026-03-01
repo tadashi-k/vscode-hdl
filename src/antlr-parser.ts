@@ -284,6 +284,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             // Collect named port connections for each instance
             const moduleInstances = this._toArray(ctx.module_instance ? ctx.module_instance() : null);
 
+            // Record the start index so we can identify which instances were added
+            // by THIS module_instantiation node when applying parameter overrides.
+            const instancesBeforeThisInstantiation = this.instances.length;
+
             for (const inst of moduleInstances) {
                 // Get instance name from name_of_instance
                 const nameOfInstCtx = inst.name_of_instance ? inst.name_of_instance() : null;
@@ -443,13 +447,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         }
                     }
                     if (Object.keys(overrides).length > 0) {
-                        // Attach overrides to all instances of this instantiation
-                        for (const inst of this.instances) {
-                            if (inst.moduleName === instModuleName &&
-                                inst.parentModuleName === this._currentModule.name &&
-                                inst.parameterOverrides === null) {
-                                inst.parameterOverrides = overrides;
-                            }
+                        // Attach overrides only to the instances created by this
+                        // module_instantiation node (identified by the start index).
+                        // This avoids incorrectly applying overrides to earlier instances
+                        // of the same module that use default parameter values.
+                        for (let i = instancesBeforeThisInstantiation; i < this.instances.length; i++) {
+                            this.instances[i].parameterOverrides = overrides;
                         }
                     }
                 }
