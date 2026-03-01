@@ -29,15 +29,15 @@ class MockTextDocument {
 }
 
 (global as any).vscode = vscode;
-import AntlrVerilogParser = require('../src/antlr-parser');
+import AntlrVerilogParser from '../src/antlr-parser';
 
 // Shared mock for a workspace-wide module database (used by cross-file tests)
 class MockModuleDatabase {
     _modules: any;
-    constructor(modules) {
-        this._modules = new Map(modules.map(m => [m.name, m]));
+    constructor(modules: any[]) {
+        this._modules = new Map(modules.map((m: any) => [m.name, m]));
     }
-    getModule(name) { return this._modules.get(name); }
+    getModule(name: string) { return this._modules.get(name); }
     getAllModules() { return Array.from(this._modules.values()) as any[]; }
 }
 

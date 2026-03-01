@@ -51,7 +51,7 @@ function progressBar(current: number, total: number): string {
   const width = 30;
   const filled = Math.round((current / total) * width);
   const empty = width - filled;
-  const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(empty);
+  const bar = '='.repeat(filled) + ' '.repeat(empty);
   return `${BOLD}[${bar}] ${current}/${total}${RESET}`;
 }
 
