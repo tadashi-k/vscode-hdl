@@ -73,7 +73,7 @@ for (let i = 0; i < testFiles.length; i++) {
   process.stdout.write(moveDown(linesUp) + CLEAR_LINE + '\r' + `Running: ${file}`);
 
   // Run the test with piped output to keep the display clean
-  const result = spawnSync(process.execPath, ['-r', 'ts-node/register', absPath], {
+  const result = spawnSync(process.execPath, ['--import=tsx', absPath], {
     stdio: 'pipe'
   });
 

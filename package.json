@@ -23,7 +23,7 @@
     "build:antlr": "node antlr/build.js",
     "clean:antlr": "rm -rf antlr/generated",
     "build": "tsc -p tsconfig.json",
-    "test": "node -r ts-node/register test/test_all.ts",
+    "test": "node --import=tsx test/test_all.ts",
     "pack": "vsce package"
   },
   "contributes": {
@@ -61,24 +61,57 @@
       }
     ],
     "semanticTokenTypes": [
-      { "id": "hdlReg", "description": "Verilog register signal", "superType": "variable" },
-      { "id": "hdlWire", "description": "Verilog wire signal", "superType": "variable" },
-      { "id": "hdlInteger", "description": "Verilog integer signal", "superType": "variable" },
-      { "id": "hdlParameter", "description": "Verilog parameter", "superType": "variable" },
-      { "id": "hdlModule", "description": "Verilog module name", "superType": "type" }
+      {
+        "id": "hdlReg",
+        "description": "Verilog register signal",
+        "superType": "variable"
+      },
+      {
+        "id": "hdlWire",
+        "description": "Verilog wire signal",
+        "superType": "variable"
+      },
+      {
+        "id": "hdlInteger",
+        "description": "Verilog integer signal",
+        "superType": "variable"
+      },
+      {
+        "id": "hdlParameter",
+        "description": "Verilog parameter",
+        "superType": "variable"
+      },
+      {
+        "id": "hdlModule",
+        "description": "Verilog module name",
+        "superType": "type"
+      }
     ],
     "semanticTokenModifiers": [
-      { "id": "hdlPort", "description": "Port signal (input/output/inout)" }
+      {
+        "id": "hdlPort",
+        "description": "Port signal (input/output/inout)"
+      }
     ],
     "semanticTokenScopes": [
       {
         "language": "verilog",
         "scopes": {
-          "hdlReg": ["variable.other.reg.verilog"],
-          "hdlWire": ["variable.other.wire.verilog"],
-          "hdlInteger": ["variable.other.integer.verilog"],
-          "hdlParameter": ["variable.other.constant.verilog"],
-          "hdlModule": ["entity.name.type.module.verilog"]
+          "hdlReg": [
+            "variable.other.reg.verilog"
+          ],
+          "hdlWire": [
+            "variable.other.wire.verilog"
+          ],
+          "hdlInteger": [
+            "variable.other.integer.verilog"
+          ],
+          "hdlParameter": [
+            "variable.other.constant.verilog"
+          ],
+          "hdlModule": [
+            "entity.name.type.module.verilog"
+          ]
         }
       }
     ],
@@ -96,6 +129,7 @@
     "@types/vscode": "^1.60.0",
     "antlr4-tool": "^1.1.1",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
 }
