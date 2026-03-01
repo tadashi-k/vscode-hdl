@@ -894,10 +894,70 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 if (paramMap && paramMap.has(name)) return paramMap.get(name);
                 if (moduleSignals && moduleSignals.has(name)) {
                     const sig = moduleSignals.get(name);
-                    return { value: null, width: this._getSignalWidth(sig.bitWidth) };
+
+                    // Check for range_expression: identifier '[' range_expression ']'
+                    const rangeExprCtx = ctx.range_expression ? ctx.range_expression() : null;
+                    if (rangeExprCtx) {
+                        const rangeExprs = rangeExprCtx.expression ? rangeExprCtx.expression() : null;
+                        const rangeArr = Array.isArray(rangeExprs) ? rangeExprs : (rangeExprs ? [rangeExprs] : []);
+                        if (rangeArr.length === 2) {
+                            const rangeText = rangeExprCtx.getText();
+                            if (rangeText.includes('+:') || rangeText.includes('-:')) {
+                                const widthVal = this._evaluateExpression(rangeArr[1], paramMap, moduleSignals);
+                                return { value: null, width: widthVal && widthVal.value !== null ? widthVal.value : null };
+                            }
+                            const hi = this._evaluateExpression(rangeArr[0], paramMap, moduleSignals);
+                            const lo = this._evaluateExpression(rangeArr[1], paramMap, moduleSignals);
+                            if (hi && hi.value !== null && lo && lo.value !== null) {
+                                return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                            }
+                        }
+                        return null;
+                    }
+
+                    // Check for bit/part select: identifier '[' expression ']' ...
+                    const exprChildren = ctx.expression ? ctx.expression() : null;
+                    const exprArr = Array.isArray(exprChildren) ? exprChildren : (exprChildren ? [exprChildren] : []);
+                    if (exprArr.length === 1) {
+                        // Single bit select: identifier[expr] → width is 1
+                        return { value: null, width: 1 };
+                    }
+                    if (exprArr.length >= 2) {
+                        const fullText = ctx.getText();
+                        if (fullText.includes('+:') || fullText.includes('-:')) {
+                            const widthVal = this._evaluateExpression(exprArr[exprArr.length - 1], paramMap, moduleSignals);
+                            return { value: null, width: widthVal && widthVal.value !== null ? widthVal.value : null };
+                        }
+                        if (exprArr.length === 3) {
+                            const hi = this._evaluateExpression(exprArr[1], paramMap, moduleSignals);
+                            const lo = this._evaluateExpression(exprArr[2], paramMap, moduleSignals);
+                            if (hi && hi.value !== null && lo && lo.value !== null) {
+                                return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                            }
+                        }
+                        return null;
+                    }
+
+                    // Plain identifier: use declared signal width (default 1 for scalars)
+                    const w = this._getSignalWidth(sig.bitWidth);
+                    return { value: null, width: w !== null ? w : 1 };
                 }
             }
             return null;
+        }
+
+        // Concatenation: '{' expression (',' expression)* '}'
+        const concatCtx = ctx.concatenation ? ctx.concatenation() : null;
+        if (concatCtx) {
+            const expressions = concatCtx.expression ? concatCtx.expression() : null;
+            const exprArr = Array.isArray(expressions) ? expressions : (expressions ? [expressions] : []);
+            let totalWidth = 0;
+            for (const exprCtx of exprArr) {
+                const ev = this._evaluateExpression(exprCtx, paramMap, moduleSignals);
+                if (!ev || ev.width === null) return null;
+                totalWidth += ev.width;
+            }
+            return { value: null, width: totalWidth > 0 ? totalWidth : null };
         }
 
         // Parenthesised expression: '(' expression ')'

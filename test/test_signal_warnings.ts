@@ -2031,6 +2031,171 @@ endmodule
         }
     }
 
+    // Test 52: Scalar signal identifier should have width 1
+    {
+        totalTests++;
+        console.log('\nTest 52: Scalar signal identifier should have width 1');
+
+        const code = `
+module scalar_width (
+    input wire clk,
+    input wire reset,
+    output wire valid,
+    output reg [7:0] data_out
+);
+    always @(posedge clk) begin
+        data_out <= valid;
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'scalar_width.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch') &&
+            w.message.includes('8') &&
+            w.message.includes('1')
+        );
+
+        if (hasMismatch) {
+            console.log('  ✓ Test 52 PASSED (scalar signal width correctly detected as 1 bit)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 52 FAILED (expected bit width mismatch for scalar signal)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 53: Concatenation expression should sum widths
+    {
+        totalTests++;
+        console.log('\nTest 53: Concatenation expression should sum widths');
+
+        const code = `
+module concat_width (
+    input wire [7:0] data_in,
+    output reg [7:0] data_out
+);
+    reg [15:0] counter;
+    always @(posedge data_in) begin
+        counter[9:0] <= {data_in, data_out};
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'concat_width.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch') &&
+            w.message.includes('10') &&
+            w.message.includes('16')
+        );
+
+        if (hasMismatch) {
+            console.log('  ✓ Test 53 PASSED (concatenation width correctly calculated as sum)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 53 FAILED (expected bit width mismatch for concatenation)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 54: Bit select data_in[0] should have width 1
+    {
+        totalTests++;
+        console.log('\nTest 54: Bit select data_in[0] should have width 1');
+
+        const code = `
+module bit_select_width (
+    input wire [7:0] data_in,
+    output wire valid
+);
+    assign valid = data_in[0];
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'bit_select_width.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch')
+        );
+
+        if (!hasMismatch) {
+            console.log('  ✓ Test 54 PASSED (bit select correctly detected as 1 bit, no mismatch)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 54 FAILED (unexpected bit width mismatch for bit select)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 55: Part select data_in[4:2] should have width 3
+    {
+        totalTests++;
+        console.log('\nTest 55: Part select data_in[4:2] should have width 3');
+
+        const code = `
+module part_select_width (
+    input wire [7:0] data_in,
+    output reg [7:0] data_out
+);
+    assign data_out = data_in[4:2];
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'part_select_width.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch') &&
+            w.message.includes('8') &&
+            w.message.includes('3')
+        );
+
+        if (hasMismatch) {
+            console.log('  ✓ Test 55 PASSED (part select width correctly calculated as 3 bits)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 55 FAILED (expected bit width mismatch for part select)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 56: Concatenation with scalar signal should sum widths correctly
+    {
+        totalTests++;
+        console.log('\nTest 56: Concatenation with scalar signal should sum widths correctly');
+
+        const code = `
+module concat_scalar_width (
+    input wire clk,
+    output wire valid,
+    output reg [7:0] data_out
+);
+    always @(posedge clk) begin
+        data_out <= {8'b0, valid};
+    end
+
+    assign valid = 1'b0;
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'concat_scalar_width.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasMismatch = warnings.some(w =>
+            w.message.includes('Bit width mismatch') &&
+            w.message.includes('8') &&
+            w.message.includes('9')
+        );
+
+        if (hasMismatch) {
+            console.log('  ✓ Test 56 PASSED (concatenation with scalar signal width correctly calculated)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 56 FAILED (expected bit width mismatch for {8\'b0, valid})');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
