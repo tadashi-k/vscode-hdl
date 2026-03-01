@@ -469,6 +469,18 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
                 for (const parsedMod of result.modules) {
                     moduleDatabase.addModule(parsedMod);
                 }
+                // Also store parameters for the dependency modules so that
+                // hover and bitwidth evaluation can use default parameter values
+                const depParamsByModule = new Map<string, any[]>();
+                for (const param of result.parameters) {
+                    if (!depParamsByModule.has(param.moduleName)) {
+                        depParamsByModule.set(param.moduleName, []);
+                    }
+                    depParamsByModule.get(param.moduleName)!.push(param);
+                }
+                for (const [modName, modParams] of depParamsByModule) {
+                    parameterDatabase.updateParameters(modName, mod.uri, modParams);
+                }
             } catch (error) {
                 console.error(`Error parsing dependency ${instance.moduleName} from ${mod.uri}:`, error);
             }
@@ -866,6 +878,42 @@ export function activate(context: vscode.ExtensionContext) {
                     }
                     hoverContent += `\n\nat line ${param.line + 1}`;
                     return new vscode.Hover(hoverContent);
+                }
+
+                // Check if hovered word is a port_identifier in a named_port_connection
+                // Pattern: ".portName(" preceded by an instance context
+                if (wordRange) {
+                    const lineText = document.lineAt(position.line).text;
+                    const charBefore = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
+                    if (charBefore === '.') {
+                        // This looks like a named port connection: .portName(...)
+                        // Find which instance this belongs to by scanning instances in this file
+                        const uri = document.uri.toString();
+                        const instances = instanceDatabase.getInstancesByUri(uri);
+                        for (const inst of instances) {
+                            // Check if this port name is in the instance's named port list
+                            if (inst.namedPortNames && inst.namedPortNames.includes(word)) {
+                                // Check if the position is within this instance's range
+                                const mod = moduleDatabase.getModule(inst.moduleName);
+                                if (mod && mod.ports) {
+                                    const port = mod.ports.find((p: any) => p.name === word);
+                                    if (port) {
+                                        // Evaluate port width with parameter overrides
+                                        const instModParams = parameterDatabase.getParameters(inst.moduleName);
+                                        const portWidth = verilogParser.evaluatePortWidth(port, instModParams, inst.parameterOverrides);
+                                        const widthStr = portWidth !== null && portWidth > 1
+                                            ? `[${portWidth - 1}:0]`
+                                            : (portWidth === 1 ? '' : (port.bitWidth || ''));
+                                        const dirStr = port.direction || '';
+                                        let hoverContent = `**${port.name}**\n\n`;
+                                        hoverContent += `${dirStr}${widthStr ? widthStr : ''}\n`;
+                                        hoverContent += `module ${inst.moduleName}`;
+                                        return new vscode.Hover(hoverContent);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Fetch signals for the current document from signal database

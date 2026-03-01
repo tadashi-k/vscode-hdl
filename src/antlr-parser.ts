@@ -407,7 +407,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     character: instNameInfo ? instNameInfo.character : instModInfo.character,
                     portConnections,
                     namedPortNames,
-                    parentModuleName: this._currentModule.name
+                    parentModuleName: this._currentModule.name,
+                    parameterOverrides: null // filled in below after parameter_value_assignment is parsed
                 });
             }
 
@@ -418,6 +419,40 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const paramValAssign = ctx.parameter_value_assignment ? ctx.parameter_value_assignment() : null;
             if (paramValAssign) {
                 this.visit(paramValAssign);
+
+                // Extract named parameter overrides: #(.WIDTH(16), .DEPTH(32))
+                const namedParamAssigns = this._toArray(
+                    paramValAssign.named_parameter_assignment
+                        ? paramValAssign.named_parameter_assignment()
+                        : null
+                );
+                if (namedParamAssigns.length > 0) {
+                    const overrides: Record<string, any> = {};
+                    const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
+                    const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+                    for (const npa of namedParamAssigns) {
+                        const paramIdCtx = npa.parameter_identifier ? npa.parameter_identifier() : null;
+                        if (!paramIdCtx) continue;
+                        const paramInfo = this._getIdentifierInfo(paramIdCtx.identifier());
+                        if (!paramInfo) continue;
+                        const exprCtx = npa.expression ? npa.expression() : null;
+                        if (!exprCtx) continue;
+                        const evalResult = this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+                        if (evalResult && evalResult.value !== null && evalResult.value !== undefined) {
+                            overrides[paramInfo.name] = evalResult.value;
+                        }
+                    }
+                    if (Object.keys(overrides).length > 0) {
+                        // Attach overrides to all instances of this instantiation
+                        for (const inst of this.instances) {
+                            if (inst.moduleName === instModuleName &&
+                                inst.parentModuleName === this._currentModule.name &&
+                                inst.parameterOverrides === null) {
+                                inst.parameterOverrides = overrides;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1118,12 +1153,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const direction = ctx.port_direction().getText();
         const dataTypeCtx = ctx.port_data_type();
         const type = dataTypeCtx ? dataTypeCtx.getText() : DEFAULT_NET_TYPE;
+        const bitWidthRaw = this._getRangeText(ctx.range());
         const bitWidth = this._getEvaluatedRangeText(ctx.range());
 
         const info = this._getIdentifierInfo(ctx.port_identifier().identifier());
         if (!info) return null;
 
-        const signal = {
+        const signal: any = {
             name: info.name,
             uri: this.uri,
             line: info.line,
@@ -1133,6 +1169,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             bitWidth,
             moduleName: this._currentModule.name
         };
+        if (bitWidthRaw && bitWidthRaw !== bitWidth) {
+            signal.bitWidthRaw = bitWidthRaw;
+        }
 
         this._currentModule.ports.push(signal);
         this.signals.push(signal);
@@ -1161,6 +1200,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _processPortDeclaration(ctx: any, direction: any) {
         const netTypeCtx = ctx.net_type();
         const type = netTypeCtx ? netTypeCtx.getText() : DEFAULT_NET_TYPE;
+        const bitWidthRaw = this._getRangeText(ctx.range());
         const bitWidth = this._getEvaluatedRangeText(ctx.range());
 
         const portIdsCtx = ctx.list_of_port_identifiers();
@@ -1171,7 +1211,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const info = this._getIdentifierInfo(portIdCtx.identifier());
             if (!info) continue;
 
-            const signal = {
+            const signal: any = {
                 name: info.name,
                 uri: this.uri,
                 line: info.line,
@@ -1181,6 +1221,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 bitWidth,
                 moduleName: this._currentModule.name
             };
+            if (bitWidthRaw && bitWidthRaw !== bitWidth) {
+                signal.bitWidthRaw = bitWidthRaw;
+            }
 
             this._currentModule.ports.push(signal);
             this.signals.push(signal);
@@ -1358,6 +1401,229 @@ class AntlrVerilogParser {
 
     constructor() {
         this.errorListener = new VerilogErrorListener();
+    }
+
+    /**
+     * Evaluate a port's bit width given parameter overrides from an instantiation.
+     * If the port has a parameterized range (bitWidthRaw), re-evaluate it using
+     * the module's default parameters merged with the instance's overrides.
+     * Returns the evaluated bit width as a number, or null if unknown.
+     *
+     * @param port - Port object from the module database
+     * @param moduleDefaultParams - Array of parameter objects from the module definition
+     * @param overrides - Record<string, number> of parameter overrides from the instantiation
+     */
+    evaluatePortWidth(port: any, moduleDefaultParams: any[], overrides: Record<string, number> | null): number | null {
+        const rawRange = port.bitWidthRaw || port.bitWidth;
+        if (!rawRange) return 1; // scalar port
+
+        // Build a param map: start with defaults, then apply overrides
+        const paramMap = new Map<string, EvalValue>();
+        if (moduleDefaultParams) {
+            for (const p of moduleDefaultParams) {
+                if (p.value !== null && p.value !== undefined) {
+                    paramMap.set(p.name, { value: p.value, width: null });
+                }
+            }
+        }
+        if (overrides) {
+            for (const [name, value] of Object.entries(overrides)) {
+                paramMap.set(name, { value, width: null });
+            }
+        }
+
+        return AntlrVerilogParser._evaluateRangeWidth(rawRange, paramMap);
+    }
+
+    /**
+     * Evaluate a Verilog range string like "[WIDTH-1:0]" given a parameter map.
+     * Returns the bit width as a number, or null if evaluation fails.
+     */
+    static _evaluateRangeWidth(rangeText: string, paramMap: Map<string, EvalValue>): number | null {
+        if (!rangeText) return null;
+        // Match [expr:expr]
+        const match = rangeText.match(/^\[(.+):(.+)\]$/);
+        if (!match) return null;
+        const hiVal = AntlrVerilogParser._evalSimpleExpr(match[1].trim(), paramMap);
+        const loVal = AntlrVerilogParser._evalSimpleExpr(match[2].trim(), paramMap);
+        if (hiVal === null || loVal === null) return null;
+        return Math.abs(hiVal - loVal) + 1;
+    }
+
+    /**
+     * Simple expression evaluator for constant expressions in port ranges.
+     * Handles: integer literals, parameter names, +, -, *, /, **, <<, >>,
+     * parenthesized expressions, and $clog2.
+     */
+    static _evalSimpleExpr(expr: string, paramMap: Map<string, EvalValue>): number | null {
+        expr = expr.trim();
+        if (!expr) return null;
+
+        // Tokenize: numbers, identifiers, operators, parens
+        const tokens: string[] = [];
+        let i = 0;
+        while (i < expr.length) {
+            if (/\s/.test(expr[i])) { i++; continue; }
+            // Multi-char operators
+            if (expr.substring(i, i + 2) === '**' || expr.substring(i, i + 2) === '<<' || expr.substring(i, i + 2) === '>>') {
+                tokens.push(expr.substring(i, i + 2)); i += 2; continue;
+            }
+            // Verilog number literal: optional size, tick, optional signed, base, digits
+            const verilogNumMatch = expr.substring(i).match(/^(\d*'[sS]?[dDbBhHoO][0-9a-fA-F_]+)/);
+            if (verilogNumMatch) {
+                tokens.push(verilogNumMatch[1]); i += verilogNumMatch[1].length; continue;
+            }
+            if (/[0-9]/.test(expr[i])) {
+                let num = '';
+                while (i < expr.length && /[0-9]/.test(expr[i])) { num += expr[i++]; }
+                tokens.push(num); continue;
+            }
+            if (/[a-zA-Z_$]/.test(expr[i])) {
+                let ident = '';
+                while (i < expr.length && /[a-zA-Z0-9_$]/.test(expr[i])) { ident += expr[i++]; }
+                tokens.push(ident); continue;
+            }
+            if ('+-*/()'.includes(expr[i])) {
+                tokens.push(expr[i++]); continue;
+            }
+            return null; // unknown character
+        }
+
+        let pos = 0;
+        function peek(): string | null { return pos < tokens.length ? tokens[pos] : null; }
+        function consume(): string { return tokens[pos++]; }
+
+        function parseExpr(): number | null {
+            return parseAddSub();
+        }
+
+        function parseAddSub(): number | null {
+            let left = parseMulDiv();
+            if (left === null) return null;
+            while (peek() === '+' || peek() === '-') {
+                const op = consume();
+                const right = parseMulDiv();
+                if (right === null) return null;
+                left = op === '+' ? left + right : left - right;
+            }
+            return left;
+        }
+
+        function parseMulDiv(): number | null {
+            let left = parseShift();
+            if (left === null) return null;
+            while (peek() === '*' || peek() === '/') {
+                const op = consume();
+                if (op === '*' && peek() === '*') {
+                    // Should not happen since ** is tokenized as one token
+                    consume();
+                    const right = parseShift();
+                    if (right === null) return null;
+                    left = Math.pow(left, right);
+                } else {
+                    const right = parseShift();
+                    if (right === null) return null;
+                    left = op === '*' ? left * right : (right !== 0 ? Math.floor(left / right) : null) as any;
+                    if (left === null) return null;
+                }
+            }
+            return left;
+        }
+
+        function parseShift(): number | null {
+            let left = parsePower();
+            if (left === null) return null;
+            while (peek() === '<<' || peek() === '>>') {
+                const op = consume();
+                const right = parsePower();
+                if (right === null) return null;
+                left = op === '<<' ? left << right : left >> right;
+            }
+            return left;
+        }
+
+        function parsePower(): number | null {
+            let left = parseUnary();
+            if (left === null) return null;
+            while (peek() === '**') {
+                consume();
+                const right = parseUnary();
+                if (right === null) return null;
+                left = Math.pow(left, right);
+            }
+            return left;
+        }
+
+        function parseUnary(): number | null {
+            if (peek() === '-') {
+                consume();
+                const val = parsePrimary();
+                return val !== null ? -val : null;
+            }
+            if (peek() === '+') {
+                consume();
+                return parsePrimary();
+            }
+            return parsePrimary();
+        }
+
+        function parsePrimary(): number | null {
+            const t = peek();
+            if (t === null) return null;
+
+            // Parenthesized expression
+            if (t === '(') {
+                consume();
+                const val = parseExpr();
+                if (peek() === ')') consume();
+                return val;
+            }
+
+            // $clog2 function
+            if (t === '$clog2') {
+                consume();
+                if (peek() === '(') {
+                    consume();
+                    const val = parseExpr();
+                    if (peek() === ')') consume();
+                    if (val === null || val <= 0) return null;
+                    return Math.ceil(Math.log2(val));
+                }
+                return null;
+            }
+
+            // Number literal
+            if (/^\d/.test(t)) {
+                consume();
+                // Check for Verilog-style literals like 8'hFF
+                const vMatch = t.match(/^(\d*)'[sS]?([dDbBhHoO])([0-9a-fA-F_]+)$/);
+                if (vMatch) {
+                    const clean = vMatch[3].replace(/[_]/g, '');
+                    switch (vMatch[2].toLowerCase()) {
+                        case 'd': return parseInt(clean, 10);
+                        case 'b': return parseInt(clean, 2);
+                        case 'h': return parseInt(clean, 16);
+                        case 'o': return parseInt(clean, 8);
+                        default: return null;
+                    }
+                }
+                return parseInt(t, 10);
+            }
+
+            // Identifier (parameter reference)
+            if (/^[a-zA-Z_$]/.test(t)) {
+                consume();
+                const pv = paramMap.get(t);
+                if (pv && pv.value !== null && pv.value !== undefined) return pv.value;
+                return null;
+            }
+
+            return null;
+        }
+
+        const result = parseExpr();
+        if (pos !== tokens.length) return null; // unconsumed tokens
+        return result;
     }
 
     /**
@@ -1687,12 +1953,30 @@ class AntlrVerilogParser {
 
             // Warning 12: bit width mismatch between connected signal and instantiated module port
             const moduleParams = visitor._moduleParams.get(moduleName) || new Map();
+            // Build a lookup of instModuleName+line -> instance for parameter override access
+            const instanceLookup = new Map<string, any>();
+            for (const inst of visitor.instances.filter((i: any) => i.parentModuleName === moduleName)) {
+                for (const pc of inst.portConnections) {
+                    instanceLookup.set(`${inst.moduleName}:${pc.line}:${pc.character}`, inst);
+                }
+            }
             for (const conn of visitor._instPortConnections.filter((c: any) => c.moduleName === moduleName)) {
                 const instModPorts = modulePortMap.get(conn.instModuleName);
                 if (!instModPorts) continue;
                 const instPort = instModPorts.get(conn.portName);
                 if (!instPort) continue;
-                const portWidth = visitor._getSignalWidth(instPort.bitWidth) ?? 1;
+                // Evaluate port width with parameter overrides if available
+                let portWidth: number | null = null;
+                const inst = instanceLookup.get(`${conn.instModuleName}:${conn.line}:${conn.character}`);
+                if (inst && inst.parameterOverrides && instPort.bitWidthRaw) {
+                    // Use the visitor's parsed parameters as defaults for the instantiated module,
+                    // and the parameter database if available (for cross-file modules)
+                    const instModParams = visitor.parameters.filter((p: any) => p.moduleName === conn.instModuleName);
+                    portWidth = this.evaluatePortWidth(instPort, instModParams, inst.parameterOverrides);
+                }
+                if (portWidth === null) {
+                    portWidth = visitor._getSignalWidth(instPort.bitWidth) ?? 1;
+                }
                 let localWidth: number | null = null;
                 // Evaluate the actual expression bit width (handles part-selects like signal[7:0])
                 if (conn.exprCtx) {

@@ -22,7 +22,8 @@ const testFiles = [
   'test_parameter_database.ts',
   'test_hdlignore.ts',
   'test_preprocessor.ts',
-  'test_semantic_tokens.ts'
+  'test_semantic_tokens.ts',
+  'test_port_hover.ts'
 ];
 
 const total = testFiles.length;
