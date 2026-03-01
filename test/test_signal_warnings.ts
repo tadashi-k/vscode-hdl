@@ -2196,6 +2196,200 @@ endmodule
         }
     }
 
+    // Test 57: if-condition with multi-bit expression warns (Warning 11)
+    {
+        totalTests++;
+        console.log('\nTest 57: if-condition with multi-bit expression warns');
+        const code = `
+module cond_width_warn (
+    input wire clk,
+    input wire [7:0] data_in,
+    output reg [7:0] data_out
+);
+    always @(posedge clk) begin
+        if (data_in[2:0]) begin
+            data_out <= 8'b0;
+        end
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'cond_width_warn.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasCondWarn = warnings.some(w =>
+            w.message.includes('condition should be 1-bit') &&
+            w.message.includes('3')
+        );
+
+        if (hasCondWarn) {
+            console.log('  ✓ Test 57 PASSED (multi-bit if-condition warned)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 57 FAILED (expected condition width warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 58: if-condition with 1-bit expression does not warn (Warning 11)
+    {
+        totalTests++;
+        console.log('\nTest 58: if-condition with 1-bit expression does not warn');
+        const code = `
+module cond_width_ok (
+    input wire clk,
+    input wire reset,
+    output reg [7:0] data_out
+);
+    always @(posedge clk) begin
+        if (reset) begin
+            data_out <= 8'b0;
+        end
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'cond_width_ok.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasCondWarn = warnings.some(w => w.message.includes('condition should be 1-bit'));
+
+        if (!hasCondWarn) {
+            console.log('  ✓ Test 58 PASSED (1-bit if-condition not warned)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 58 FAILED (unexpected condition width warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 59: while-condition with multi-bit expression warns (Warning 11)
+    {
+        totalTests++;
+        console.log('\nTest 59: while-condition with multi-bit expression warns');
+        // Note: 'while (data_in)' intentionally uses an 8-bit signal as a condition
+        // to test the width warning; this is not intended as correct hardware behaviour.
+        const code = `
+module while_cond_warn (
+    input wire clk,
+    input wire [7:0] data_in,
+    output reg [7:0] data_out
+);
+    integer i;
+    always @(posedge clk) begin
+        i = 0;
+        while (data_in) begin
+            data_out <= data_out + 1;
+            i = i + 1;
+        end
+    end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'while_cond_warn.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasCondWarn = warnings.some(w =>
+            w.message.includes('condition should be 1-bit') &&
+            w.message.includes('8')
+        );
+
+        if (hasCondWarn) {
+            console.log('  ✓ Test 59 PASSED (multi-bit while-condition warned)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 59 FAILED (expected while condition width warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 60: Port connection bit width mismatch warns (Warning 12)
+    {
+        totalTests++;
+        console.log('\nTest 60: Port connection bit width mismatch warns');
+
+        const subModule = {
+            name: 'sub_mod',
+            uri: 'sub_mod.v',
+            ports: [
+                { name: 'clk', direction: 'input', type: 'wire', bitWidth: null },
+                { name: 'data_in', direction: 'input', type: 'wire', bitWidth: '[7:0]' },
+                { name: 'data_out', direction: 'output', type: 'wire', bitWidth: '[7:0]' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([subModule]);
+
+        const code = `
+module top_port_width (
+    input wire clk,
+    input wire [15:0] wide_sig,
+    output wire [7:0] result
+);
+    sub_mod u1 (
+        .clk(clk),
+        .data_in(wide_sig),
+        .data_out(result)
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'top_port_width.v');
+        const { warnings } = parser.parseSymbols(doc, mockDb);
+
+        const hasPortWidthWarn = warnings.some(w =>
+            w.message.includes("Port 'data_in'") &&
+            w.message.includes('8') &&
+            w.message.includes('16') &&
+            w.message.includes("'wide_sig'")
+        );
+
+        if (hasPortWidthWarn) {
+            console.log('  ✓ Test 60 PASSED (port connection width mismatch warned)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 60 FAILED (expected port connection width mismatch warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
+    // Test 61: Port connection bit width match does not warn (Warning 12)
+    {
+        totalTests++;
+        console.log('\nTest 61: Port connection bit width match does not warn');
+
+        const subModule = {
+            name: 'sub_mod2',
+            uri: 'sub_mod2.v',
+            ports: [
+                { name: 'data_in', direction: 'input', type: 'wire', bitWidth: '[7:0]' },
+                { name: 'data_out', direction: 'output', type: 'wire', bitWidth: '[7:0]' }
+            ]
+        };
+        const mockDb = new MockModuleDatabase([subModule]);
+
+        const code = `
+module top_port_ok (
+    input wire [7:0] data,
+    output wire [7:0] result
+);
+    sub_mod2 u1 (
+        .data_in(data),
+        .data_out(result)
+    );
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'top_port_ok.v');
+        const { warnings } = parser.parseSymbols(doc, mockDb);
+
+        const hasPortWidthWarn = warnings.some(w =>
+            w.message.includes("Port '") && w.message.includes('width')
+        );
+
+        if (!hasPortWidthWarn) {
+            console.log('  ✓ Test 61 PASSED (matching port widths not warned)');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 61 FAILED (unexpected port connection width warning)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);

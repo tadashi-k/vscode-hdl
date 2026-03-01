@@ -101,6 +101,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _inContinuousAssign: boolean;
     _currentParamKind: any;
     widthMismatches: any[];
+    condWidthWarnings: any[];
 
     constructor(uri: string) {
         super();
@@ -123,6 +124,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._inProcedural = false;
         this._inContinuousAssign = false;
         this.widthMismatches = [];           // [{lvalName, lvalWidth, exprWidth, line, character, moduleName}]
+        this.condWidthWarnings = [];         // [{exprText, exprWidth, line, character, length, moduleName}]
     }
 
     _addSignalRef(name: any, line: any, character: any) {
@@ -544,8 +546,23 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
             const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
             const exprsArr = Array.isArray(exprs) ? exprs : [exprs];
+            // For WHILE and FOR loops the single expression is the boolean condition.
+            // REPEAT uses its expression as a count (not a boolean), so skip width check.
+            // FOREVER has no expression at all, so exprs will already be null/empty.
+            const isCondLoop = !!(ctx.WHILE ? ctx.WHILE() : null) || !!(ctx.FOR ? ctx.FOR() : null);
             for (const exprCtx of exprsArr) {
-                this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+                const exprVal = this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+                if (isCondLoop && exprVal && exprVal.width !== null && exprVal.width > 1) {
+                    const start = exprCtx.start;
+                    this.condWidthWarnings.push({
+                        exprText: exprCtx.getText(),
+                        exprWidth: exprVal.width,
+                        line: start ? start.line - 1 : 0,
+                        character: start ? start.column : 0,
+                        length: exprCtx.getText().length,
+                        moduleName: this._currentModule.name
+                    });
+                }
             }
         }
         this.visitChildren(ctx);
@@ -559,7 +576,18 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (exprCtx) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
             const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
-            this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+            const exprVal = this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
+            if (exprVal && exprVal.width !== null && exprVal.width > 1) {
+                const start = exprCtx.start;
+                this.condWidthWarnings.push({
+                    exprText: exprCtx.getText(),
+                    exprWidth: exprVal.width,
+                    line: start ? start.line - 1 : 0,
+                    character: start ? start.column : 0,
+                    length: exprCtx.getText().length,
+                    moduleName: this._currentModule.name
+                });
+            }
         }
         this.visitChildren(ctx);
         return null;
@@ -1655,6 +1683,27 @@ class AntlrVerilogParser {
                     }
                 }
             }
+
+            // Warning 12: bit width mismatch between connected signal and instantiated module port
+            for (const conn of visitor._instPortConnections.filter((c: any) => c.moduleName === moduleName)) {
+                const instModPorts = modulePortMap.get(conn.instModuleName);
+                if (!instModPorts) continue;
+                const instPort = instModPorts.get(conn.portName);
+                if (!instPort) continue;
+                const localSig = declaredByName.get(conn.localSignalName);
+                if (!localSig) continue;
+                const localWidth = visitor._getSignalWidth(localSig.bitWidth) ?? 1;
+                const portWidth = visitor._getSignalWidth(instPort.bitWidth) ?? 1;
+                if (localWidth !== portWidth) {
+                    warnings.push({
+                        line: conn.line,
+                        character: conn.character,
+                        length: conn.localSignalName.length,
+                        message: `Port '${conn.portName}' has width ${portWidth}, but connected signal '${conn.localSignalName}' has width ${localWidth}`,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
         }
 
         // Warning 10: bit width mismatch between lvalue and expression
@@ -1664,6 +1713,17 @@ class AntlrVerilogParser {
                 character: mismatch.character,
                 length: mismatch.length,
                 message: `Bit width mismatch: '${mismatch.lvalText}' has width ${mismatch.lvalWidth}, but expression has width ${mismatch.exprWidth}`,
+                severity: vscode.DiagnosticSeverity.Warning
+            });
+        }
+
+        // Warning 11: condition expression in if/while/for has width > 1 bit
+        for (const cw of visitor.condWidthWarnings) {
+            warnings.push({
+                line: cw.line,
+                character: cw.character,
+                length: cw.length,
+                message: `Condition expression '${cw.exprText}' has width ${cw.exprWidth} bits; condition should be 1-bit`,
                 severity: vscode.DiagnosticSeverity.Warning
             });
         }
