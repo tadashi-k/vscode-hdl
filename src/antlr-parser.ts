@@ -1461,6 +1461,28 @@ class AntlrVerilogParser {
             for (const [name, value] of Object.entries(overrides)) {
                 paramMap.set(name, { value, width: null });
             }
+            // Re-evaluate dependent parameters that were NOT explicitly overridden
+            // but whose computed default depends on overridden parameters.
+            // Iterate to fixed-point to handle chains of dependencies.
+            if (moduleDefaultParams && moduleDefaultParams.length > 0) {
+                const overriddenNames = new Set(Object.keys(overrides));
+                let changed = true;
+                while (changed) {
+                    changed = false;
+                    for (const p of moduleDefaultParams) {
+                        if (overriddenNames.has(p.name)) continue; // explicitly overridden
+                        if (!p.exprText) continue;
+                        const newVal = AntlrVerilogParser._evalSimpleExpr(p.exprText, paramMap);
+                        if (newVal !== null) {
+                            const currentVal = paramMap.get(p.name)?.value ?? null;
+                            if (newVal !== currentVal) {
+                                paramMap.set(p.name, { value: newVal, width: null });
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         return AntlrVerilogParser._evaluateRangeWidth(rawRange, paramMap);
@@ -1880,12 +1902,66 @@ class AntlrVerilogParser {
             });
         }
 
+        if (visitor) this._enrichInstanceParamOverrides(visitor);
+
         const warnings = visitor ? this._generateSignalWarnings(modules, signals, visitor, moduleDatabase) : [];
         const instances = visitor ? visitor.instances : [];
         const parameters = visitor ? visitor.parameters : [];
         const moduleTokens = visitor ? visitor.moduleTokens : [];
 
         return { modules, signals, instances, parameters, moduleTokens, errors: this.errorListener.getErrors(), warnings };
+    }
+
+    /**
+     * For each instance that has parameterOverrides, re-evaluate any module parameters
+     * that were NOT explicitly overridden but whose computed default value depends on
+     * one of the overridden parameters (e.g. ADR_WIDTH that depends on DEPTH).
+     * The re-evaluated values are added to parameterOverrides so subsequent width
+     * checks use the correct resolved values.
+     */
+    _enrichInstanceParamOverrides(visitor: VerilogSymbolVisitor) {
+        for (const inst of visitor.instances) {
+            if (!inst.parameterOverrides) continue;
+            // Only consider 'parameter' declarations for the instantiated module.
+            const instModParams = visitor.parameters.filter(
+                (p: any) => p.moduleName === inst.moduleName && p.kind === 'parameter'
+            );
+            if (instModParams.length === 0) continue;
+
+            // Build a paramMap with default values first.
+            const paramMap = new Map<string, EvalValue>();
+            for (const p of instModParams) {
+                if (p.value !== null && p.value !== undefined) {
+                    paramMap.set(p.name, { value: p.value, width: null });
+                }
+            }
+            // Apply the explicit overrides.
+            const overriddenNames = new Set(Object.keys(inst.parameterOverrides));
+            for (const [name, value] of Object.entries(inst.parameterOverrides)) {
+                paramMap.set(name, { value: value as number, width: null });
+            }
+
+            // Iteratively re-evaluate non-overridden params to fixed-point.
+            const enriched: Record<string, number> = { ...(inst.parameterOverrides as Record<string, number>) };
+            let changed = true;
+            while (changed) {
+                changed = false;
+                for (const p of instModParams) {
+                    if (overriddenNames.has(p.name)) continue; // explicitly set — leave alone
+                    if (!p.exprText) continue;
+                    const newVal = AntlrVerilogParser._evalSimpleExpr(p.exprText, paramMap);
+                    if (newVal !== null) {
+                        const currentVal = paramMap.get(p.name)?.value ?? null;
+                        if (newVal !== currentVal) {
+                            paramMap.set(p.name, { value: newVal, width: null });
+                            enriched[p.name] = newVal;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            inst.parameterOverrides = enriched;
+        }
     }
 
     /**

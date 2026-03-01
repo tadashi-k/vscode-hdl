@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 // Test script for signal-usage warnings in the ANTLR Verilog parser
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Mock vscode API for testing
 const vscode = {
@@ -29,7 +31,7 @@ class MockTextDocument {
 }
 
 (global as any).vscode = vscode;
-import AntlrVerilogParser from '../src/antlr-parser';
+const AntlrVerilogParser = require('../src/antlr-parser');
 
 // Shared mock for a workspace-wide module database (used by cross-file tests)
 class MockModuleDatabase {

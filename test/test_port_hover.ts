@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 // Test script for port hover information and parameterized bit width evaluation
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Mock vscode API for testing
 const vscode = {
@@ -532,6 +534,72 @@ endmodule
             console.log('  u_counter overrides:', JSON.stringify(uCounter ? uCounter.parameterOverrides : null));
             console.log('  u_counter_16 overrides:', JSON.stringify(uCounter16 ? uCounter16.parameterOverrides : null));
             console.log('  count_in warnings:', countInWarnings.map((w: any) => w.message));
+        }
+    }
+
+    // Test 13: Dependent parameters - re-evaluate when other parameters are overridden
+    {
+        totalTests++;
+        console.log('\nTest 13: Dependent parameters re-evaluated with overrides');
+        const code = `
+module top (
+    input wire clk,
+    input wire reset,
+    input wire [7:0] my_addr
+);
+    wire [7:0] my_data;
+    
+    test_parameter #(
+        .DEPTH(16),
+        .WIDTH(8)
+    ) u_mem (
+        .clk(clk),
+        .reset(reset),
+        .addr(my_addr[3:0]),
+        .data_in(my_data),
+        .we(1'b0),
+        .re(1'b0),
+        .data_out()
+    );
+endmodule
+
+module test_parameter #(
+    parameter DEPTH = 32,
+    parameter WIDTH = 8,
+    parameter ADR_WIDTH = (DEPTH == 16) ? 4 : (DEPTH == 32) ? 5 : (DEPTH == 64) ? 6 : 0
+)
+(
+    input wire clk,
+    input wire reset,
+    input wire [ADR_WIDTH-1:0] addr,
+    input wire [WIDTH-1:0] data_in,
+    input wire we,
+    input wire re,
+    output reg [WIDTH-1:0] data_out
+);
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'test13.v');
+        const { instances, warnings } = parser.parseSymbols(doc);
+
+        const inst = instances.find((i: any) => i.instanceName === 'u_mem');
+        const hasDepthOverride = inst && inst.parameterOverrides && inst.parameterOverrides.DEPTH === 16;
+        // ADR_WIDTH should be re-evaluated to 4 when DEPTH=16
+        const hasAdrWidthInOverrides = inst && inst.parameterOverrides && inst.parameterOverrides.ADR_WIDTH === 4;
+
+        // With ADR_WIDTH=4, addr is [3:0] (4 bits), my_addr[3:0] is [3:0] (4 bits) -> no warning
+        const addrWarning = warnings.find((w: any) =>
+            w.message && w.message.includes("Port 'addr'") && w.message.includes('my_addr'));
+
+        const pass = hasDepthOverride && hasAdrWidthInOverrides && !addrWarning;
+
+        if (pass) {
+            console.log(`  ✓ Test 13 PASSED (DEPTH=${inst.parameterOverrides.DEPTH}, ADR_WIDTH=${inst.parameterOverrides.ADR_WIDTH})`);
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 13 FAILED');
+            console.log('  inst.parameterOverrides:', JSON.stringify(inst ? inst.parameterOverrides : null));
+            console.log('  addr warnings:', warnings.filter((w: any) => w.message && w.message.includes("Port 'addr'")));
         }
     }
 
