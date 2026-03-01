@@ -22,9 +22,9 @@ A Visual Studio Code extension that provides syntax highlighting, symbol extract
 - **File Detection**: Automatically detects and activates for *.v files
 - **Language Configuration**: Proper comment handling, bracket matching, and auto-closing pairs
 
-## Syntax Error Detection
+## Verilog Parser and Syntax Error Detection
 
-The extension includes a Verilog parser that performs real-time syntax checking and displays errors directly in the editor. The parser detects:
+The extension includes a comprehensive Verilog parser that performs real-time syntax checking. Errors are displayed directly in the editor with squiggly underlines and detailed error messages.
 
 ## Verilog Symbol Database
 
@@ -52,10 +52,6 @@ The module database is automatically updated when:
 - A Verilog file is opened or modified (modules are added/updated)
 - A Verilog file is closed (modules from that file are removed)
 - Files are created or deleted in the workspace
-
-## Verilog Parser and Syntax Error Detection
-
-The extension includes a comprehensive Verilog parser that performs real-time syntax checking. Errors are displayed directly in the editor with squiggly underlines and detailed error messages.
 
 ## Goto Definition
 
