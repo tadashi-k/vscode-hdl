@@ -499,6 +499,38 @@ endmodule
         }
     }
 
+    // Test 15: Nested ternary operators (ADR_WIDTH calculation bug)
+    {
+        totalTests++;
+        console.log('\nTest 15: Nested ternary operators with DEPTH parameter');
+        const code = `
+module mem_ctrl #(
+    parameter DEPTH = 32,
+    parameter ADR_WIDTH = (DEPTH == 16) ? 4 : (DEPTH == 32) ? 5 : (DEPTH == 64) ? 6 : 0
+)
+(
+    input wire clk
+);
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'test15.v');
+        const { parameters } = parser.parseSymbols(doc);
+
+        const adrWidth = parameters.find((p: any) => p.name === 'ADR_WIDTH');
+        
+        // With DEPTH=32, ADR_WIDTH should evaluate to 5, not 6
+        const pass = adrWidth && adrWidth.value === 5;
+
+        if (pass) {
+            console.log(`  ✓ Test 15 PASSED (ADR_WIDTH = ${adrWidth.value})`);
+            passedTests++;
+        } else {
+            console.log(`  ✗ Test 15 FAILED`);
+            console.log(`  Expected ADR_WIDTH = 5, got ${adrWidth ? adrWidth.value : 'undefined'}`);
+            console.log('  ADR_WIDTH:', JSON.stringify(adrWidth));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);

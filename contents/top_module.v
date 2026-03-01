@@ -7,9 +7,9 @@ module top_module (
     output wire valid
 );
 
-    wire [7:0] counter_value;
+    wire[7:0] counter_value;
     reg ready;
-    wire counter_in = setup & (counter_value == 0);
+    wire[7:0] counter_in = setup & (counter_value == 0); // should show bit width mismatch: from 8 bits to 1 bit
 
     // Instantiate counter module - goto definition should work on "counter"
     counter u_counter (
@@ -26,5 +26,18 @@ module top_module (
     always @(posedge clk) begin
         ready <= 1'b1;
     end
+
+    test_parameter #(
+        .DEPTH(16),
+        .WIDTH(8)
+    ) u_test_parameter (
+        .clk(clk),
+        .reset(reset),
+        .addr(counter_value[4:0]), // should show bit width mismatch: from 5 bits to 4 bits
+        .data_in(counter_value),
+        .we(setup),
+        .re(setup),
+        .data_out()
+    );
 
 endmodule

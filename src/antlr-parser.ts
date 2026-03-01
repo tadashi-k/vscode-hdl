@@ -750,11 +750,30 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Helper: evaluate a constant_expression context
     _evaluateConstantExpression(ctx: any, paramMap: any): EvalValue | null {
         const exprCtx = ctx.expression ? ctx.expression() : null;
+        let exprCtxToUse = exprCtx;
+        
         if (Array.isArray(exprCtx)) {
             // expression() returns an array via getTypedRuleContexts; pick the first
-            return exprCtx.length > 0 ? this._evaluateExpression(exprCtx[0], paramMap) : null;
+            exprCtxToUse = exprCtx.length > 0 ? exprCtx[0] : null;
         }
-        return exprCtx ? this._evaluateExpression(exprCtx, paramMap) : null;
+        
+        if (!exprCtxToUse) return null;
+        
+        // Get the text of the expression
+        const exprText = exprCtxToUse.getText();
+        
+        // If the expression contains ternary operators, use text-based parser
+        // which handles right-associativity correctly
+        if (exprText && exprText.includes('?') && exprText.includes(':')) {
+            // Try text-based parsing first for ternary expressions
+            const simpleVal = AntlrVerilogParser._evalSimpleExpr(exprText, paramMap);
+            if (simpleVal !== null) {
+                return { value: simpleVal, width: null };
+            }
+        }
+        
+        // Fall back to ANTLR tree-based evaluation
+        return this._evaluateExpression(exprCtxToUse, paramMap);
     }
 
     // Helper: build a map of signal name -> signal object for a given module
@@ -930,13 +949,22 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             return this._applyBinary(binaryOpCtx.getText(), left, right);
         }
 
-        // Ternary: condition ? then : else (3 sub-expressions)
-        if (exprsArr.length === 3) {
+        // Ternary: condition ? then : else
+        if (exprsArr.length >= 3) {
             const cond = this._evaluateExpression(exprsArr[0], paramMap, moduleSignals);
             if (cond === null || cond.value === null) return null;
-            return cond.value
-                ? this._evaluateExpression(exprsArr[1], paramMap, moduleSignals)
-                : this._evaluateExpression(exprsArr[2], paramMap, moduleSignals);
+            
+            if (cond.value) {
+                return this._evaluateExpression(exprsArr[1], paramMap, moduleSignals);
+            } else {
+                if (exprsArr.length === 3) {
+                    return this._evaluateExpression(exprsArr[2], paramMap, moduleSignals);
+                }
+                
+                // More than 3 expressions - create synthetic context for remaining
+                const syntheticCtx = { expression: () => exprsArr.slice(2) };
+                return this._evaluateExpression(syntheticCtx, paramMap, moduleSignals);
+            }
         }
 
         return null;
@@ -1462,13 +1490,53 @@ class AntlrVerilogParser {
         expr = expr.trim();
         if (!expr) return null;
 
+        // Handle ternary operator with right-associativity: a ? b : c  
+        // Right-associative means: a ? b : (c ? d : e)
+        // Find the first ? and : at the top level (not inside parens)
+        let depth = 0;
+        let questionPos = -1;
+        let colonPos = -1;
+        
+        for (let i = 0; i < expr.length; i++) {
+            if (expr[i] === '(') depth++;
+            else if (expr[i] === ')') depth--;
+            else if (expr[i] === '?' && depth === 0 && questionPos === -1) {
+                questionPos = i;
+            } else if (expr[i] === ':' && depth === 0 && questionPos !== -1 && colonPos === -1) {
+                colonPos = i;
+                break; // Found the first ? : pair at top level
+            }
+        }
+        
+        if (questionPos !== -1 && colonPos !== -1 && colonPos > questionPos + 1) {
+            // We have a ternary operator
+            const condStr = expr.substring(0, questionPos);
+            const thenStr = expr.substring(questionPos + 1, colonPos);
+            const elseStr = expr.substring(colonPos + 1);
+            
+            const condVal = AntlrVerilogParser._evalSimpleExpr(condStr, paramMap);
+            if (condVal === null) return null;
+            
+            if (condVal) {
+                return AntlrVerilogParser._evalSimpleExpr(thenStr, paramMap);
+            } else {
+                return AntlrVerilogParser._evalSimpleExpr(elseStr, paramMap);
+            }
+        }
+
         // Tokenize: numbers, identifiers, operators, parens
         const tokens: string[] = [];
         let i = 0;
         while (i < expr.length) {
             if (/\s/.test(expr[i])) { i++; continue; }
-            // Multi-char operators
-            if (expr.substring(i, i + 2) === '**' || expr.substring(i, i + 2) === '<<' || expr.substring(i, i + 2) === '>>') {
+            // Multi-char operators (handle before single-char to avoid misparse)
+            if (expr.substring(i, i + 3) === '<<=' || expr.substring(i, i + 3) === '>>=') {
+                tokens.push(expr.substring(i, i + 3)); i += 3; continue;
+            }
+            if (expr.substring(i, i + 2) === '**' || expr.substring(i, i + 2) === '<<' || expr.substring(i, i + 2) === '>>' ||
+                expr.substring(i, i + 2) === '==' || expr.substring(i, i + 2) === '!=' ||
+                expr.substring(i, i + 2) === '<=' || expr.substring(i, i + 2) === '>=' ||
+                expr.substring(i, i + 2) === '&&' || expr.substring(i, i + 2) === '||') {
                 tokens.push(expr.substring(i, i + 2)); i += 2; continue;
             }
             // Verilog number literal: optional size, tick, optional signed, base, digits
@@ -1486,7 +1554,7 @@ class AntlrVerilogParser {
                 while (i < expr.length && /[a-zA-Z0-9_$]/.test(expr[i])) { ident += expr[i++]; }
                 tokens.push(ident); continue;
             }
-            if ('+-*/()'.includes(expr[i])) {
+            if ('+-*/<>!&|()'.includes(expr[i])) {
                 tokens.push(expr[i++]); continue;
             }
             return null; // unknown character
@@ -1497,7 +1565,90 @@ class AntlrVerilogParser {
         function consume(): string { return tokens[pos++]; }
 
         function parseExpr(): number | null {
-            return parseAddSub();
+            return parseLogicalOr();
+        }
+
+        function parseLogicalOr(): number | null {
+            let left = parseLogicalAnd();
+            if (left === null) return null;
+            while (peek() === '||') {
+                consume();
+                const right = parseLogicalAnd();
+                if (right === null) return null;
+                left = (left || right) ? 1 : 0;
+            }
+            return left;
+        }
+
+        function parseLogicalAnd(): number | null {
+            let left = parseBitwiseOr();
+            if (left === null) return null;
+            while (peek() === '&&') {
+                consume();
+                const right = parseBitwiseOr();
+                if (right === null) return null;
+                left = (left && right) ? 1 : 0;
+            }
+            return left;
+        }
+
+        function parseBitwiseOr(): number | null {
+            let left = parseBitwiseXor();
+            if (left === null) return null;
+            while (peek() === '|' && peek() !== '||') {
+                consume();
+                const right = parseBitwiseXor();
+                if (right === null) return null;
+                left = left | right;
+            }
+            return left;
+        }
+
+        function parseBitwiseXor(): number | null {
+            let left = parseBitwiseAnd();
+            if (left === null) return null;
+            while (peek() === '^') {
+                consume();
+                const right = parseBitwiseAnd();
+                if (right === null) return null;
+                left = left ^ right;
+            }
+            return left;
+        }
+
+        function parseBitwiseAnd(): number | null {
+            let left = parseComparison();
+            if (left === null) return null;
+            while (peek() === '&' && peek() !== '&&') {
+                consume();
+                const right = parseComparison();
+                if (right === null) return null;
+                left = left & right;
+            }
+            return left;
+        }
+
+        function parseComparison(): number | null {
+            let left = parseAddSub();
+            if (left === null) return null;
+            const op = peek();
+            if (op === '==' || op === '!=' || op === '<' || op === '>' || op === '<=' || op === '>=') {
+                consume();
+                const right = parseAddSub();
+                if (right === null) return null;
+                let result: number;
+                switch (op) {
+                    case '==': result = left === right ? 1 : 0; break;
+                    case '!=': result = left !== right ? 1 : 0; break;
+                    case '<':  result = left < right ? 1 : 0; break;
+                    case '>':  result = left > right ? 1 : 0; break;
+                    case '<=': result = left <= right ? 1 : 0; break;
+                    case '>=': result = left >= right ? 1 : 0; break;
+                    default: return null;
+                }
+                return result;
+            }
+            return left;
         }
 
         function parseAddSub(): number | null {
@@ -1570,6 +1721,16 @@ class AntlrVerilogParser {
             if (peek() === '+') {
                 consume();
                 return parsePrimary();
+            }
+            if (peek() === '!') {
+                consume();
+                const val = parsePrimary();
+                return val !== null ? (val ? 0 : 1) : null;
+            }
+            if (peek() === '~') {
+                consume();
+                const val = parsePrimary();
+                return val !== null ? ~val : null;
             }
             return parsePrimary();
         }
