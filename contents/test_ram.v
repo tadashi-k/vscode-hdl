@@ -12,7 +12,9 @@ module test_ram #(
 
 localparam RAM_SIZE = 1 << ADR_WIDTH;
 
-reg [DATA_WIDTH-1:0] ram [0:RAM_SIZE-1];
+reg[DATA_WIDTH-1:0] ram[0:RAM_SIZE-1];
+reg[3:0] internal_rd;
+
 integer cnt;
 initial begin
     for(cnt = 0; cnt < RAM_SIZE; cnt = cnt + 1) begin
@@ -26,6 +28,8 @@ always @(posedge clk) begin
     end else begin
         data_out <= ram[addr];
     end
+
+    internal_rd <= ram[addr][3:0];
 end
 
 endmodule
