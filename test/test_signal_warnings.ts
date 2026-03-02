@@ -2472,6 +2472,46 @@ endmodule
         }
     }
 
+    // Test 64: No bit width mismatch for memory array element assignment (ram[addr] <= data_in)
+    {
+        totalTests++;
+        console.log('\nTest 64: No bit width mismatch for memory array element assignment');
+        const code = `
+module test_ram #(
+    parameter DATA_WIDTH = 8,
+    parameter ADR_WIDTH = 4
+)
+(
+    input clk,
+    input we,
+    input [ADR_WIDTH-1:0] addr,
+    input [DATA_WIDTH-1:0] data_in,
+    output reg [DATA_WIDTH-1:0] data_out
+);
+localparam RAM_SIZE = 1 << ADR_WIDTH;
+reg[DATA_WIDTH-1:0] ram[0:RAM_SIZE-1];
+always @(posedge clk) begin
+    if (we) begin
+        ram[addr] <= data_in;
+    end else begin
+        data_out <= ram[addr];
+    end
+end
+endmodule
+`;
+        const doc = new MockTextDocument(code, 'test_ram.v');
+        const { warnings } = parser.parseSymbols(doc);
+
+        const hasWidthMismatch = warnings.some(w => w.message.includes('Bit width mismatch') && w.message.includes('ram'));
+        if (!hasWidthMismatch) {
+            console.log('  ✓ Test 64 PASSED (no spurious width mismatch for memory array access ram[addr])');
+            passedTests++;
+        } else {
+            console.log('  ✗ Test 64 FAILED (unexpected bit width mismatch for memory array access)');
+            warnings.forEach(w => console.log(`    WARNING: Line ${w.line + 1}: ${w.message}`));
+        }
+    }
+
     // Summary
     console.log('\n' + '='.repeat(60));
     console.log(`\nTest Results: ${passedTests}/${totalTests} tests passed`);
