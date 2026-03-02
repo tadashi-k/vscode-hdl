@@ -853,6 +853,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             return w !== null ? w : 1;
         }
         if (exprArr.length === 1) {
+            // Memory array access: identifier[addr] → element width (not a bit select)
+            const sig = moduleSignals.get(name);
+            if (sig && sig.isMemory) {
+                const w = this._getSignalWidth(sig.bitWidth);
+                return w !== null ? w : 1;
+            }
             // Single bit select: identifier[expr] → width is 1
             return 1;
         }
@@ -1014,6 +1020,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     const exprChildren = ctx.expression ? ctx.expression() : null;
                     const exprArr = Array.isArray(exprChildren) ? exprChildren : (exprChildren ? [exprChildren] : []);
                     if (exprArr.length === 1) {
+                        // Memory array access: identifier[addr] → element width (not a bit select)
+                        if (sig.isMemory) {
+                            const w = this._getSignalWidth(sig.bitWidth);
+                            return { value: null, width: w !== null ? w : 1 };
+                        }
                         // Single bit select: identifier[expr] → width is 1
                         return { value: null, width: 1 };
                     }
@@ -1319,6 +1330,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const info = this._getIdentifierInfo(regIdCtx.identifier());
             if (!info) continue;
 
+            // Detect memory array: reg [W:0] mem [0:N-1] — the identifier has a range
+            // (array dimension) in the list_of_register_identifiers context.
+            const isMemory = this._registerIdentifierHasArrayRange(regIdsCtx, regIdCtx);
+
             this.signals.push({
                 name: info.name,
                 uri: this.uri,
@@ -1327,6 +1342,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 direction: null,
                 type: 'reg',
                 bitWidth,
+                isMemory,
                 moduleName: this._currentModule.name
             });
 
@@ -1379,6 +1395,25 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         }
         this.visitChildren(ctx);
         return null;
+    }
+
+    // Helper: detect whether a register_identifier in list_of_register_identifiers is followed by
+    // an array range (e.g. ram [0:N-1]), indicating a memory array declaration.
+    _registerIdentifierHasArrayRange(listCtx: any, regIdCtx: any): boolean {
+        const children = listCtx.children;
+        if (!children) return false;
+        let found = false;
+        for (const child of children) {
+            if (!found) {
+                if (child === regIdCtx) found = true;
+            } else {
+                const text = typeof child.getText === 'function' ? child.getText() : '';
+                if (text === ',' || text === '=') break;
+                if (text.startsWith('[')) return true;
+                break;
+            }
+        }
+        return false;
     }
 
     // Helper: determine which identifier contexts in a list have initial values ('=' expr).
