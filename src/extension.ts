@@ -120,27 +120,6 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
         paramsByModule.get(param.moduleName)!.push(param);
     }
 
-    // Group module tokens by module name
-    const tokensByModule = new Map<string, any[]>();
-    // Module tokens include the module declaration name itself; associate with
-    // the correct module by matching the module name from the parsed modules list.
-    // For simplicity we group all tokens under the first module they relate to.
-    // Tokens are per-file so this is fine.
-    for (const parsedMod of modules) {
-        tokensByModule.set(parsedMod.name, []);
-    }
-    for (const tok of moduleTokens) {
-        // Associate with the module that declared the token's name if possible
-        // Otherwise just assign to the first module
-        let assigned = false;
-        for (const parsedMod of modules) {
-            const modTokens = tokensByModule.get(parsedMod.name)!;
-            modTokens.push(tok);
-            assigned = true;
-            break;
-        }
-    }
-
     // Build unified Module objects in the database
     for (const parsedMod of modules) {
         const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);

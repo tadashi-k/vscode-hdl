@@ -204,7 +204,7 @@ function runTests() {
     const counterDoc2 = new MockTextDocument(counterContent, counterPath);
     updateDatabase(db, counterDoc2);
     const counterMod2 = db.getModule('counter');
-    if (counterMod2 && counterMod2.scanned === true) {
+    if (counterMod2 && counterMod2.scanned) {
         console.log(`✓ counter module has scanned=true after ANTLR parse`);
         passed++;
     } else {

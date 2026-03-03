@@ -130,13 +130,14 @@ export class ModuleDatabase {
 
     /** Get module-token positions for the given file URI. */
     getModuleTokensByUri(uri: string): any[] {
-        const result: any[] = [];
+        // Module tokens are per-file (shared across all modules in the file).
+        // Return from the first scanned module found for this URI.
         for (const mod of this.modules.values()) {
             if (mod.uri === uri && mod.scanned) {
-                result.push(...mod.moduleTokens);
+                return mod.moduleTokens;
             }
         }
-        return result;
+        return [];
     }
 
     /** Get signals for a specific module by name. */
