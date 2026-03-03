@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Test for verifying the separation of signal and module databases
- * Uses the ANTLR-based parser (parseSymbols)
+ * Test for verifying the unified module database
+ * Uses the ANTLR-based parser (parseSymbols) and the new ModuleDatabase from database.ts
  */
 
 import * as fs from 'fs';
@@ -16,6 +16,8 @@ const vscode = {
 
 const AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
+
+import { Module, ModuleDatabase } from '../src/database';
 
 class MockTextDocument {
     text: any;
@@ -32,91 +34,12 @@ class MockTextDocument {
     }
 }
 
-// Signal database - per module (mirrors extension.js SignalDatabase)
-class SignalDatabase {
-    signals: any;
-    _modulesByUri: any;
-    constructor() {
-        this.signals = new Map<string, any>();
-        this._modulesByUri = new Map<string, any>();
-    }
-
-    updateSignals(moduleName: any, uri: any, signals: any) {
-        this.signals.set(moduleName, signals);
-        if (!this._modulesByUri.has(uri)) {
-            this._modulesByUri.set(uri, []);
-        }
-        const list = this._modulesByUri.get(uri);
-        if (!list.includes(moduleName)) {
-            list.push(moduleName);
-        }
-    }
-
-    getSignals(moduleName: any) {
-        return this.signals.get(moduleName) || [];
-    }
-
-    getSignalsByUri(uri: any) {
-        const moduleNames = this._modulesByUri.get(uri) || [];
-        const result = [];
-        for (const name of moduleNames) {
-            result.push(...(this.signals.get(name) || []));
-        }
-        return result;
-    }
-
-    removeSignalsByUri(uri: any) {
-        const moduleNames = this._modulesByUri.get(uri) || [];
-        for (const name of moduleNames) {
-            this.signals.delete(name);
-        }
-        this._modulesByUri.delete(uri);
-    }
-
-    getAllSignals() {
-        const allSignals = [];
-        for (const signals of this.signals.values()) {
-            allSignals.push(...signals);
-        }
-        return allSignals;
-    }
-}
-
-// Module database - workspace-wide (mirrors extension.js ModuleDatabase)
-class ModuleDatabase {
-    modules: any;
-    constructor() {
-        this.modules = new Map<string, any>();
-    }
-
-    addModule(module: any) {
-        this.modules.set(module.name, module);
-    }
-
-    getModule(name: any) {
-        return this.modules.get(name);
-    }
-
-    removeModulesFromFile(uri: any) {
-        for (const [name, module] of this.modules.entries()) {
-            if (module.uri === uri) {
-                this.modules.delete(name);
-            }
-        }
-    }
-
-    getAllModules() {
-        return Array.from(this.modules.values()) as any[];
-    }
-}
-
-// Helper to update databases from a parsed document
-function updateDatabases(signalDB: any, moduleDB: any, doc: any) {
+// Helper to update the unified database from a parsed document
+function updateDatabase(db: ModuleDatabase, doc: any) {
     const uri = doc.uri.toString();
-    const { modules, signals } = parser.parseSymbols(doc);
+    const { modules, signals, instances, parameters } = parser.parseSymbols(doc);
 
-    signalDB.removeSignalsByUri(uri);
-    moduleDB.removeModulesFromFile(uri);
+    db.removeModulesFromFile(uri);
 
     const signalsByModule = new Map<string, any>();
     for (const signal of signals) {
@@ -126,10 +49,47 @@ function updateDatabases(signalDB: any, moduleDB: any, doc: any) {
         signalsByModule.get(signal.moduleName).push(signal);
     }
 
-    for (const module of modules) {
-        moduleDB.addModule(module);
-        const moduleSignals = signalsByModule.get(module.name) || [];
-        signalDB.updateSignals(module.name, uri, moduleSignals);
+    const instancesByModule = new Map<string, any[]>();
+    for (const instance of instances) {
+        if (!instancesByModule.has(instance.parentModuleName)) {
+            instancesByModule.set(instance.parentModuleName, []);
+        }
+        instancesByModule.get(instance.parentModuleName)!.push(instance);
+    }
+
+    const paramsByModule = new Map<string, any[]>();
+    for (const param of parameters) {
+        if (!paramsByModule.has(param.moduleName)) {
+            paramsByModule.set(param.moduleName, []);
+        }
+        paramsByModule.get(param.moduleName)!.push(param);
+    }
+
+    for (const parsedMod of modules) {
+        const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
+        mod.ports = parsedMod.ports || [];
+
+        const moduleSignals = signalsByModule.get(parsedMod.name) || [];
+        mod.signalList = moduleSignals;
+        for (const sig of moduleSignals) {
+            mod.signalMap.set(sig.name, sig);
+        }
+
+        const moduleParams = paramsByModule.get(parsedMod.name) || [];
+        mod.parameterList = moduleParams;
+        for (const param of moduleParams) {
+            mod.parameterMap.set(param.name, param);
+        }
+
+        const moduleInstances = instancesByModule.get(parsedMod.name) || [];
+        mod.instanceList = moduleInstances;
+        for (const inst of moduleInstances) {
+            if (inst.instanceName) {
+                mod.instanceMap.set(inst.instanceName, inst);
+            }
+        }
+
+        db.addModule(mod);
     }
 }
 
@@ -140,23 +100,22 @@ function runTests() {
     let passed = 0;
     let failed = 0;
 
-    const signalDB = new SignalDatabase();
-    const moduleDB = new ModuleDatabase();
+    const db = new ModuleDatabase();
 
     // Load test files
     const counterPath = path.join(__dirname, '..', 'contents', 'counter.v');
     const counterContent = fs.readFileSync(counterPath, 'utf8');
     const counterDoc = new MockTextDocument(counterContent, counterPath);
-    updateDatabases(signalDB, moduleDB, counterDoc);
+    updateDatabase(db, counterDoc);
 
     const topPath = path.join(__dirname, '..', 'contents', 'top_module.v');
     const topContent = fs.readFileSync(topPath, 'utf8');
     const topDoc = new MockTextDocument(topContent, topPath);
-    updateDatabases(signalDB, moduleDB, topDoc);
+    updateDatabase(db, topDoc);
 
     // Test 1: Verify module database is workspace-wide
     console.log('Test 1: Module database stores all modules workspace-wide');
-    const allModules = moduleDB.getAllModules();
+    const allModules = db.getAllModules();
     if (allModules.length === 2 &&
         allModules.some(m => m.name === 'counter') &&
         allModules.some(m => m.name === 'top_module')) {
@@ -167,10 +126,10 @@ function runTests() {
         failed++;
     }
 
-    // Test 2: Verify signal database is per-module
-    console.log('\nTest 2: Signal database stores signals per-module');
-    const counterSignals = signalDB.getSignals('counter');
-    const topSignals = signalDB.getSignals('top_module');
+    // Test 2: Verify signals are stored per-module within the unified database
+    console.log('\nTest 2: Signals are stored per-module within the unified database');
+    const counterSignals = db.getSignals('counter');
+    const topSignals = db.getSignals('top_module');
 
     if (counterSignals.length >= 3 && topSignals.length >= 3) {
         console.log(`✓ counter module has ${counterSignals.length} signals: ${counterSignals.map((s: any) => s.name).join(', ')}`);
@@ -184,7 +143,7 @@ function runTests() {
 
     // Test 3: Verify module lookup by name (workspace-wide)
     console.log('\nTest 3: Module database allows lookup by name');
-    const counterModule = moduleDB.getModule('counter');
+    const counterModule = db.getModule('counter');
     if (counterModule && counterModule.name === 'counter' && counterModule.uri.includes('counter.v')) {
         console.log(`✓ Found 'counter' module at ${path.basename(counterModule.uri)}, line ${counterModule.line + 1}`);
         passed++;
@@ -212,10 +171,10 @@ function runTests() {
 
     // Test 5: Verify module database survives file removal
     console.log('\nTest 5: Module database persists across file operations');
-    const initialModuleCount = moduleDB.getAllModules().length;
+    const initialModuleCount = db.getAllModules().length;
 
-    moduleDB.removeModulesFromFile(counterPath);
-    const afterRemoval = moduleDB.getAllModules();
+    db.removeModulesFromFile(counterPath);
+    const afterRemoval = db.getAllModules();
 
     if (afterRemoval.length === initialModuleCount - 1 &&
         afterRemoval.some(m => m.name === 'top_module') &&
@@ -230,12 +189,26 @@ function runTests() {
 
     // Test 6: Module ports list is populated
     console.log('\nTest 6: Module object includes ports list');
-    const topModule = moduleDB.getModule('top_module');
+    const topModule = db.getModule('top_module');
     if (topModule && Array.isArray(topModule.ports) && topModule.ports.length >= 2) {
         console.log(`✓ top_module has ${topModule.ports.length} ports: ${topModule.ports.map((p: any) => p.name).join(', ')}`);
         passed++;
     } else {
         console.log(`✗ Expected top_module to have ports list`);
+        failed++;
+    }
+
+    // Test 7: Module scanned flag is set
+    console.log('\nTest 7: Module scanned flag is set after ANTLR parse');
+    // Re-add counter to test scanned flag
+    const counterDoc2 = new MockTextDocument(counterContent, counterPath);
+    updateDatabase(db, counterDoc2);
+    const counterMod2 = db.getModule('counter');
+    if (counterMod2 && counterMod2.scanned === true) {
+        console.log(`✓ counter module has scanned=true after ANTLR parse`);
+        passed++;
+    } else {
+        console.log(`✗ Expected counter module to have scanned=true`);
         failed++;
     }
 
@@ -250,4 +223,3 @@ function runTests() {
 // Run the tests
 const success = runTests();
 process.exit(success ? 0 : 1);
-

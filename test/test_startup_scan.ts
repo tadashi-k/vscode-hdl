@@ -18,6 +18,8 @@ const vscode = {
 
 const AntlrVerilogParser = require('../src/antlr-parser');
 
+import { Module, ModuleDatabase } from '../src/database';
+
 class MockTextDocument {
     text: any;
     uri: any;
@@ -30,27 +32,27 @@ class MockTextDocument {
     getText() { return this.text; }
 }
 
-// Mirrors the ModuleDatabase class from extension.js
-class ModuleDatabase {
-    modules: any;
-    constructor() {
-        this.modules = new Map<string, any>();
+/** Helper: parse a document and populate the unified database. */
+function parseIntoDatabase(parser: any, doc: any, db: ModuleDatabase) {
+    const uri = doc.uri.toString();
+    const { modules, signals, instances, parameters } = parser.parseSymbols(doc, null);
+
+    db.removeModulesFromFile(uri);
+
+    const signalsByModule = new Map<string, any[]>();
+    for (const s of signals) {
+        if (!signalsByModule.has(s.moduleName)) signalsByModule.set(s.moduleName, []);
+        signalsByModule.get(s.moduleName)!.push(s);
     }
-    addModule(module: any) {
-        this.modules.set(module.name, module);
-    }
-    getModule(name: any) {
-        return this.modules.get(name);
-    }
-    removeModulesFromFile(uri: any) {
-        for (const [name, module] of this.modules.entries()) {
-            if (module.uri === uri) {
-                this.modules.delete(name);
-            }
+
+    for (const parsedMod of modules) {
+        const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
+        mod.ports = parsedMod.ports || [];
+        mod.signalList = signalsByModule.get(parsedMod.name) || [];
+        for (const sig of mod.signalList) {
+            mod.signalMap.set(sig.name, sig);
         }
-    }
-    getAllModules() {
-        return Array.from(this.modules.values()) as any[];
+        db.addModule(mod);
     }
 }
 
@@ -128,17 +130,11 @@ endmodule
 
         // Step 1: Scan library file (simulates scanWorkspaceForModules)
         const counterDoc = new MockTextDocument(counterCode, 'counter.v');
-        const { modules: counterModules } = parser.parseSymbols(counterDoc, null);
-        for (const mod of counterModules) {
-            moduleDB.addModule(mod);
-        }
+        parseIntoDatabase(parser, counterDoc, moduleDB);
 
         // Step 2: Scan top file to build its symbols
         const topDoc = new MockTextDocument(topCode, 'top.v');
-        const { modules: topModules } = parser.parseSymbols(topDoc, null);
-        for (const mod of topModules) {
-            moduleDB.addModule(mod);
-        }
+        parseIntoDatabase(parser, topDoc, moduleDB);
 
         // Step 3: Run diagnostics on the open top file WITH the complete module database
         const { warnings } = parser.parseSymbols(topDoc, moduleDB);
@@ -206,10 +202,7 @@ endmodule
 
         // Now add counter to DB (simulates workspace scan completing)
         const counterDoc = new MockTextDocument(counterCode, 'counter.v');
-        const { modules: cModules } = freshParser.parseSymbols(counterDoc, null);
-        for (const mod of cModules) {
-            emptyDB.addModule(mod);
-        }
+        parseIntoDatabase(freshParser, counterDoc, emptyDB);
 
         // Simulate NEW behavior: run diagnostics AFTER scanning library files
         const { warnings: warningsAfter } = freshParser.parseSymbols(topDoc, emptyDB);

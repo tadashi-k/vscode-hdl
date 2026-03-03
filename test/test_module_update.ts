@@ -2,7 +2,7 @@
 
 /**
  * Test for verifying module update behavior (rename/delete scenarios)
- * Uses the ANTLR-based parser (parseSymbols)
+ * Uses the ANTLR-based parser (parseSymbols) and the unified ModuleDatabase
  */
 
 import * as fs from 'fs';
@@ -16,6 +16,8 @@ const vscode = {
 
 const AntlrVerilogParser = require('../src/antlr-parser');
 const parser = new AntlrVerilogParser();
+
+import { Module, ModuleDatabase } from '../src/database';
 
 class MockUri {
     fsPath: any;
@@ -43,72 +45,26 @@ class MockTextDocument {
     }
 }
 
-// Signal database - per module (mirrors extension.js)
-class SignalDatabase {
-    signals: any;
-    _modulesByUri: any;
-    constructor() {
-        this.signals = new Map<string, any>();
-        this._modulesByUri = new Map<string, any>();
-    }
-
-    updateSignals(moduleName: any, uri: any, signals: any) {
-        this.signals.set(moduleName, signals);
-        if (!this._modulesByUri.has(uri)) this._modulesByUri.set(uri, []);
-        const list = this._modulesByUri.get(uri);
-        if (!list.includes(moduleName)) list.push(moduleName);
-    }
-
-    removeSignalsByUri(uri: any) {
-        const names = this._modulesByUri.get(uri) || [];
-        for (const name of names) this.signals.delete(name);
-        this._modulesByUri.delete(uri);
-    }
-}
-
-class ModuleDatabase {
-    modules: any;
-    constructor() {
-        this.modules = new Map<string, any>();
-    }
-
-    addModule(module: any) {
-        this.modules.set(module.name, module);
-    }
-
-    getModule(name: any) {
-        return this.modules.get(name);
-    }
-
-    removeModulesFromFile(uri: any) {
-        for (const [name, module] of this.modules.entries()) {
-            if (module.uri === uri) {
-                this.modules.delete(name);
-            }
-        }
-    }
-
-    getAllModules() {
-        return Array.from(this.modules.values()) as any[];
-    }
-}
-
-function updateDocumentSymbols(document: any, signalDB: any, moduleDB: any) {
+function updateDocumentSymbols(document: any, db: ModuleDatabase) {
     const uri = document.uri.toString();
-    const { modules, signals } = parser.parseSymbols(document);
+    const { modules, signals, instances, parameters } = parser.parseSymbols(document);
 
-    signalDB.removeSignalsByUri(uri);
-    moduleDB.removeModulesFromFile(uri);
+    db.removeModulesFromFile(uri);
 
-    const signalsByModule = new Map<string, any>();
+    const signalsByModule = new Map<string, any[]>();
     for (const s of signals) {
         if (!signalsByModule.has(s.moduleName)) signalsByModule.set(s.moduleName, []);
-        signalsByModule.get(s.moduleName).push(s);
+        signalsByModule.get(s.moduleName)!.push(s);
     }
 
-    for (const module of modules) {
-        moduleDB.addModule(module);
-        signalDB.updateSignals(module.name, uri, signalsByModule.get(module.name) || []);
+    for (const parsedMod of modules) {
+        const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
+        mod.ports = parsedMod.ports || [];
+        mod.signalList = signalsByModule.get(parsedMod.name) || [];
+        for (const sig of mod.signalList) {
+            mod.signalMap.set(sig.name, sig);
+        }
+        db.addModule(mod);
     }
 }
 
@@ -119,16 +75,15 @@ function runTests() {
     let passed = 0;
     let failed = 0;
 
-    const signalDB = new SignalDatabase();
-    const moduleDB = new ModuleDatabase();
+    const db = new ModuleDatabase();
 
     // Test 1: Initial module addition
     console.log('Test 1: Initial module addition');
     const testPath = '/tmp/test.v';
     const doc1 = new MockTextDocument('module original_name ();\nendmodule', testPath);
-    updateDocumentSymbols(doc1, signalDB, moduleDB);
+    updateDocumentSymbols(doc1, db);
 
-    if (moduleDB.getModule('original_name')) {
+    if (db.getModule('original_name')) {
         console.log('✓ Original module added successfully');
         passed++;
     } else {
@@ -139,15 +94,15 @@ function runTests() {
     // Test 2: Module rename (simulate file modification)
     console.log('\nTest 2: Module rename handles old module removal');
     const doc2 = new MockTextDocument('module renamed_module ();\nendmodule', testPath);
-    updateDocumentSymbols(doc2, signalDB, moduleDB);
+    updateDocumentSymbols(doc2, db);
 
-    if (!moduleDB.getModule('original_name') && moduleDB.getModule('renamed_module')) {
+    if (!db.getModule('original_name') && db.getModule('renamed_module')) {
         console.log('✓ Old module removed, new module added');
         passed++;
     } else {
         console.log('✗ Module rename not handled correctly');
-        if (moduleDB.getModule('original_name')) console.log('  Error: old module still exists');
-        if (!moduleDB.getModule('renamed_module')) console.log('  Error: new module not added');
+        if (db.getModule('original_name')) console.log('  Error: old module still exists');
+        if (!db.getModule('renamed_module')) console.log('  Error: new module not added');
         failed++;
     }
 
@@ -157,10 +112,10 @@ function runTests() {
         'module mod1 ();\nendmodule\nmodule mod2 ();\nendmodule',
         testPath
     );
-    updateDocumentSymbols(doc3, signalDB, moduleDB);
+    updateDocumentSymbols(doc3, db);
 
-    const allModules = moduleDB.getAllModules();
-    if (allModules.length === 2 && moduleDB.getModule('mod1') && moduleDB.getModule('mod2')) {
+    const allModules = db.getAllModules();
+    if (allModules.length === 2 && db.getModule('mod1') && db.getModule('mod2')) {
         console.log('✓ Both modules added correctly');
         passed++;
     } else {
@@ -172,9 +127,9 @@ function runTests() {
     // Test 4: Update file to have only one module (delete scenario)
     console.log('\nTest 4: File update removes deleted modules');
     const doc4 = new MockTextDocument('module mod1 ();\nendmodule', testPath);
-    updateDocumentSymbols(doc4, signalDB, moduleDB);
+    updateDocumentSymbols(doc4, db);
 
-    if (moduleDB.getModule('mod1') && !moduleDB.getModule('mod2')) {
+    if (db.getModule('mod1') && !db.getModule('mod2')) {
         console.log('✓ Deleted module (mod2) removed, kept module (mod1) preserved');
         passed++;
     } else {
@@ -186,12 +141,12 @@ function runTests() {
     console.log('\nTest 5: Updates to one file don\'t affect modules in other files');
     const otherPath = '/tmp/other.v';
     const otherDoc = new MockTextDocument('module other_module ();\nendmodule', otherPath);
-    updateDocumentSymbols(otherDoc, signalDB, moduleDB);
+    updateDocumentSymbols(otherDoc, db);
 
     const doc5 = new MockTextDocument('module updated_mod1 ();\nendmodule', testPath);
-    updateDocumentSymbols(doc5, signalDB, moduleDB);
+    updateDocumentSymbols(doc5, db);
 
-    if (moduleDB.getModule('other_module') && moduleDB.getModule('updated_mod1') && !moduleDB.getModule('mod1')) {
+    if (db.getModule('other_module') && db.getModule('updated_mod1') && !db.getModule('mod1')) {
         console.log('✓ Other file\'s module preserved, original file updated correctly');
         passed++;
     } else {
@@ -210,4 +165,3 @@ function runTests() {
 // Run the tests
 const success = runTests();
 process.exit(success ? 0 : 1);
-
