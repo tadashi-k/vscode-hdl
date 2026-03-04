@@ -97,7 +97,7 @@ endmodule
 `;
         const doc = new MockTextDocument(validCode, 'test_valid.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -124,7 +124,7 @@ module test_module (
 `;
         const doc = new MockTextDocument(code, 'test_missing_endmodule.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
         const hasEndmoduleError = errors.some((e: any) => e.message.includes('endmodule'));
@@ -149,7 +149,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_reserved.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
         const hasReservedError = errors.some((e: any) =>
@@ -179,7 +179,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_brackets.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
         const hasBracketError = errors.some((e: any) =>
@@ -205,7 +205,7 @@ endmodule
             const testContent = fs.readFileSync(testPath, 'utf8');
             const doc = new MockTextDocument(testContent, testPath);
             const parser = new AntlrVerilogParser();
-            const errors = parser.parse(doc);
+            const errors = parser.generateErrors(doc);
             
             console.log(`  Found ${errors.length} error(s):`);
             errors.forEach((e: any) => {
@@ -235,7 +235,7 @@ endmodule
             const testContent = fs.readFileSync(testPath, 'utf8');
             const doc = new MockTextDocument(testContent, testPath);
             const parser = new AntlrVerilogParser();
-            const errors = parser.parse(doc);
+            const errors = parser.generateErrors(doc);
             
             console.log(`  Found ${errors.length} error(s)`);
             if (errors.length > 0) {

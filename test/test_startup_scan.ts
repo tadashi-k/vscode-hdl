@@ -35,23 +35,9 @@ class MockTextDocument {
 /** Helper: parse a document and populate the unified database. */
 function parseIntoDatabase(parser: any, doc: any, db: ModuleDatabase) {
     const uri = doc.uri.toString();
-    const { modules, signals, instances, parameters } = parser.parseSymbols(doc, null);
-
+    const modules = parser.parseSymbols(doc);
     db.removeModulesFromFile(uri);
-
-    const signalsByModule = new Map<string, any[]>();
-    for (const s of signals) {
-        if (!signalsByModule.has(s.moduleName)) signalsByModule.set(s.moduleName, []);
-        signalsByModule.get(s.moduleName)!.push(s);
-    }
-
-    for (const parsedMod of modules) {
-        const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
-        mod.ports = parsedMod.ports || [];
-        mod.signalList = signalsByModule.get(parsedMod.name) || [];
-        for (const sig of mod.signalList) {
-            mod.signalMap.set(sig.name, sig);
-        }
+    for (const mod of modules) {
         db.addModule(mod);
     }
 }
@@ -104,7 +90,7 @@ endmodule
         totalTests++;
         console.log('\nTest 1: Without pre-built module database - cross-file ports unknown');
         const topDoc = new MockTextDocument(topCode, 'top.v');
-        const { warnings } = parser.parseSymbols(topDoc, null);
+        const warnings = parser.generateErrors(topDoc, null).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         // Without the module database, port connections to 'counter' are unknown,
         // so signals connected to its output ports may incorrectly appear "never assigned"
@@ -137,7 +123,7 @@ endmodule
         parseIntoDatabase(parser, topDoc, moduleDB);
 
         // Step 3: Run diagnostics on the open top file WITH the complete module database
-        const { warnings } = parser.parseSymbols(topDoc, moduleDB);
+        const warnings = parser.generateErrors(topDoc, moduleDB).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
         const neverAssignedWarnings = warnings.filter((w: any) => w.message.includes('never assigned'));
         const cntWarned = neverAssignedWarnings.some((w: any) => w.message.includes('cnt'));
 
@@ -197,7 +183,7 @@ endmodule
         const topDoc = new MockTextDocument(topCode, 'top.v');
 
         // Simulate OLD behavior: run diagnostics BEFORE scanning library files
-        const { warnings: warningsBefore } = freshParser.parseSymbols(topDoc, emptyDB);
+        const warningsBefore = freshParser.generateErrors(topDoc, emptyDB).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
         const cntWarnedBefore = warningsBefore.some((w: any) => w.message.includes('cnt') && w.message.includes('never assigned'));
 
         // Now add counter to DB (simulates workspace scan completing)
@@ -205,7 +191,7 @@ endmodule
         parseIntoDatabase(freshParser, counterDoc, emptyDB);
 
         // Simulate NEW behavior: run diagnostics AFTER scanning library files
-        const { warnings: warningsAfter } = freshParser.parseSymbols(topDoc, emptyDB);
+        const warningsAfter = freshParser.generateErrors(topDoc, emptyDB).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
         const cntWarnedAfter = warningsAfter.some((w: any) => w.message.includes('cnt') && w.message.includes('never assigned'));
 
         if (cntWarnedBefore && !cntWarnedAfter) {

@@ -7,6 +7,7 @@ import { preprocessVerilog } from './verilog-scanner';
 import { VerilogLexer } from '../antlr/generated/VerilogLexer';
 import { VerilogParser } from '../antlr/generated/VerilogParser';
 import { VerilogVisitor } from '../antlr/generated/VerilogVisitor';
+import { Module, ModuleDatabase } from './database';
 
 let vscode: typeof vsCodeModule;
 try {
@@ -1464,9 +1465,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
  */
 class AntlrVerilogParser {
     errorListener: VerilogErrorListener;
+    _lastVisitor: VerilogSymbolVisitor | null;
 
     constructor() {
         this.errorListener = new VerilogErrorListener();
+        this._lastVisitor = null;
     }
 
     /**
@@ -1852,32 +1855,20 @@ class AntlrVerilogParser {
     }
 
     /**
-     * Parse Verilog document and detect syntax errors
-     * Also generates semantic warnings (signal usage issues).
-     * @param {vscode.TextDocument} document 
-     * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
-     * @returns {Array} Array of diagnostic objects (syntax errors + signal warnings)
-     */
-    parse(document: any, moduleDatabase: any = null, fileReader: ((resolvedPath: string) => string | null) | null = null) {
-        const { errors, warnings } = this.parseSymbols(document, moduleDatabase, fileReader);
-        return [...errors, ...warnings];
-    }
-
-    /**
-     * Parse Verilog document and extract module/signal symbols plus syntax errors.
-     * Replaces the regex-based parseVerilogSymbols function.
+     * Parse Verilog document and extract module symbols.
+     * Returns an array of Module objects populated with signals, parameters,
+     * instances, ports, and moduleTokens.
+     *
+     * As a side effect, this.errorListener is populated with syntax errors
+     * and this._lastVisitor is stored for use by generateErrors.
      *
      * @param {vscode.TextDocument} document
-     * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
-     * @returns {{ modules: Array, signals: Array, parameters: Array, errors: Array, warnings: Array }}
-     *   modules:    [{ name, uri, line, character, ports[] }]
-     *   signals:    [{ name, uri, line, character, direction, type, bitWidth, moduleName }]
-     *   parameters: [{ name, uri, line, character, kind, exprText, value, moduleName }]
-     *   errors:  syntax errors
-     *   warnings: signal usage warnings
+     * @param {Function} [fileReader] - Optional file reader for `include resolution
+     * @returns {Module[]} Array of Module objects
      */
-    parseSymbols(document: any, moduleDatabase: any = null, fileReader: ((resolvedPath: string) => string | null) | null = null) {
+    parseSymbols(document: any, fileReader: ((resolvedPath: string) => string | null) | null = null): Module[] {
         this.errorListener.clearErrors();
+        this._lastVisitor = null;
 
         const rawText = document.getText();
         const uri = document.uri.toString();
@@ -1903,8 +1894,6 @@ class AntlrVerilogParser {
         // Preprocess: expand `define macros and `include directives, strip others.
         const text = preprocessVerilog(rawText, basePath, fileReader);
 
-        let modules: any[] = [];
-        let signals: any[] = [];
         let visitor: VerilogSymbolVisitor | null = null;
 
         try {
@@ -1923,8 +1912,6 @@ class AntlrVerilogParser {
 
             visitor = new VerilogSymbolVisitor(uri);
             (tree as any).accept(visitor);
-            modules = visitor.modules;
-            signals = visitor.signals;
 
         } catch (error: any) {
             console.error('ANTLR symbol extraction error:', error);
@@ -1937,14 +1924,82 @@ class AntlrVerilogParser {
             });
         }
 
-        if (visitor) this._enrichInstanceParamOverrides(visitor);
+        if (visitor) {
+            this._enrichInstanceParamOverrides(visitor);
+            this._lastVisitor = visitor;
+        }
 
-        const warnings = visitor ? this._generateSignalWarnings(modules, signals, visitor, moduleDatabase) : [];
-        const instances = visitor ? visitor.instances : [];
-        const parameters = visitor ? visitor.parameters : [];
-        const moduleTokens = visitor ? visitor.moduleTokens : [];
+        // Build Module class instances from the visitor data
+        const moduleObjects: Module[] = [];
+        if (visitor) {
+            const moduleTokens = visitor.moduleTokens;
 
-        return { modules, signals, instances, parameters, moduleTokens, errors: this.errorListener.getErrors(), warnings };
+            // Group signals, parameters, instances by module name
+            const signalsByModule = new Map<string, any[]>();
+            for (const sig of visitor.signals) {
+                if (!signalsByModule.has(sig.moduleName)) signalsByModule.set(sig.moduleName, []);
+                signalsByModule.get(sig.moduleName)!.push(sig);
+            }
+            const paramsByModule = new Map<string, any[]>();
+            for (const param of visitor.parameters) {
+                if (!paramsByModule.has(param.moduleName)) paramsByModule.set(param.moduleName, []);
+                paramsByModule.get(param.moduleName)!.push(param);
+            }
+            const instancesByModule = new Map<string, any[]>();
+            for (const inst of visitor.instances) {
+                if (!instancesByModule.has(inst.parentModuleName)) instancesByModule.set(inst.parentModuleName, []);
+                instancesByModule.get(inst.parentModuleName)!.push(inst);
+            }
+
+            for (const parsedMod of visitor.modules) {
+                const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
+                mod.ports = parsedMod.ports || [];
+
+                mod.signalList = signalsByModule.get(parsedMod.name) || [];
+                for (const sig of mod.signalList) {
+                    mod.signalMap.set(sig.name, sig);
+                }
+
+                mod.parameterList = paramsByModule.get(parsedMod.name) || [];
+                for (const param of mod.parameterList) {
+                    mod.parameterMap.set(param.name, param);
+                }
+
+                mod.instanceList = instancesByModule.get(parsedMod.name) || [];
+                for (const inst of mod.instanceList) {
+                    if (inst.instanceName) {
+                        mod.instanceMap.set(inst.instanceName, inst);
+                    }
+                }
+
+                // Store all module tokens for the file on each module
+                // (tokens are per-file and include all module/instance names)
+                mod.moduleTokens = moduleTokens;
+
+                moduleObjects.push(mod);
+            }
+        }
+
+        return moduleObjects;
+    }
+
+    /**
+     * Parse Verilog document and return syntax errors plus signal-usage warnings.
+     * Calls parseSymbols internally to perform the parse, then reads from
+     * this.errorListener and generates signal warnings using _generateSignalWarnings.
+     *
+     * @param {vscode.TextDocument} document
+     * @param {ModuleDatabase} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
+     * @param {Function} [fileReader] - Optional file reader for `include resolution
+     * @returns {Array} Array of diagnostic objects (syntax errors + signal warnings)
+     */
+    generateErrors(document: any, moduleDatabase: ModuleDatabase | null = null, fileReader: ((resolvedPath: string) => string | null) | null = null): any[] {
+        const modules = this.parseSymbols(document, fileReader);
+        const errors = this.errorListener.getErrors();
+        const warnings = this._lastVisitor
+            ? this._generateSignalWarnings(modules, this._lastVisitor, moduleDatabase)
+            : [];
+        return [...errors, ...warnings];
     }
 
     /**
@@ -2001,13 +2056,12 @@ class AntlrVerilogParser {
 
     /**
      * Generate signal-usage warnings for all modules in the parsed result.
-     * @param {Array} modules
-     * @param {Array} signals
+     * @param {Module[]} modules - Array of Module objects (from database.ts) with signalList populated
      * @param {VerilogSymbolVisitor} visitor
-     * @param {Object} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
+     * @param {ModuleDatabase} [moduleDatabase] - Optional workspace-wide module database for cross-file port lookup
      * @returns {Array} Array of warning diagnostic objects
      */
-    _generateSignalWarnings(modules: any[], signals: any[], visitor: VerilogSymbolVisitor, moduleDatabase: any = null) {
+    _generateSignalWarnings(modules: Module[], visitor: VerilogSymbolVisitor, moduleDatabase: ModuleDatabase | null = null) {
         const warnings: any[] = [];
         const wireTypes = new Set(['wire', 'tri', 'supply0', 'supply1']);
 
@@ -2028,7 +2082,7 @@ class AntlrVerilogParser {
 
         for (const module of modules) {
             const moduleName = module.name;
-            const declaredSignals = signals.filter(s => s.moduleName === moduleName);
+            const declaredSignals = module.signalList;
             const declaredByName = new Map(declaredSignals.map((s: any) => [s.name, s]));
             const paramNames = visitor._moduleParamNames.get(moduleName) || new Set();
             const genvarNames = visitor._moduleGenvarNames.get(moduleName) || new Set();
@@ -2250,8 +2304,12 @@ class AntlrVerilogParser {
                 const inst = instanceLookup.get(connKey(conn.instModuleName, conn.line, conn.character));
                 if (inst && inst.parameterOverrides && instPort.bitWidthRaw) {
                     // Use the visitor's parsed parameters as defaults for the instantiated module,
-                    // and the parameter database if available (for cross-file modules)
-                    const instModParams = visitor.parameters.filter((p: any) => p.moduleName === conn.instModuleName);
+                    // then fall back to the moduleDatabase for cross-file modules
+                    let instModParams = visitor.parameters.filter((p: any) => p.moduleName === conn.instModuleName);
+                    if (instModParams.length === 0 && moduleDatabase) {
+                        const dbMod = moduleDatabase.getModule(conn.instModuleName);
+                        if (dbMod) instModParams = dbMod.parameterList;
+                    }
                     portWidth = this.evaluatePortWidth(instPort, instModParams, inst.parameterOverrides);
                 }
                 if (portWidth === null) {

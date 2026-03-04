@@ -88,71 +88,20 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
     }
 
     const uri = document.uri.toString();
-    const { modules, signals, instances, parameters, moduleTokens } = verilogParser.parseSymbols(document, null, fsFileReader);
+    const modules = verilogParser.parseSymbols(document, fsFileReader);
 
     // Remove existing entries for this file before adding fresh ones
     moduleDatabase.removeModulesFromFile(uri);
 
-    // Group signals by module
-    const signalsByModule = new Map<string, any[]>();
-    for (const signal of signals) {
-        if (!signalsByModule.has(signal.moduleName)) {
-            signalsByModule.set(signal.moduleName, []);
-        }
-        signalsByModule.get(signal.moduleName)!.push(signal);
-    }
-
-    // Group instances by parent module
-    const instancesByModule = new Map<string, any[]>();
-    for (const instance of instances) {
-        if (!instancesByModule.has(instance.parentModuleName)) {
-            instancesByModule.set(instance.parentModuleName, []);
-        }
-        instancesByModule.get(instance.parentModuleName)!.push(instance);
-    }
-
-    // Group parameters by module
-    const paramsByModule = new Map<string, any[]>();
-    for (const param of parameters) {
-        if (!paramsByModule.has(param.moduleName)) {
-            paramsByModule.set(param.moduleName, []);
-        }
-        paramsByModule.get(param.moduleName)!.push(param);
-    }
-
-    // Build unified Module objects in the database
-    for (const parsedMod of modules) {
-        const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
-        mod.ports = parsedMod.ports || [];
-
-        const moduleSignals = signalsByModule.get(parsedMod.name) || [];
-        mod.signalList = moduleSignals;
-        for (const sig of moduleSignals) {
-            mod.signalMap.set(sig.name, sig);
-        }
-
-        const moduleParams = paramsByModule.get(parsedMod.name) || [];
-        mod.parameterList = moduleParams;
-        for (const param of moduleParams) {
-            mod.parameterMap.set(param.name, param);
-        }
-
-        const moduleInstances = instancesByModule.get(parsedMod.name) || [];
-        mod.instanceList = moduleInstances;
-        for (const inst of moduleInstances) {
-            if (inst.instanceName) {
-                mod.instanceMap.set(inst.instanceName, inst);
-            }
-        }
-
-        // Store all module tokens for the file on each module
-        // (tokens are per-file and include instantiated module names)
-        mod.moduleTokens = moduleTokens;
-
+    // parseSymbols returns fully-populated Module objects; add them directly
+    for (const mod of modules) {
         moduleDatabase.addModule(mod);
     }
 
-    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals.length} signals, ${instances.length} instances, ${parameters.length} parameters found`);
+    const signals = modules.reduce((acc, m) => acc + m.signalList.length, 0);
+    const instances = modules.reduce((acc, m) => acc + m.instanceList.length, 0);
+    const parameters = modules.reduce((acc, m) => acc + m.parameterList.length, 0);
+    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals} signals, ${instances} instances, ${parameters} parameters found`);
 }
 
 /**
@@ -191,7 +140,8 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
  */
 class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
     provideDocumentSymbols(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.DocumentSymbol[] {
-        const { modules, signals } = verilogParser.parseSymbols(document, null, fsFileReader);
+        const modules = verilogParser.parseSymbols(document, fsFileReader);
+        const signals = modules.flatMap((m: any) => m.signalList);
 
         const moduleSymbols = modules.map((module: any) => {
             const line = document.lineAt(module.line);
@@ -398,7 +348,7 @@ function updateDiagnostics(document: vscode.TextDocument, diagnosticCollection: 
         return;
     }
 
-    const errors = verilogParser.parse(document, moduleDatabase, fsFileReader);
+    const errors = verilogParser.generateErrors(document, moduleDatabase, fsFileReader);
     const diagnostics: vscode.Diagnostic[] = [];
 
     for (const error of errors) {

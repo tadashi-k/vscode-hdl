@@ -97,7 +97,7 @@ endmodule
 `;
         const doc = new MockTextDocument(validCode, 'test_valid.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -124,7 +124,7 @@ module test_module (
 `;
         const doc = new MockTextDocument(code, 'test_missing_endmodule.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -154,7 +154,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_brackets.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
         
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -179,7 +179,7 @@ endmodule
             const testContent = fs.readFileSync(testPath, 'utf8');
             const doc = new MockTextDocument(testContent, testPath);
             const parser = new AntlrVerilogParser();
-            const errors = parser.parse(doc);
+            const errors = parser.generateErrors(doc);
             
             console.log(`  Found ${errors.length} error(s)`);
             if (errors.length > 0) {
@@ -218,7 +218,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_generate.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -252,7 +252,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_generate_for.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -292,7 +292,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_task.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -328,7 +328,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_function.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -362,7 +362,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_fork_join.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -395,7 +395,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_delay.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -427,7 +427,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_system_task.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {
@@ -465,7 +465,7 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_task_enable.v');
         const parser = new AntlrVerilogParser();
-        const errors = parser.parse(doc);
+        const errors = parser.generateErrors(doc);
 
         console.log(`  Found ${errors.length} error(s)`);
         if (errors.length > 0) {

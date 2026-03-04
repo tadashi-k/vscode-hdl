@@ -49,7 +49,7 @@ class SymbolDatabase {
 
     update(doc: any) {
         const uri = doc.uri.toString();
-        const { modules, signals } = parser.parseSymbols(doc);
+        const modules = parser.parseSymbols(doc);
 
         // Clear stale entries
         const staleNames = this._modulesByUri.get(uri) || [];
@@ -59,15 +59,9 @@ class SymbolDatabase {
         }
         this._modulesByUri.set(uri, []);
 
-        const signalsByModule = new Map<string, any>();
-        for (const s of signals) {
-            if (!signalsByModule.has(s.moduleName)) signalsByModule.set(s.moduleName, []);
-            signalsByModule.get(s.moduleName).push(s);
-        }
-
         for (const mod of modules) {
             this.modules.set(mod.name, mod);
-            this.signals.set(mod.name, signalsByModule.get(mod.name) || []);
+            this.signals.set(mod.name, mod.signalList);
             this._modulesByUri.get(uri).push(mod.name);
         }
     }

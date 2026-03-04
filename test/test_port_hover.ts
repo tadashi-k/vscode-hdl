@@ -76,7 +76,8 @@ module top (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test1.v');
-        const { instances } = parser.parseSymbols(doc);
+        const _mods_ph = parser.parseSymbols(doc);
+        const instances = _mods_ph.flatMap((m: any) => m.instanceList);
 
         const inst = instances.find((i: any) => i.instanceName === 'u_counter_16');
         const pass = inst &&
@@ -117,7 +118,8 @@ module top (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test2.v');
-        const { instances } = parser.parseSymbols(doc);
+        const _mods_ph = parser.parseSymbols(doc);
+        const instances = _mods_ph.flatMap((m: any) => m.instanceList);
 
         const inst = instances.find((i: any) => i.instanceName === 'u_counter');
         const pass = inst && inst.parameterOverrides === null;
@@ -148,7 +150,7 @@ module counter #(
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test3.v');
-        const { modules } = parser.parseSymbols(doc);
+        const modules = parser.parseSymbols(doc);
 
         const mod = modules.find((m: any) => m.name === 'counter');
         const clkPort = mod && mod.ports.find((p: any) => p.name === 'clk');
@@ -340,7 +342,7 @@ module test_bitwidth(
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test9.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         // counter_int is [15:0] (16 bits), count_in with WIDTH=16 override should be [15:0] (16 bits)
         // So there should be NO width mismatch warning for count_in
@@ -388,7 +390,7 @@ module top (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test10.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         // data is [7:0] (8 bits), count_in with WIDTH=16 is [15:0] (16 bits) -> should warn
         const countInWarning = warnings.find((w: any) =>
@@ -436,7 +438,9 @@ module top (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test11.v');
-        const { instances, warnings } = parser.parseSymbols(doc);
+        const _mods_iw = parser.parseSymbols(doc);
+        const instances = _mods_iw.flatMap((m: any) => m.instanceList);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const inst = instances.find((i: any) => i.instanceName === 'u_dp');
         const hasOverrides = inst && inst.parameterOverrides &&
@@ -502,7 +506,9 @@ module test_bitwidth(
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test12.v');
-        const { instances, warnings } = parser.parseSymbols(doc);
+        const _mods_iw = parser.parseSymbols(doc);
+        const instances = _mods_iw.flatMap((m: any) => m.instanceList);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const uCounter = instances.find((i: any) => i.instanceName === 'u_counter');
         const uCounter16 = instances.find((i: any) => i.instanceName === 'u_counter_16');
@@ -580,7 +586,9 @@ module test_parameter #(
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test13.v');
-        const { instances, warnings } = parser.parseSymbols(doc);
+        const _mods_iw = parser.parseSymbols(doc);
+        const instances = _mods_iw.flatMap((m: any) => m.instanceList);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const inst = instances.find((i: any) => i.instanceName === 'u_mem');
         const hasDepthOverride = inst && inst.parameterOverrides && inst.parameterOverrides.DEPTH === 16;

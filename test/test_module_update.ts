@@ -47,23 +47,9 @@ class MockTextDocument {
 
 function updateDocumentSymbols(document: any, db: ModuleDatabase) {
     const uri = document.uri.toString();
-    const { modules, signals, instances, parameters } = parser.parseSymbols(document);
-
+    const modules = parser.parseSymbols(document);
     db.removeModulesFromFile(uri);
-
-    const signalsByModule = new Map<string, any[]>();
-    for (const s of signals) {
-        if (!signalsByModule.has(s.moduleName)) signalsByModule.set(s.moduleName, []);
-        signalsByModule.get(s.moduleName)!.push(s);
-    }
-
-    for (const parsedMod of modules) {
-        const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
-        mod.ports = parsedMod.ports || [];
-        mod.signalList = signalsByModule.get(parsedMod.name) || [];
-        for (const sig of mod.signalList) {
-            mod.signalMap.set(sig.name, sig);
-        }
+    for (const mod of modules) {
         db.addModule(mod);
     }
 }

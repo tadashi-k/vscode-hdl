@@ -99,7 +99,7 @@ function updateDiagnostics(document, diagnosticCollection) {
         return;
     }
 
-    const errors = verilogParser.parse(document);
+    const errors = verilogParser.generateErrors(document);
     const diagnostics = [];
 
     for (const error of errors) {
