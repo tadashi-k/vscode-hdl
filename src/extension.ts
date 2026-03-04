@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import AntlrVerilogParser = require('./antlr-parser');
 import { parseHdlIgnore, regexScanModules } from './verilog-scanner';
 import { computeSemanticTokens, TOKEN_TYPES, TOKEN_MODIFIERS } from './semantic-tokens';
+import { Module, ModuleDatabase } from './database';
 
 /**
  * File reader for `include directive expansion in the VS Code extension context.
@@ -18,310 +19,8 @@ function fsFileReader(resolvedPath: string): string | null {
     }
 }
 
-// Signal database - stores signals (wire/reg) per module
-class SignalDatabase {
-    signals: Map<string, any[]>;
-    _modulesByUri: Map<string, string[]>;
-
-    constructor() {
-        // Map of module name -> signals array
-        this.signals = new Map();
-        // Map of file URI -> module names (for cleanup when file changes)
-        this._modulesByUri = new Map();
-    }
-
-    /**
-     * Update signals for a module
-     * @param {string} moduleName - Module name
-     * @param {string} uri - Document URI (for cleanup tracking)
-     * @param {Array} signals - Array of signal objects
-     */
-    updateSignals(moduleName: string, uri: string, signals: any[]) {
-        this.signals.set(moduleName, signals);
-        if (!this._modulesByUri.has(uri)) {
-            this._modulesByUri.set(uri, []);
-        }
-        const list = this._modulesByUri.get(uri)!;
-        if (!list.includes(moduleName)) {
-            list.push(moduleName);
-        }
-    }
-
-    /**
-     * Get signals for a module
-     * @param {string} moduleName - Module name
-     * @returns {Array} Array of signal objects
-     */
-    getSignals(moduleName: string) {
-        return this.signals.get(moduleName) || [];
-    }
-
-    /**
-     * Get all signals from all modules in a file
-     * @param {string} uri - Document URI
-     * @returns {Array} Array of signal objects
-     */
-    getSignalsByUri(uri: string) {
-        const moduleNames = this._modulesByUri.get(uri) || [];
-        const result: any[] = [];
-        for (const name of moduleNames) {
-            result.push(...(this.signals.get(name) || []));
-        }
-        return result;
-    }
-
-    /**
-     * Remove signals for all modules defined in a document
-     * @param {string} uri - Document URI
-     */
-    removeSignalsByUri(uri: string) {
-        const moduleNames = this._modulesByUri.get(uri) || [];
-        for (const name of moduleNames) {
-            this.signals.delete(name);
-        }
-        this._modulesByUri.delete(uri);
-    }
-
-    /**
-     * Get all signals from all modules
-     * @returns {Array} Array of all signal objects
-     */
-    getAllSignals() {
-        const allSignals: any[] = [];
-        for (const signals of this.signals.values()) {
-            allSignals.push(...signals);
-        }
-        return allSignals;
-    }
-}
-
-// Instance database - stores module instantiations per parent module
-class InstanceDatabase {
-    instances: Map<string, any[]>;
-    _modulesByUri: Map<string, string[]>;
-
-    constructor() {
-        // Map of parent module name -> instances array
-        this.instances = new Map();
-        // Map of file URI -> parent module names (for cleanup when file changes)
-        this._modulesByUri = new Map();
-    }
-
-    /**
-     * Update instances for a parent module
-     * @param {string} parentModuleName - Parent module name
-     * @param {string} uri - Document URI (for cleanup tracking)
-     * @param {Array} instances - Array of instance objects
-     */
-    updateInstances(parentModuleName: string, uri: string, instances: any[]) {
-        this.instances.set(parentModuleName, instances);
-        if (!this._modulesByUri.has(uri)) {
-            this._modulesByUri.set(uri, []);
-        }
-        const list = this._modulesByUri.get(uri)!;
-        if (!list.includes(parentModuleName)) {
-            list.push(parentModuleName);
-        }
-    }
-
-    /**
-     * Get instances for a parent module
-     * @param {string} parentModuleName - Parent module name
-     * @returns {Array} Array of instance objects
-     */
-    getInstances(parentModuleName: string) {
-        return this.instances.get(parentModuleName) || [];
-    }
-
-    /**
-     * Get all instances from all parent modules in a file
-     * @param {string} uri - Document URI
-     * @returns {Array} Array of instance objects
-     */
-    getInstancesByUri(uri: string) {
-        const moduleNames = this._modulesByUri.get(uri) || [];
-        const result: any[] = [];
-        for (const name of moduleNames) {
-            result.push(...(this.instances.get(name) || []));
-        }
-        return result;
-    }
-
-    /**
-     * Remove instances for all modules defined in a document
-     * @param {string} uri - Document URI
-     */
-    removeInstancesByUri(uri: string) {
-        const moduleNames = this._modulesByUri.get(uri) || [];
-        for (const name of moduleNames) {
-            this.instances.delete(name);
-        }
-        this._modulesByUri.delete(uri);
-    }
-
-    /**
-     * Get all instances from all parent modules
-     * @returns {Array} Array of all instance objects
-     */
-    getAllInstances() {
-        const allInstances: any[] = [];
-        for (const instances of this.instances.values()) {
-            allInstances.push(...instances);
-        }
-        return allInstances;
-    }
-}
-
-class ModuleDatabase {
-    modules: Map<string, any>;
-
-    constructor() {
-        // Map of module name -> module symbol
-        this.modules = new Map();
-    }
-
-    /**
-     * Add or update a module in the database
-     * @param {Object} module - Module symbol object
-     */
-    addModule(module: any) {
-        this.modules.set(module.name, module);
-    }
-
-    /**
-     * Get a module by name
-     * @param {string} name - Module name
-     * @returns {Object|undefined} Module symbol object or undefined
-     */
-    getModule(name: string) {
-        return this.modules.get(name);
-    }
-
-    /**
-     * Remove modules from a specific file
-     * @param {string} uri - Document URI
-     */
-    removeModulesFromFile(uri: string) {
-        for (const [name, module] of this.modules.entries()) {
-            if (module.uri === uri) {
-                this.modules.delete(name);
-            }
-        }
-    }
-
-    /**
-     * Get all modules
-     * @returns {Array} Array of all module objects
-     */
-    getAllModules() {
-        return Array.from(this.modules.values());
-    }
-}
-
-// Parameter database - stores parameter/localparam declarations per module
-class ParameterDatabase {
-    params: Map<string, any[]>;
-    _modulesByUri: Map<string, string[]>;
-
-    constructor() {
-        // Map of module name -> parameters array
-        this.params = new Map();
-        // Map of file URI -> module names (for cleanup when file changes)
-        this._modulesByUri = new Map();
-    }
-
-    /**
-     * Update parameters for a module
-     * @param {string} moduleName - Module name
-     * @param {string} uri - Document URI (for cleanup tracking)
-     * @param {Array} parameters - Array of parameter objects
-     */
-    updateParameters(moduleName: string, uri: string, parameters: any[]) {
-        this.params.set(moduleName, parameters);
-        if (!this._modulesByUri.has(uri)) {
-            this._modulesByUri.set(uri, []);
-        }
-        const list = this._modulesByUri.get(uri)!;
-        if (!list.includes(moduleName)) {
-            list.push(moduleName);
-        }
-    }
-
-    /**
-     * Get parameters for a module
-     * @param {string} moduleName - Module name
-     * @returns {Array} Array of parameter objects
-     */
-    getParameters(moduleName: string) {
-        return this.params.get(moduleName) || [];
-    }
-
-    /**
-     * Get all parameters from all modules in a file
-     * @param {string} uri - Document URI
-     * @returns {Array} Array of parameter objects
-     */
-    getParametersByUri(uri: string) {
-        const moduleNames = this._modulesByUri.get(uri) || [];
-        const result: any[] = [];
-        for (const name of moduleNames) {
-            result.push(...(this.params.get(name) || []));
-        }
-        return result;
-    }
-
-    /**
-     * Remove parameters for all modules defined in a document
-     * @param {string} uri - Document URI
-     */
-    removeParametersByUri(uri: string) {
-        const moduleNames = this._modulesByUri.get(uri) || [];
-        for (const name of moduleNames) {
-            this.params.delete(name);
-        }
-        this._modulesByUri.delete(uri);
-    }
-
-    /**
-     * Get all parameters from all modules
-     * @returns {Array} Array of all parameter objects
-     */
-    getAllParameters() {
-        const all: any[] = [];
-        for (const params of this.params.values()) {
-            all.push(...params);
-        }
-        return all;
-    }
-}
-
-// Module token database - stores module token positions per file URI
-class ModuleTokenDatabase {
-    _tokensByUri: Map<string, any[]>;
-
-    constructor() {
-        this._tokensByUri = new Map();
-    }
-
-    updateTokens(uri: string, tokens: any[]) {
-        this._tokensByUri.set(uri, tokens);
-    }
-
-    getTokensByUri(uri: string) {
-        return this._tokensByUri.get(uri) || [];
-    }
-
-    removeTokensByUri(uri: string) {
-        this._tokensByUri.delete(uri);
-    }
-}
-
-// Create global database instances
-const signalDatabase = new SignalDatabase();
+// Create a single unified module database and parser instance
 const moduleDatabase = new ModuleDatabase();
-const instanceDatabase = new InstanceDatabase();
-const parameterDatabase = new ParameterDatabase();
-const moduleTokenDatabase = new ModuleTokenDatabase();
 const verilogParser = new AntlrVerilogParser();
 
 /**
@@ -380,6 +79,7 @@ async function loadHdlIgnoreFilter(): Promise<(fsPath: string) => boolean> {
 
 /**
  * Update symbols for a document using the ANTLR-based parser.
+ * Populates the unified ModuleDatabase with scanned Module objects.
  * @param {vscode.TextDocument} document 
  */
 function updateDocumentSymbols(document: vscode.TextDocument) {
@@ -391,16 +91,9 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
     const { modules, signals, instances, parameters, moduleTokens } = verilogParser.parseSymbols(document, null, fsFileReader);
 
     // Remove existing entries for this file before adding fresh ones
-    signalDatabase.removeSignalsByUri(uri);
     moduleDatabase.removeModulesFromFile(uri);
-    instanceDatabase.removeInstancesByUri(uri);
-    parameterDatabase.removeParametersByUri(uri);
-    moduleTokenDatabase.removeTokensByUri(uri);
 
-    // Store module tokens (positions for hdlModule semantic tokens)
-    moduleTokenDatabase.updateTokens(uri, moduleTokens);
-
-    // Group signals by module and update the per-module signal database
+    // Group signals by module
     const signalsByModule = new Map<string, any[]>();
     for (const signal of signals) {
         if (!signalsByModule.has(signal.moduleName)) {
@@ -427,16 +120,36 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
         paramsByModule.get(param.moduleName)!.push(param);
     }
 
-    // Update module database (workspace-wide), signal database (per-module),
-    // instance database (per-module), and parameter database (per-module)
-    for (const module of modules) {
-        moduleDatabase.addModule(module);
-        const moduleSignals = signalsByModule.get(module.name) || [];
-        signalDatabase.updateSignals(module.name, uri, moduleSignals);
-        const moduleInstances = instancesByModule.get(module.name) || [];
-        instanceDatabase.updateInstances(module.name, uri, moduleInstances);
-        const moduleParams = paramsByModule.get(module.name) || [];
-        parameterDatabase.updateParameters(module.name, uri, moduleParams);
+    // Build unified Module objects in the database
+    for (const parsedMod of modules) {
+        const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
+        mod.ports = parsedMod.ports || [];
+
+        const moduleSignals = signalsByModule.get(parsedMod.name) || [];
+        mod.signalList = moduleSignals;
+        for (const sig of moduleSignals) {
+            mod.signalMap.set(sig.name, sig);
+        }
+
+        const moduleParams = paramsByModule.get(parsedMod.name) || [];
+        mod.parameterList = moduleParams;
+        for (const param of moduleParams) {
+            mod.parameterMap.set(param.name, param);
+        }
+
+        const moduleInstances = instancesByModule.get(parsedMod.name) || [];
+        mod.instanceList = moduleInstances;
+        for (const inst of moduleInstances) {
+            if (inst.instanceName) {
+                mod.instanceMap.set(inst.instanceName, inst);
+            }
+        }
+
+        // Store all module tokens for the file on each module
+        // (tokens are per-file and include instantiated module names)
+        mod.moduleTokens = moduleTokens;
+
+        moduleDatabase.addModule(mod);
     }
 
     console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals.length} signals, ${instances.length} instances, ${parameters.length} parameters found`);
@@ -445,18 +158,18 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
 /**
  * Ensure that port information for all modules instantiated in the given
  * document is available in the module database.  When a module only has a
- * lightweight regex-scanned entry (ports: []), its source file is read and
- * ANTLR-parsed so that full port information becomes available for
+ * lightweight regex-scanned entry (scanned === false), its source file is
+ * read and ANTLR-parsed so that full port information becomes available for
  * downstream diagnostics (signal warning generation).
  */
 function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
     if (document.languageId !== 'verilog') return;
     const uri = document.uri.toString();
-    const instances = instanceDatabase.getInstancesByUri(uri);
+    const instances = moduleDatabase.getInstancesByUri(uri);
 
     for (const instance of instances) {
         const mod = moduleDatabase.getModule(instance.moduleName);
-        if (mod && mod.ports && mod.ports.length === 0 && mod.uri && mod.uri !== uri) {
+        if (mod && !mod.scanned && mod.uri && mod.uri !== uri) {
             try {
                 const depFsPath = vscode.Uri.parse(mod.uri).fsPath;
                 const content = fs.readFileSync(depFsPath, 'utf8');
@@ -465,22 +178,7 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
                     uri: { toString: () => mod.uri },
                     languageId: 'verilog'
                 };
-                const result = verilogParser.parseSymbols(depDoc, null, fsFileReader);
-                for (const parsedMod of result.modules) {
-                    moduleDatabase.addModule(parsedMod);
-                }
-                // Also store parameters for the dependency modules so that
-                // hover and bitwidth evaluation can use default parameter values
-                const depParamsByModule = new Map<string, any[]>();
-                for (const param of result.parameters) {
-                    if (!depParamsByModule.has(param.moduleName)) {
-                        depParamsByModule.set(param.moduleName, []);
-                    }
-                    depParamsByModule.get(param.moduleName)!.push(param);
-                }
-                for (const [modName, modParams] of depParamsByModule) {
-                    parameterDatabase.updateParameters(modName, mod.uri, modParams);
-                }
+                updateDocumentSymbols(depDoc);
             } catch (error) {
                 console.error(`Error parsing dependency ${instance.moduleName} from ${mod.uri}:`, error);
             }
@@ -556,10 +254,12 @@ async function scanWorkspaceForModules() {
             const found = regexScanModules(content, uri);
             if (found.length > 0) {
                 regexModuleMap.set(uri, found);
-                for (const mod of found) {
+                for (const entry of found) {
                     // Only add if not already present (ANTLR entry takes priority).
-                    if (!moduleDatabase.getModule(mod.name)) {
-                        moduleDatabase.addModule({ ...mod, ports: [] });
+                    if (!moduleDatabase.getModule(entry.name)) {
+                        moduleDatabase.addModule(
+                            new Module(entry.name, entry.uri, entry.line, entry.character, false)
+                        );
                     }
                 }
             }
@@ -581,14 +281,14 @@ async function scanWorkspaceForModules() {
     // --- Step 4: resolve instances from open files and ANTLR-parse their deps ---
     const neededModuleNames = new Set<string>();
     for (const uri of openUris) {
-        for (const instance of instanceDatabase.getInstancesByUri(uri)) {
+        for (const instance of moduleDatabase.getInstancesByUri(uri)) {
             neededModuleNames.add(instance.moduleName);
         }
     }
 
     for (const moduleName of neededModuleNames) {
         const mod = moduleDatabase.getModule(moduleName);
-        if (mod && mod.uri && !openUris.has(mod.uri)) {
+        if (mod && !mod.scanned && mod.uri && !openUris.has(mod.uri)) {
             try {
                 const depUri = vscode.Uri.parse(mod.uri);
                 const document = await vscode.workspace.openTextDocument(depUri);
@@ -616,7 +316,7 @@ class VerilogDefinitionProvider implements vscode.DefinitionProvider {
         const word = document.getText(wordRange);
         
         // First, check for signal definitions (wire/reg) in all modules of the current document
-        const currentDocSignals = signalDatabase.getSignalsByUri(document.uri.toString());
+        const currentDocSignals = moduleDatabase.getSignalsByUri(document.uri.toString());
         const localSignal = currentDocSignals.find((s: any) => s.name === word);
         
         if (localSignal) {
@@ -626,7 +326,7 @@ class VerilogDefinitionProvider implements vscode.DefinitionProvider {
         }
 
         // Check for parameter/localparam definitions in the current document
-        const currentDocParams = parameterDatabase.getParametersByUri(document.uri.toString());
+        const currentDocParams = moduleDatabase.getParametersByUri(document.uri.toString());
         const localParam = currentDocParams.find((p: any) => p.name === word);
 
         if (localParam) {
@@ -668,9 +368,9 @@ class VerilogSemanticTokensProvider implements vscode.DocumentSemanticTokensProv
 
     provideDocumentSemanticTokens(document: vscode.TextDocument): vscode.SemanticTokens {
         const uri = document.uri.toString();
-        const signals = signalDatabase.getSignalsByUri(uri);
-        const params = parameterDatabase.getParametersByUri(uri);
-        const modTokens = moduleTokenDatabase.getTokensByUri(uri);
+        const signals = moduleDatabase.getSignalsByUri(uri);
+        const params = moduleDatabase.getParametersByUri(uri);
+        const modTokens = moduleDatabase.getModuleTokensByUri(uri);
         const tokenData = computeSemanticTokens(document.getText(), signals, params, modTokens);
 
         const builder = new vscode.SemanticTokensBuilder(semanticTokensLegend);
@@ -736,9 +436,16 @@ export function activate(context: vscode.ExtensionContext) {
     // Create semantic token provider (needs to be referenced from event handlers)
     const semanticTokensProvider = new VerilogSemanticTokensProvider();
 
+    // Track line counts per document for edit optimization.
+    // Only re-scan with ANTLR when line count changes (line added/deleted).
+    const documentLineCounts = new Map<string, number>();
+
     // Listen for document open events
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(document => {
+            if (document.languageId === 'verilog') {
+                documentLineCounts.set(document.uri.toString(), document.lineCount);
+            }
             updateDocumentSymbols(document);
             ensureInstanceDependenciesParsed(document);
             updateDiagnostics(document, diagnosticCollection);
@@ -749,6 +456,19 @@ export function activate(context: vscode.ExtensionContext) {
     // Listen for document change events
     context.subscriptions.push(
         vscode.workspace.onDidChangeTextDocument(event => {
+            if (event.document.languageId !== 'verilog') return;
+
+            const uri = event.document.uri.toString();
+            const previousLineCount = documentLineCounts.get(uri);
+            const currentLineCount = event.document.lineCount;
+            documentLineCounts.set(uri, currentLineCount);
+
+            // Only re-scan with ANTLR when lines are added or deleted.
+            // In-line edits (same line count) are skipped for performance.
+            if (previousLineCount !== undefined && previousLineCount === currentLineCount) {
+                return;
+            }
+
             updateDocumentSymbols(event.document);
             ensureInstanceDependenciesParsed(event.document);
             updateDiagnostics(event.document, diagnosticCollection);
@@ -761,19 +481,18 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.workspace.onDidCloseTextDocument(document => {
             if (document.languageId === 'verilog') {
                 const uri = document.uri.toString();
-                signalDatabase.removeSignalsByUri(uri);
                 moduleDatabase.removeModulesFromFile(uri);
-                instanceDatabase.removeInstancesByUri(uri);
-                parameterDatabase.removeParametersByUri(uri);
                 diagnosticCollection.delete(document.uri);
 
                 // Restore lightweight regex-scanned entries so that
                 // go-to-definition still works for the closed file.
                 const regexEntries = regexModuleMap.get(uri);
                 if (regexEntries) {
-                    for (const mod of regexEntries) {
-                        if (!moduleDatabase.getModule(mod.name)) {
-                            moduleDatabase.addModule({ ...mod, ports: [] });
+                    for (const entry of regexEntries) {
+                        if (!moduleDatabase.getModule(entry.name)) {
+                            moduleDatabase.addModule(
+                                new Module(entry.name, entry.uri, entry.line, entry.character, false)
+                            );
                         }
                     }
                 }
@@ -834,7 +553,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('verilog.showSymbols', function () {
             const MAX_PREVIEW_LENGTH = 200;
             const allModules = moduleDatabase.getAllModules();
-            const allSignals = signalDatabase.getAllSignals();
+            const allSignals = moduleDatabase.getAllSignals();
             const totalSymbols = allModules.length + allSignals.length;
             
             const moduleInfo = allModules.map((m: any) => `module: ${m.name} (line ${m.line + 1})`).join('\n');
@@ -853,7 +572,7 @@ export function activate(context: vscode.ExtensionContext) {
                 { modal: false }
             );
             console.log('Module database:', allModules);
-            console.log('Signal database:', allSignals);
+            console.log('Signals:', allSignals);
         })
     );
 
@@ -865,7 +584,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const word = document.getText(wordRange);
 
                 // Check for parameter/localparam first
-                const params = parameterDatabase.getParametersByUri(document.uri.toString());
+                const params = moduleDatabase.getParametersByUri(document.uri.toString());
                 const param = params.find((p: any) => p.name === word);
 
                 if (param) {
@@ -889,7 +608,7 @@ export function activate(context: vscode.ExtensionContext) {
                         // This looks like a named port connection: .portName(...)
                         // Find which instance this belongs to by scanning instances in this file
                         const uri = document.uri.toString();
-                        const instances = instanceDatabase.getInstancesByUri(uri);
+                        const instances = moduleDatabase.getInstancesByUri(uri);
                         for (const inst of instances) {
                             if (!inst.namedPortNames || !inst.namedPortNames.includes(word)) continue;
                             // Use port connection line position to match the correct instance
@@ -903,7 +622,7 @@ export function activate(context: vscode.ExtensionContext) {
                                 const port = mod.ports.find((p: any) => p.name === word);
                                 if (port) {
                                     // Evaluate port width with parameter overrides
-                                    const instModParams = parameterDatabase.getParameters(inst.moduleName);
+                                    const instModParams = moduleDatabase.getParameters(inst.moduleName);
                                     const portWidth = verilogParser.evaluatePortWidth(port, instModParams, inst.parameterOverrides);
                                     const widthStr = portWidth !== null && portWidth > 1
                                         ? `[${portWidth - 1}:0]`
@@ -920,7 +639,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
 
                 // Fetch signals for the current document from signal database
-                const signals = signalDatabase.getSignalsByUri(document.uri.toString());
+                const signals = moduleDatabase.getSignalsByUri(document.uri.toString());
 
                 // Find the signal matching the hovered word
                 const signal = signals.find((s: any) => s.name === word);

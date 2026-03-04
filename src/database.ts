@@ -1,72 +1,193 @@
 /**
- * evaluate a Verilog constant expression and returns its value as a number.
- * If the expression cannot be evaluated, it returns null.
+ * Internal database types for the Verilog Language Support extension.
+ *
+ * A single ModuleDatabase instance holds every module discovered in the
+ * workspace.  Each Module carries its own parameter, signal, and instance
+ * lists so that the separate per-category databases are no longer needed.
+ *
+ * No VS Code dependency – safe for use in tests.
  */
-function evaluateExpression(expr: string, params?: Map<string, Parameter>): number | null {
-    return null;
-}
 
-class BitRange {
-    rawMsb: string;
-    rawLsb: string;
-    msb: number | null;
-    lsb: number | null;
-
-    constructor(rawMsb: string, rawLsb: string) {
-        this.rawMsb = rawMsb;
-        this.rawLsb = rawLsb;
-        this.msb = evaluateExpression(rawMsb);
-        this.lsb = evaluateExpression(rawMsb);
-    }
-}
-
-class Signal {
-    name: string;
-    line: number;
-    character: number;
-    type: 'wire' | 'reg' | 'integer' | 'real';
-    direction: 'input' | 'output' | 'inout' | null; // null for internal signals
-    bitRange: BitRange | null; // treated as 1-bit if null
-}
-
-class Parameter {
-    name: string;
-    line: number;
-    character: number;
-    kind: 'parameter' | 'localparam';
-    bitRange: BitRange | null; // treated as [31:0] if null
-    rawValue: string;
-    value: number | null;
-}
-
-class Instance {
-    moduleName: string;
-    instanceName: string;
-    line: number;
-    character: number;
-    paramOrderedAssignments: string[] | null; // parsed parameter value assignment in order, e.g. ["8", "16"] for parameter_value_assignment #(8, 16)
-    paramNamedAssignments: Map<string, string> | null; // parsed parameter value assignment, e.g. {"WIDTH": "8", "DEPTH": "16"}
-    signalOrderedConnections: string[] | null; // parsed signal connection in order, e.g. ["data_in", "data_out"] for ordered port connection .e.g. module_instance data_in(data_in, data_out)
-    signalNamedConnections: Map<string, string> | null; // parsed signal connection, e.g. {"data_in": "data_in", "data_out": "data_out"} for named port connection .e.g. module_instance data_in(.data_in(data_in), .data_out(data_out))
-}
-
-class Module {
+/**
+ * A Verilog module definition stored in the workspace-wide database.
+ *
+ * After the initial regex scan a module only has name / uri / line /
+ * character with scanned === false.  Once the ANTLR parser has processed
+ * the file the remaining fields are populated and scanned is set to true.
+ */
+export class Module {
     name: string;
     uri: string;
     line: number;
     character: number;
-    scanned: boolean; // true if all signals, parameters, and instances have been scanned for this module
-    parameterMap: Map<string, Parameter>;
-    parameterList: Parameter[]; // parameters in the order they are declared
-    signalMap: Map<string, Signal>;
-    signalList: Signal[]; // signals in the order they are declared
-    instances: Map<string, Instance>;
+    scanned: boolean;
+    /** Ports list (populated by the ANTLR parser, empty before scan). */
+    ports: any[];
+    /** Signals grouped by name for fast lookup. */
+    signalMap: Map<string, any>;
+    /** Signals in declaration order. */
+    signalList: any[];
+    /** Parameters grouped by name. */
+    parameterMap: Map<string, any>;
+    /** Parameters in declaration order. */
+    parameterList: any[];
+    /** Module instantiations keyed by instance name. */
+    instanceMap: Map<string, any>;
+    /** Module instantiations in declaration order. */
+    instanceList: any[];
+    /** Module-token positions (for hdlModule semantic highlighting). */
+    moduleTokens: any[];
+
+    constructor(name: string, uri: string, line: number, character: number, scanned: boolean = false) {
+        this.name = name;
+        this.uri = uri;
+        this.line = line;
+        this.character = character;
+        this.scanned = scanned;
+        this.ports = [];
+        this.signalMap = new Map();
+        this.signalList = [];
+        this.parameterMap = new Map();
+        this.parameterList = [];
+        this.instanceMap = new Map();
+        this.instanceList = [];
+        this.moduleTokens = [];
+    }
 }
 
-class ModuleDatabase {
+/**
+ * Workspace-wide module database.
+ *
+ * Stores every module discovered via regex scan or ANTLR parse.
+ * Consumers can look up modules by name and query signals / parameters /
+ * instances directly from the Module object.
+ */
+export class ModuleDatabase {
     modules: Map<string, Module>;
 
     constructor() {
         this.modules = new Map<string, Module>();
+    }
+
+    /** Add or replace a module entry. */
+    addModule(module: Module) {
+        this.modules.set(module.name, module);
+    }
+
+    /** Retrieve a module by name. */
+    getModule(name: string): Module | undefined {
+        return this.modules.get(name);
+    }
+
+    /** Remove all modules whose uri matches the given file URI. */
+    removeModulesFromFile(uri: string) {
+        for (const [name, mod] of this.modules.entries()) {
+            if (mod.uri === uri) {
+                this.modules.delete(name);
+            }
+        }
+    }
+
+    /** Return all modules as an array. */
+    getAllModules(): Module[] {
+        return Array.from(this.modules.values());
+    }
+
+    // ----- Convenience accessors (mirror the old per-category databases) -----
+
+    /** Get all signals belonging to modules defined in the given file URI. */
+    getSignalsByUri(uri: string): any[] {
+        const result: any[] = [];
+        for (const mod of this.modules.values()) {
+            if (mod.uri === uri && mod.scanned) {
+                result.push(...mod.signalList);
+            }
+        }
+        return result;
+    }
+
+    /** Get all parameters belonging to modules defined in the given file URI. */
+    getParametersByUri(uri: string): any[] {
+        const result: any[] = [];
+        for (const mod of this.modules.values()) {
+            if (mod.uri === uri && mod.scanned) {
+                result.push(...mod.parameterList);
+            }
+        }
+        return result;
+    }
+
+    /** Get all instances belonging to modules defined in the given file URI. */
+    getInstancesByUri(uri: string): any[] {
+        const result: any[] = [];
+        for (const mod of this.modules.values()) {
+            if (mod.uri === uri && mod.scanned) {
+                result.push(...mod.instanceList);
+            }
+        }
+        return result;
+    }
+
+    /** Get module-token positions for the given file URI. */
+    getModuleTokensByUri(uri: string): any[] {
+        // Module tokens are per-file (shared across all modules in the file).
+        // Return from the first scanned module found for this URI.
+        for (const mod of this.modules.values()) {
+            if (mod.uri === uri && mod.scanned) {
+                return mod.moduleTokens;
+            }
+        }
+        return [];
+    }
+
+    /** Get signals for a specific module by name. */
+    getSignals(moduleName: string): any[] {
+        const mod = this.modules.get(moduleName);
+        return mod && mod.scanned ? mod.signalList : [];
+    }
+
+    /** Get parameters for a specific module by name. */
+    getParameters(moduleName: string): any[] {
+        const mod = this.modules.get(moduleName);
+        return mod && mod.scanned ? mod.parameterList : [];
+    }
+
+    /** Get instances for a specific module by name. */
+    getInstances(moduleName: string): any[] {
+        const mod = this.modules.get(moduleName);
+        return mod && mod.scanned ? mod.instanceList : [];
+    }
+
+    /** Get all signals across all modules. */
+    getAllSignals(): any[] {
+        const result: any[] = [];
+        for (const mod of this.modules.values()) {
+            if (mod.scanned) {
+                result.push(...mod.signalList);
+            }
+        }
+        return result;
+    }
+
+    /** Get all parameters across all modules. */
+    getAllParameters(): any[] {
+        const result: any[] = [];
+        for (const mod of this.modules.values()) {
+            if (mod.scanned) {
+                result.push(...mod.parameterList);
+            }
+        }
+        return result;
+    }
+
+    /** Get all instances across all modules. */
+    getAllInstances(): any[] {
+        const result: any[] = [];
+        for (const mod of this.modules.values()) {
+            if (mod.scanned) {
+                result.push(...mod.instanceList);
+            }
+        }
+        return result;
     }
 }
