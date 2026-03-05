@@ -64,8 +64,9 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'top.v');
         const result = parser.parseSymbols(doc);
+        const instances_check = result.flatMap((m: any) => m.instanceList);
 
-        const pass = 'instances' in result && Array.isArray(result.instances);
+        const pass = Array.isArray(instances_check);
 
         if (pass) {
             console.log('  ✓ Test 1 PASSED');
@@ -97,7 +98,8 @@ module top (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top.v');
-        const { instances } = parser.parseSymbols(doc);
+        const _mods = parser.parseSymbols(doc);
+        const instances = _mods.flatMap((m: any) => m.instanceList);
 
         const inst = instances.find((i: any) => i.instanceName === 'u_counter');
         const pass = inst &&
@@ -136,7 +138,8 @@ module top (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top.v');
-        const { instances } = parser.parseSymbols(doc);
+        const _mods = parser.parseSymbols(doc);
+        const instances = _mods.flatMap((m: any) => m.instanceList);
 
         const inst = instances.find((i: any) => i.instanceName === 'u_counter');
         const clkConn = inst && inst.portConnections.find((p: any) => p.portName === 'clk');
@@ -184,7 +187,8 @@ module top (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top2.v');
-        const { instances } = parser.parseSymbols(doc);
+        const _mods = parser.parseSymbols(doc);
+        const instances = _mods.flatMap((m: any) => m.instanceList);
 
         const ha1 = instances.find((i: any) => i.instanceName === 'ha1');
         const ha2 = instances.find((i: any) => i.instanceName === 'ha2');
@@ -222,7 +226,8 @@ module mod_b (input wire x, output wire y);
 endmodule
 `;
         const doc = new MockTextDocument(code, 'multi.v');
-        const { instances } = parser.parseSymbols(doc);
+        const _mods = parser.parseSymbols(doc);
+        const instances = _mods.flatMap((m: any) => m.instanceList);
 
         const instA = instances.find((i: any) => i.parentModuleName === 'mod_a');
         const instB = instances.find((i: any) => i.parentModuleName === 'mod_b');
@@ -256,7 +261,8 @@ module leaf (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'leaf.v');
-        const { instances } = parser.parseSymbols(doc);
+        const _mods = parser.parseSymbols(doc);
+        const instances = _mods.flatMap((m: any) => m.instanceList);
 
         const pass = Array.isArray(instances) && instances.length === 0;
 
@@ -328,7 +334,8 @@ module top (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top3.v');
-        const { instances } = parser.parseSymbols(doc);
+        const _mods = parser.parseSymbols(doc);
+        const instances = _mods.flatMap((m: any) => m.instanceList);
 
         const db = new InstanceDatabase();
         const uri = 'top3.v';

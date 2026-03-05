@@ -40,7 +40,8 @@ function runTests() {
     const test1Path = path.join(__dirname, '../contents', 'full_adder.v');
     const test1Content = fs.readFileSync(test1Path, 'utf8');
     const test1Doc = new MockTextDocument(test1Content, test1Path);
-    const { modules: modules1, signals: signals1 } = parser.parseSymbols(test1Doc);
+    const modules1 = parser.parseSymbols(test1Doc);
+    const signals1 = modules1.flatMap((m: any) => m.signalList);
 
     const moduleCount = modules1.length;
     const wireCount = signals1.filter((s: any) => s.type === 'wire').length;
@@ -64,7 +65,8 @@ function runTests() {
     const test2Path = path.join(__dirname, '../contents', 'test_symbols.v');
     const test2Content = fs.readFileSync(test2Path, 'utf8');
     const test2Doc = new MockTextDocument(test2Content, test2Path);
-    const { modules: modules2, signals: signals2 } = parser.parseSymbols(test2Doc);
+    const modules2 = parser.parseSymbols(test2Doc);
+    const signals2 = modules2.flatMap((m: any) => m.signalList);
 
     const module2Count = modules2.length;
     const wire2Count = signals2.filter((s: any) => s.type === 'wire').length;

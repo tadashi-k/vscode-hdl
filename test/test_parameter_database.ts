@@ -52,18 +52,19 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test.v');
         const result = parser.parseSymbols(doc);
+        const parameters_t1 = result.flatMap((m: any) => m.parameterList);
 
-        const pass = Array.isArray(result.parameters) &&
-            result.parameters.length === 2 &&
-            result.parameters.some((p: any) => p.name === 'WIDTH') &&
-            result.parameters.some((p: any) => p.name === 'DEPTH');
+        const pass = Array.isArray(parameters_t1) &&
+            parameters_t1.length === 2 &&
+            parameters_t1.some((p: any) => p.name === 'WIDTH') &&
+            parameters_t1.some((p: any) => p.name === 'DEPTH');
 
         if (pass) {
             console.log('  ✓ Test 1 PASSED');
             passedTests++;
         } else {
             console.log('  ✗ Test 1 FAILED');
-            console.log('  parameters:', JSON.stringify(result.parameters));
+            console.log('  parameters:', JSON.stringify(parameters_t1));
         }
     }
 
@@ -80,7 +81,8 @@ module kind_test (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test.v');
-        const { parameters } = parser.parseSymbols(doc);
+        const _mods_p = parser.parseSymbols(doc);
+        const parameters = _mods_p.flatMap((m: any) => m.parameterList);
 
         const param = parameters.find((p: any) => p.name === 'PARAM');
         const local = parameters.find((p: any) => p.name === 'LOCAL');
@@ -112,7 +114,8 @@ module eval_test (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test.v');
-        const { parameters } = parser.parseSymbols(doc);
+        const _mods_p = parser.parseSymbols(doc);
+        const parameters = _mods_p.flatMap((m: any) => m.parameterList);
 
         const a = parameters.find((p: any) => p.name === 'A');
         const b = parameters.find((p: any) => p.name === 'B');
@@ -148,7 +151,8 @@ module arith_test (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test.v');
-        const { parameters } = parser.parseSymbols(doc);
+        const _mods_p = parser.parseSymbols(doc);
+        const parameters = _mods_p.flatMap((m: any) => m.parameterList);
 
         const max   = parameters.find((p: any) => p.name === 'MAX');
         const dbl   = parameters.find((p: any) => p.name === 'DOUBLE');
@@ -180,7 +184,8 @@ endmodule
 endmodule
 `;
         const doc = new MockTextDocument(code, 'location_test.v');
-        const { parameters } = parser.parseSymbols(doc);
+        const _mods_p = parser.parseSymbols(doc);
+        const parameters = _mods_p.flatMap((m: any) => m.parameterList);
 
         const p = parameters.find((x: any) => x.name === 'PARAM_A');
 
@@ -212,7 +217,8 @@ module mod_b (input wire y);
 endmodule
 `;
         const doc = new MockTextDocument(code, 'two_mods.v');
-        const { parameters } = parser.parseSymbols(doc);
+        const _mods_p = parser.parseSymbols(doc);
+        const parameters = _mods_p.flatMap((m: any) => m.parameterList);
 
         const pa = parameters.find((p: any) => p.name === 'P' && p.moduleName === 'mod_a');
         const pb = parameters.find((p: any) => p.name === 'P' && p.moduleName === 'mod_b');
@@ -242,7 +248,8 @@ module expr_test (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'expr.v');
-        const { parameters } = parser.parseSymbols(doc);
+        const _mods_p = parser.parseSymbols(doc);
+        const parameters = _mods_p.flatMap((m: any) => m.parameterList);
 
         const base = parameters.find((p: any) => p.name === 'BASE');
         const calc = parameters.find((p: any) => p.name === 'CALC');
@@ -274,7 +281,8 @@ module counter (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'counter.v');
-        const { parameters } = parser.parseSymbols(doc);
+        const _mods_p = parser.parseSymbols(doc);
+        const parameters = _mods_p.flatMap((m: any) => m.parameterList);
 
         const width    = parameters.find((p: any) => p.name === 'WIDTH');
         const maxCount = parameters.find((p: any) => p.name === 'MAX_COUNT');
@@ -306,7 +314,8 @@ module width_test (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'width_test.v');
-        const { signals } = parser.parseSymbols(doc);
+        const _mods_s = parser.parseSymbols(doc);
+        const signals = _mods_s.flatMap((m: any) => m.signalList);
 
         // Parse yields correct bitWidth for ports/regs defined with literal ranges.
         // Here we just confirm the module parses without error.
@@ -345,7 +354,8 @@ module ctrl (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'ctrl.v');
-        const { modules, errors } = parser.parseSymbols(doc);
+        const modules = parser.parseSymbols(doc);
+        const errors = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
 
         const pass = modules.length === 1 && modules[0].name === 'ctrl' && errors.length === 0;
 
@@ -373,7 +383,9 @@ module bw_arith (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'bw_arith.v');
-        const { signals, parameters } = parser.parseSymbols(doc);
+        const _mods_sp = parser.parseSymbols(doc);
+        const signals = _mods_sp.flatMap((m: any) => m.signalList);
+        const parameters = _mods_sp.flatMap((m: any) => m.parameterList);
 
         const width      = parameters.find((p: any) => p.name === 'WIDTH');
         const addrWidth  = parameters.find((p: any) => p.name === 'ADDR_WIDTH');
@@ -416,7 +428,8 @@ module if_test (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'if_test.v');
-        const { modules, errors } = parser.parseSymbols(doc);
+        const modules = parser.parseSymbols(doc);
+        const errors = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
 
         const pass = modules.length === 1 && modules[0].name === 'if_test' && errors.length === 0;
 
@@ -449,7 +462,8 @@ module sw2_test (
 endmodule
 `;
         const doc2 = new MockTextDocument(signalWidthTestCode, 'sw2_test.v');
-        const { modules: signalWidthModules, errors: signalWidthErrors } = parser.parseSymbols(doc2);
+        const signalWidthModules = parser.parseSymbols(doc2);
+        const signalWidthErrors = parser.generateErrors(doc2).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
 
         const pass = signalWidthModules.length === 1 && signalWidthErrors.length === 0;
 
@@ -483,7 +497,10 @@ module cond_sig_test (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'cond_sig_test.v');
-        const { modules: mods, errors: errs, warnings: warns } = parser.parseSymbols(doc);
+        const mods = parser.parseSymbols(doc);
+        const allDiags_t14 = parser.generateErrors(doc);
+        const errs = allDiags_t14.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warns = allDiags_t14.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         // There should be no errors and no "undefined signal" warnings for 'enable' or 'val'
         const undefinedWarns = warns.filter((w: any) => w.message.includes('referenced but not declared'));
@@ -514,7 +531,8 @@ module mem_ctrl #(
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test15.v');
-        const { parameters } = parser.parseSymbols(doc);
+        const _mods_p = parser.parseSymbols(doc);
+        const parameters = _mods_p.flatMap((m: any) => m.parameterList);
 
         const adrWidth = parameters.find((p: any) => p.name === 'ADR_WIDTH');
         

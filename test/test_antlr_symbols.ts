@@ -57,7 +57,9 @@ module test_module (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test_ansi.v');
-        const { modules, signals, errors } = parser.parseSymbols(doc);
+        const modules = parser.parseSymbols(doc);
+        const signals = modules.flatMap((m: any) => m.signalList);
+        const errors = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
 
         console.log(`  Modules: ${modules.length}, Signals: ${signals.length}, Errors: ${errors.length}`);
 
@@ -97,7 +99,8 @@ module mod_b (output reg y);
 endmodule
 `;
         const doc = new MockTextDocument(code, 'two_modules.v');
-        const { modules, signals } = parser.parseSymbols(doc);
+        const modules = parser.parseSymbols(doc);
+        const signals = modules.flatMap((m: any) => m.signalList);
 
         const aSignals = signals.filter((s: any) => s.moduleName === 'mod_a');
         const bSignals = signals.filter((s: any) => s.moduleName === 'mod_b');
@@ -133,7 +136,8 @@ module field_test (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'field_test.v');
-        const { signals } = parser.parseSymbols(doc);
+        const modules_tmp = parser.parseSymbols(doc);
+        const signals = modules_tmp.flatMap((m: any) => m.signalList);
 
         const data = signals.find((s: any) => s.name === 'data');
         const q = signals.find((s: any) => s.name === 'q');
@@ -167,7 +171,8 @@ endmodule
         const testPath = path.join(__dirname, '../contents', 'counter.v');
         const testContent = fs.readFileSync(testPath, 'utf8');
         const doc = new MockTextDocument(testContent, testPath);
-        const { modules, signals } = parser.parseSymbols(doc);
+        const modules = parser.parseSymbols(doc);
+        const signals = modules.flatMap((m: any) => m.signalList);
 
         const counterMod = modules.find((m: any) => m.name === 'counter');
         const portNames = counterMod ? counterMod.ports.map((p: any) => p.name) : [];
@@ -197,7 +202,9 @@ endmodule
         const testPath = path.join(__dirname, '../contents', 'full_adder.v');
         const testContent = fs.readFileSync(testPath, 'utf8');
         const doc = new MockTextDocument(testContent, testPath);
-        const { modules, signals, errors } = parser.parseSymbols(doc);
+        const modules = parser.parseSymbols(doc);
+        const signals = modules.flatMap((m: any) => m.signalList);
+        const errors = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
 
         const pass = modules.length === 2 &&
             modules.some((m: any) => m.name === 'full_adder') &&
@@ -224,7 +231,9 @@ module err_module (
     assign temp = clk;
 `;
         const doc = new MockTextDocument(code, 'err.v');
-        const { modules, signals, errors } = parser.parseSymbols(doc);
+        const modules = parser.parseSymbols(doc);
+        const signals = modules.flatMap((m: any) => m.signalList);
+        const errors = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
 
         const pass = errors.length > 0 &&
             modules.length >= 1 &&
@@ -251,7 +260,8 @@ module param_range (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'param_range.v');
-        const { signals } = parser.parseSymbols(doc);
+        const modules_tmp = parser.parseSymbols(doc);
+        const signals = modules_tmp.flatMap((m: any) => m.signalList);
 
         const internalCount = signals.find((s: any) => s.name === 'internal_count');
 
@@ -274,7 +284,8 @@ endmodule
         const testPath = path.join(__dirname, '../contents', 'counter.v');
         const testContent = fs.readFileSync(testPath, 'utf8');
         const doc = new MockTextDocument(testContent, testPath);
-        const { signals } = parser.parseSymbols(doc);
+        const modules_tmp = parser.parseSymbols(doc);
+        const signals = modules_tmp.flatMap((m: any) => m.signalList);
 
         const internalCount = signals.find((s: any) => s.name === 'internal_count');
 

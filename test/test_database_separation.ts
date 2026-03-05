@@ -37,58 +37,9 @@ class MockTextDocument {
 // Helper to update the unified database from a parsed document
 function updateDatabase(db: ModuleDatabase, doc: any) {
     const uri = doc.uri.toString();
-    const { modules, signals, instances, parameters } = parser.parseSymbols(doc);
-
+    const modules = parser.parseSymbols(doc);
     db.removeModulesFromFile(uri);
-
-    const signalsByModule = new Map<string, any>();
-    for (const signal of signals) {
-        if (!signalsByModule.has(signal.moduleName)) {
-            signalsByModule.set(signal.moduleName, []);
-        }
-        signalsByModule.get(signal.moduleName).push(signal);
-    }
-
-    const instancesByModule = new Map<string, any[]>();
-    for (const instance of instances) {
-        if (!instancesByModule.has(instance.parentModuleName)) {
-            instancesByModule.set(instance.parentModuleName, []);
-        }
-        instancesByModule.get(instance.parentModuleName)!.push(instance);
-    }
-
-    const paramsByModule = new Map<string, any[]>();
-    for (const param of parameters) {
-        if (!paramsByModule.has(param.moduleName)) {
-            paramsByModule.set(param.moduleName, []);
-        }
-        paramsByModule.get(param.moduleName)!.push(param);
-    }
-
-    for (const parsedMod of modules) {
-        const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
-        mod.ports = parsedMod.ports || [];
-
-        const moduleSignals = signalsByModule.get(parsedMod.name) || [];
-        mod.signalList = moduleSignals;
-        for (const sig of moduleSignals) {
-            mod.signalMap.set(sig.name, sig);
-        }
-
-        const moduleParams = paramsByModule.get(parsedMod.name) || [];
-        mod.parameterList = moduleParams;
-        for (const param of moduleParams) {
-            mod.parameterMap.set(param.name, param);
-        }
-
-        const moduleInstances = instancesByModule.get(parsedMod.name) || [];
-        mod.instanceList = moduleInstances;
-        for (const inst of moduleInstances) {
-            if (inst.instanceName) {
-                mod.instanceMap.set(inst.instanceName, inst);
-            }
-        }
-
+    for (const mod of modules) {
         db.addModule(mod);
     }
 }

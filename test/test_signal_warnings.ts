@@ -76,7 +76,9 @@ module valid_module (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'valid.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const pass = errors.length === 0 && warnings.length === 0;
         if (pass) {
@@ -103,7 +105,9 @@ module undef_ref (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'undef_ref.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasUndefinedWarning = warnings.some(w =>
             w.message.includes('undefined_signal') &&
@@ -137,7 +141,9 @@ module unused_signal (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'unused.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const unusedWireWarning = warnings.some(w =>
             w.message.includes('unused_wire') && w.message.includes('never used')
@@ -169,7 +175,9 @@ module assign_reg (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'assign_reg.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasAssignRegWarning = warnings.some(w =>
             w.message.includes('out_reg') && w.message.includes('l-value') && w.message.includes('reg')
@@ -199,7 +207,9 @@ module proc_wire_blocking (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'proc_wire_blocking.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasProcWireWarning = warnings.some(w =>
             w.message.includes('out_wire') && w.message.includes('wire')
@@ -229,7 +239,9 @@ module proc_wire_nonblocking (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'proc_wire_nonblocking.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasProcWireWarning = warnings.some(w =>
             w.message.includes('out_wire') && w.message.includes('wire')
@@ -259,7 +271,9 @@ module valid_reg_always (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'valid_reg.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasNoWarnings = warnings.length === 0;
 
@@ -285,7 +299,9 @@ module valid_wire_assign (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'valid_wire.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasNoWarnings = warnings.length === 0;
 
@@ -298,10 +314,10 @@ endmodule
         }
     }
 
-    // Test 9: parse() includes both syntax errors and warnings
+    // Test 9: generateErrors() includes both syntax errors and warnings
     {
         totalTests++;
-        console.log('\nTest 9: parse() includes both syntax errors and warnings');
+        console.log('\nTest 9: generateErrors() includes both syntax errors and warnings');
         const code = `
 module mixed_issues (
     input wire clk,
@@ -314,7 +330,7 @@ module mixed_issues (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'mixed.v');
-        const issues = parser.parse(doc);
+        const issues = parser.generateErrors(doc);
 
         const hasSyntaxError = issues.some(i => i.severity === vscode.DiagnosticSeverity.Error);
         const hasWarning = issues.some(i =>
@@ -323,7 +339,7 @@ endmodule
         );
 
         if (hasSyntaxError && hasWarning) {
-            console.log('  ✓ Test 9 PASSED (parse() returns both errors and warnings)');
+            console.log('  ✓ Test 9 PASSED (generateErrors() returns both errors and warnings)');
             passedTests++;
         } else {
             console.log(`  ✗ Test 9 FAILED (hasSyntaxError: ${hasSyntaxError}, hasWarning: ${hasWarning})`);
@@ -350,7 +366,7 @@ module check_severity (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'severity.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const allAreWarnings = warnings.length > 0 &&
             warnings.every(w => w.severity === vscode.DiagnosticSeverity.Warning);
@@ -383,7 +399,7 @@ module mod_b (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'two_mods.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         // mod_a: all signals used, no warnings for x or y
         const mod_a_warnings = warnings.filter(w => {
@@ -415,7 +431,9 @@ module input_assign_lval (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'input_assign_lval.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasInputLvalWarning = warnings.some(w =>
             w.message.includes('in_sig') && w.message.includes('cannot be used as l-value')
@@ -450,7 +468,9 @@ module input_proc_lval (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'input_proc_lval.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasInputLvalWarning = warnings.some(w =>
             w.message.includes('data_in') && w.message.includes('cannot be used as l-value')
@@ -503,7 +523,9 @@ module top_mod (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'inst_output_reg.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasOutputRegWarning = warnings.some(w =>
             w.message.includes('captured') && w.message.includes('cannot be connected to reg')
@@ -542,7 +564,9 @@ module never_assigned (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'never_assigned.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasOutNeverWarning = warnings.some(w =>
             w.message.includes('out_never') && w.message.includes('never assigned')
@@ -602,7 +626,9 @@ module consumer (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'inst_assigned.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noReceivedNeverAssigned = !warnings.some(w =>
             w.message.includes('received') && w.message.includes('never assigned')
@@ -652,7 +678,9 @@ module top_inout (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'inout_reg.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasInoutRegWarning = warnings.some(w =>
             w.message.includes('bus_reg') && w.message.includes('cannot be connected to reg')
@@ -699,7 +727,9 @@ module top_inout_assigned (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'inout_assigned.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noBusNeverAssigned = !warnings.some(w =>
             w.message.includes('bus_io') && w.message.includes('never assigned')
@@ -739,7 +769,9 @@ module top_input_used (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'input_used.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noMyDataUnused = !warnings.some(w =>
             w.message.includes('my_data') && w.message.includes('never used')
@@ -791,7 +823,9 @@ module top_mod (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top_mod.v');
-        const { errors, warnings } = parser.parseSymbols(doc, mockDb);
+        const allDiags = parser.generateErrors(doc, mockDb);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noReceivedNeverAssigned = !warnings.some(w =>
             w.message.includes('received') && w.message.includes('never assigned')
@@ -841,7 +875,9 @@ module top_cross (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top_cross.v');
-        const { errors, warnings } = parser.parseSymbols(doc, mockDb);
+        const allDiags = parser.generateErrors(doc, mockDb);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasCapturedRegWarning = warnings.some(w =>
             w.message.includes('captured') && w.message.includes('cannot be connected to reg')
@@ -897,7 +933,9 @@ module top_bidir (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top_bidir.v');
-        const { errors, warnings } = parser.parseSymbols(doc, mockDb);
+        const allDiags = parser.generateErrors(doc, mockDb);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasBusRegWarning = warnings.some(w =>
             w.message.includes('bus_reg') && w.message.includes('cannot be connected to reg')
@@ -936,7 +974,9 @@ module lval_only (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'lval_only.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasNeverUsedX = warnings.some(w =>
             w.message.includes("'x'") && w.message.includes('never used')
@@ -981,7 +1021,9 @@ module top_driven_only (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'driven_only.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasDrivenOnlyNeverUsed = warnings.some(w =>
             w.message.includes('driven_only') && w.message.includes('never used')
@@ -1022,7 +1064,7 @@ endmodule
 `;
         const fullAdderDoc = new MockTextDocument(fullAdderCode, 'full_adder.v');
         const fullAdderResult = parser.parseSymbols(fullAdderDoc);
-        const crossDb = new MockModuleDatabase(fullAdderResult.modules);
+        const crossDb = new MockModuleDatabase(fullAdderResult as any[]);
 
         // Parse counter.v with the cross-file database
         const counterCode = `
@@ -1060,7 +1102,9 @@ localparam MAX_COUNT = (1 << WIDTH) - 1;
 endmodule
 `;
         const counterDoc = new MockTextDocument(counterCode, 'counter.v');
-        const { errors: cErrors, warnings: cWarnings } = parser.parseSymbols(counterDoc, crossDb);
+        const cDiags = parser.generateErrors(counterDoc, crossDb);
+        const cErrors = cDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const cWarnings = cDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noEnableNeverAssigned = !cWarnings.some(w =>
             w.message.includes("'enable'") && w.message.includes('never assigned')
@@ -1099,7 +1143,9 @@ module wire_init (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'wire_init.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noNeverAssigned = !warnings.some(w =>
             w.message.includes("'a'") && w.message.includes('never assigned')
@@ -1136,7 +1182,9 @@ module reg_init (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'reg_init.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noNeverAssigned = !warnings.some(w =>
             w.message.includes("'r'") && w.message.includes('never assigned')
@@ -1175,7 +1223,7 @@ module twodim (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'twodim.v');
-        const { errors } = parser.parseSymbols(doc);
+        const errors = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
 
         if (errors.length === 0) {
             console.log('  ✓ Test 28 PASSED (two-dimensional array access parses without errors)');
@@ -1204,7 +1252,9 @@ module concat_assign (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'concat_assign.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noANeverAssigned = !warnings.some(w =>
             w.message.includes("'a'") && w.message.includes('never assigned')
@@ -1249,7 +1299,9 @@ module concat_ref (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'concat_ref.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noANeverUsed = !warnings.some(w =>
             w.message.includes("'a'") && w.message.includes('never used')
@@ -1287,7 +1339,9 @@ module concat_cont_assign (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'concat_cont.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noXNeverAssigned = !warnings.some(w =>
             w.message.includes("'x'") && w.message.includes('never assigned')
@@ -1327,7 +1381,9 @@ module top_module (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'wire_assign_expr.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noSetupNeverUsed = !warnings.some(w =>
             w.message.includes("'setup'") && w.message.includes('never used')
@@ -1365,7 +1421,9 @@ module reg_assign (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'reg_assign_expr.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const noANeverUsed = !warnings.some(w =>
             w.message.includes("'a'") && w.message.includes('never used')
@@ -1405,7 +1463,9 @@ module top;
 endmodule
 `;
         const doc = new MockTextDocument(code, 'named_port_no_warn.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         // Named port names (.WIDTH, .clk, .reset, .count_in, .count_out) must NOT
         // produce "referenced but not declared" warnings.
@@ -1439,7 +1499,9 @@ module top;
 endmodule
 `;
         const doc = new MockTextDocument(code, 'port_expr_warn.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasUndeclaredClk = warnings.some(w =>
             w.message.includes("'undeclared_clk'") &&
@@ -1473,7 +1535,9 @@ module top;
 endmodule
 `;
         const doc = new MockTextDocument(code, 'concat_port_warn.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasUndeclaredL = warnings.some(w =>
             w.message.includes("'undeclared_l'") &&
@@ -1510,7 +1574,9 @@ module top;
 endmodule
 `;
         const doc = new MockTextDocument(code, 'param_expr_warn.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasUndefParam = warnings.some(w =>
             w.message.includes("'UNDEF_PARAM'") &&
@@ -1543,7 +1609,9 @@ module top;
 endmodule
 `;
         const doc = new MockTextDocument(code, 'ordered_port_warn.v');
-        const { errors, warnings } = parser.parseSymbols(doc);
+        const allDiags = parser.generateErrors(doc);
+        const errors = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Error);
+        const warnings = allDiags.filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasUndeclaredSig = warnings.some(w =>
             w.message.includes("'undeclared_sig'") &&
@@ -1615,7 +1683,9 @@ counter_i_2 (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test_instance.v');
-        const { warnings, instances } = parser.parseSymbols(doc, mockDb);
+        const modules = parser.parseSymbols(doc);
+        const instances = modules.flatMap((m: any) => m.instanceList);
+        const warnings = parser.generateErrors(doc, mockDb).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         // counter_i_1 has all 4 ports → no missing port warning
         const ci1 = instances.find(i => i.instanceName === 'counter_i_1');
@@ -1664,7 +1734,7 @@ module top (input clk);
 endmodule
 `;
         const doc = new MockTextDocument(code, 'multi_missing.v');
-        const { warnings } = parser.parseSymbols(doc, mockDb);
+        const warnings = parser.generateErrors(doc, mockDb).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const missingWarn = warnings.find(w => w.message.includes('unconnected'));
         const hasDataIn = missingWarn && missingWarn.message.includes("'data_in' unconnected");
@@ -1707,7 +1777,7 @@ module top (input clk);
 endmodule
 `;
         const doc = new MockTextDocument(code, 'empty_port.v');
-        const { warnings } = parser.parseSymbols(doc, mockDb);
+        const warnings = parser.generateErrors(doc, mockDb).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMissingWarn = warnings.some(w => w.message.includes('unconnected'));
 
@@ -1734,7 +1804,7 @@ module top (input clk);
 endmodule
 `;
         const doc = new MockTextDocument(code, 'undef_module.v');
-        const { warnings } = parser.parseSymbols(doc, mockDb);
+        const warnings = parser.generateErrors(doc, mockDb).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasUndefWarn = warnings.some(w =>
             w.message.includes("'unknown_module'") && w.message.includes('not defined')
@@ -1767,7 +1837,7 @@ module top (input clk);
 endmodule
 `;
         const doc = new MockTextDocument(code, 'local_module.v');
-        const { warnings } = parser.parseSymbols(doc, mockDb);
+        const warnings = parser.generateErrors(doc, mockDb).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasUndefWarn = warnings.some(w =>
             w.message.includes("'sub_mod'") && w.message.includes('not defined')
@@ -1794,7 +1864,7 @@ module top (input clk);
 endmodule
 `;
         const doc = new MockTextDocument(code, 'no_db.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasUndefWarn = warnings.some(w =>
             w.message.includes('not defined')
@@ -1823,7 +1893,7 @@ module width_mismatch_assign (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'width_mismatch_assign.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch') &&
@@ -1858,7 +1928,7 @@ module width_mismatch_blocking (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'width_mismatch_blocking.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch') &&
@@ -1893,7 +1963,7 @@ module width_mismatch_nonblocking (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'width_mismatch_nonblocking.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch') &&
@@ -1925,7 +1995,7 @@ module width_match (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'width_match.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch')
@@ -1953,7 +2023,7 @@ module width_mismatch_literal (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'width_mismatch_literal.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch') &&
@@ -1987,7 +2057,7 @@ module width_match_unsized (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'width_match_unsized.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch')
@@ -2016,7 +2086,7 @@ module width_mismatch_partselect (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'width_mismatch_partselect.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch') &&
@@ -2051,7 +2121,7 @@ module scalar_width (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'scalar_width.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch') &&
@@ -2085,7 +2155,7 @@ module concat_width (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'concat_width.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch') &&
@@ -2116,7 +2186,7 @@ module bit_select_width (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'bit_select_width.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch')
@@ -2145,7 +2215,7 @@ module part_select_width (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'part_select_width.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch') &&
@@ -2181,7 +2251,7 @@ module concat_scalar_width (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'concat_scalar_width.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasMismatch = warnings.some(w =>
             w.message.includes('Bit width mismatch') &&
@@ -2216,7 +2286,7 @@ module cond_width_warn (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'cond_width_warn.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasCondWarn = warnings.some(w =>
             w.message.includes('condition should be 1-bit') &&
@@ -2250,7 +2320,7 @@ module cond_width_ok (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'cond_width_ok.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasCondWarn = warnings.some(w => w.message.includes('condition should be 1-bit'));
 
@@ -2286,7 +2356,7 @@ module while_cond_warn (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'while_cond_warn.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasCondWarn = warnings.some(w =>
             w.message.includes('condition should be 1-bit') &&
@@ -2332,7 +2402,7 @@ module top_port_width (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top_port_width.v');
-        const { warnings } = parser.parseSymbols(doc, mockDb);
+        const warnings = parser.generateErrors(doc, mockDb).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasPortWidthWarn = warnings.some(w =>
             w.message.includes("Port 'data_in'") &&
@@ -2377,7 +2447,7 @@ module top_port_ok (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top_port_ok.v');
-        const { warnings } = parser.parseSymbols(doc, mockDb);
+        const warnings = parser.generateErrors(doc, mockDb).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasPortWidthWarn = warnings.some(w =>
             w.message.includes("Port '") && w.message.includes('width')
@@ -2416,7 +2486,7 @@ module top_partsel_ok (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top_partsel_ok.v');
-        const { warnings } = parser.parseSymbols(doc, mockDb);
+        const warnings = parser.generateErrors(doc, mockDb).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasPortWidthWarn = warnings.some(w =>
             w.message.includes("Port 'count_in'") && w.message.includes('width')
@@ -2455,7 +2525,7 @@ module top_partsel_mismatch (
 endmodule
 `;
         const doc = new MockTextDocument(code, 'top_partsel_mismatch.v');
-        const { warnings } = parser.parseSymbols(doc, mockDb);
+        const warnings = parser.generateErrors(doc, mockDb).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasPortWidthWarn = warnings.some(w =>
             w.message.includes("Port 'count_in'") &&
@@ -2500,7 +2570,7 @@ end
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test_ram.v');
-        const { warnings } = parser.parseSymbols(doc);
+        const warnings = parser.generateErrors(doc).filter((d: any) => d.severity === vscode.DiagnosticSeverity.Warning);
 
         const hasWidthMismatch = warnings.some(w => w.message.includes('Bit width mismatch') && w.message.includes('ram'));
         if (!hasWidthMismatch) {

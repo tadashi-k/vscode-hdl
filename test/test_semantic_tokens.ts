@@ -41,8 +41,8 @@ function runTests() {
     const counterContent = fs.readFileSync(counterPath, 'utf8');
     const counterDoc = new MockTextDocument(counterContent, counterPath);
     const counterResult = parser.parseSymbols(counterDoc);
-    const counterSignals = counterResult.signals;
-    const counterParams = counterResult.parameters;
+    const counterSignals = counterResult.flatMap((m: any) => m.signalList);
+    const counterParams = counterResult.flatMap((m: any) => m.parameterList);
 
     // Helper: find a 0-based line number by matching line content
     function findLine(text: string, pattern: string): number {
@@ -189,7 +189,9 @@ function runTests() {
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test_comments.v');
-        const { signals, parameters } = parser.parseSymbols(doc);
+        const _modules_doc = parser.parseSymbols(doc);
+        const signals = _modules_doc.flatMap((m: any) => m.signalList);
+        const parameters = _modules_doc.flatMap((m: any) => m.parameterList);
 
         const tokens = computeSemanticTokens(code, signals, parameters);
         // Line 2 (0-based) is the comment line
@@ -263,7 +265,9 @@ endmodule
 endmodule
 `;
         const doc = new MockTextDocument(code, 'test_block_comment.v');
-        const { signals, parameters } = parser.parseSymbols(doc);
+        const _modules_doc = parser.parseSymbols(doc);
+        const signals = _modules_doc.flatMap((m: any) => m.signalList);
+        const parameters = _modules_doc.flatMap((m: any) => m.parameterList);
 
         const tokens = computeSemanticTokens(code, signals, parameters);
         // Lines 2-3 are the block comment
@@ -295,7 +299,7 @@ endmodule
         const doc = new MockTextDocument(code, 'test_module_decl.v');
         const result = parser.parseSymbols(doc);
 
-        const tokens = computeSemanticTokens(code, result.signals, result.parameters, result.moduleTokens);
+        const tokens = computeSemanticTokens(code, result.flatMap((m: any) => m.signalList), result.flatMap((m: any) => m.parameterList), result.length > 0 ? result[0].moduleTokens : []);
         const lines = code.split('\n');
         const modLine = findLine(code, 'module my_counter');
         const modChar = lines[modLine].indexOf('my_counter');
@@ -330,7 +334,7 @@ endmodule
         const doc = new MockTextDocument(code, 'test_module_inst.v');
         const result = parser.parseSymbols(doc);
 
-        const tokens = computeSemanticTokens(code, result.signals, result.parameters, result.moduleTokens);
+        const tokens = computeSemanticTokens(code, result.flatMap((m: any) => m.signalList), result.flatMap((m: any) => m.parameterList), result.length > 0 ? result[0].moduleTokens : []);
         const lines = code.split('\n');
         const instLine = findLine(code, 'child u_child');
         const childChar = lines[instLine].indexOf('child');
