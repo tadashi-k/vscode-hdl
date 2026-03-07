@@ -36,12 +36,14 @@ export class Definition {
     name: string;
     line: number;
     character: number;
+    type: 'module' | 'port' | 'wire' | 'reg' | 'integer' | 'parameter' | 'localparam';
     description: string;
 
-    constructor(name: string, line: number, character: number, description: string) {
+    constructor(name: string, line: number, character: number, type: any, description: string) {
         this.name = name;
         this.line = line;
         this.character = character;
+        this.type = type;
         this.description = description;
     }
 }
@@ -67,9 +69,6 @@ export class Module {
     /** Parameters as an ordered list. */
     parameterList: any[] = [];
 
-    /** Definitions (signals, parameters, localparams) for hover and goto-definition. */
-    definitionList: Definition[] = [];
-
     /** Map from definition name to Definition for O(1) lookup. */
     definitionMap: Map<string, Definition> = new Map();
 
@@ -84,7 +83,6 @@ export class Module {
 
     /** Add a definition to both the list and the map. */
     addDefinition(def: Definition) {
-        this.definitionList.push(def);
         this.definitionMap.set(def.name, def);
     }
 }

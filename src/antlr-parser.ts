@@ -239,7 +239,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (signal.type && signal.type !== DEFAULT_NET_TYPE) parts.push(signal.type);
         if (signal.bitWidth) parts.push(signal.bitWidth);
         parts.push(signal.name);
-        return new Definition(signal.name, signal.line, signal.character, parts.join(' '));
+        return new Definition(signal.name, signal.line, signal.character, 'port', parts.join(' '));
     }
 
     visitModule_declaration(ctx: any) {
@@ -717,7 +717,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     const kind = param.kind;
                     const descValue = value !== null ? String(value) : exprText;
                     const paramDesc = descValue ? `${kind} ${info.name} = ${descValue}` : `${kind} ${info.name}`;
-                    this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, paramDesc));
+                    this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, kind, paramDesc));
                 }
             }
         }
@@ -1394,7 +1394,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
             this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
             const netDesc = [type, bitWidth, info.name].filter(Boolean).join(' ');
-            this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, netDesc));
+            this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, type, netDesc));
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(netIdCtx)) {
@@ -1443,7 +1443,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
             this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
             const regDesc = ['reg', bitWidth, info.name].filter(Boolean).join(' ');
-            this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, regDesc));
+            this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, 'reg', regDesc));
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(regIdCtx)) {
@@ -1485,7 +1485,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             };
             this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
             this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
-            this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, `integer ${info.name}`));
+            this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, 'integer', `integer ${info.name}`));
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(intIdCtx)) {

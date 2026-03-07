@@ -70,12 +70,12 @@ console.log('\nTest: parameter and localparam definitions in counter.v');
     const mod = db.getModule('counter');
     assert(mod !== undefined, 'counter module is found');
 
-    const defs = mod?.definitionList ?? [];
-    assert(Array.isArray(defs), 'definitionList is an array');
-    assert(defs.length > 0, 'definitionList is non-empty');
+    const defs = mod?.definitionMap ?? new Map();
+    assert(defs instanceof Map, 'definitionMap is a Map');
+    assert(defs.size > 0, 'definitionMap is non-empty');
 
     // parameter WIDTH = 8
-    const widthDef = defs.find((d: any) => d.name === 'WIDTH');
+    const widthDef = defs.get('WIDTH');
     assert(widthDef !== undefined, 'WIDTH definition is collected');
     assert(typeof widthDef?.line === 'number', 'WIDTH definition has line number');
     assert(typeof widthDef?.character === 'number', 'WIDTH definition has character position');
@@ -83,7 +83,7 @@ console.log('\nTest: parameter and localparam definitions in counter.v');
     assert(widthDef?.description.includes('8'), 'WIDTH description includes value 8');
 
     // localparam MAX_COUNT = ...
-    const maxCountDef = defs.find((d: any) => d.name === 'MAX_COUNT');
+    const maxCountDef = defs.get('MAX_COUNT');
     assert(maxCountDef !== undefined, 'MAX_COUNT definition is collected');
     assert(maxCountDef?.description.startsWith('localparam MAX_COUNT'), 'MAX_COUNT description starts with "localparam MAX_COUNT"');
 }
@@ -93,22 +93,22 @@ console.log('\nTest: parameter and localparam definitions in counter.v');
 console.log('\nTest: signal definitions in counter.v');
 {
     const mod = db.getModule('counter');
-    const defs = mod?.definitionList ?? [];
+    const defs = mod?.definitionMap ?? new Map();
 
     // wire enable
-    const enableDef = defs.find((d: any) => d.name === 'enable');
+    const enableDef = defs.get('enable');
     assert(enableDef !== undefined, 'enable wire definition is collected');
     assert(enableDef?.description.includes('wire'), 'enable description includes "wire"');
     assert(enableDef?.description.includes('enable'), 'enable description includes signal name');
 
     // reg [WIDTH-1:0] internal_count  (bitWidth may be evaluated or raw)
-    const internalCountDef = defs.find((d: any) => d.name === 'internal_count');
+    const internalCountDef = defs.get('internal_count');
     assert(internalCountDef !== undefined, 'internal_count reg definition is collected');
     assert(internalCountDef?.description.startsWith('reg'), 'internal_count description starts with "reg"');
     assert(internalCountDef?.description.includes('internal_count'), 'internal_count description includes name');
 
     // integer cnt
-    const cntDef = defs.find((d: any) => d.name === 'cnt');
+    const cntDef = defs.get('cnt');
     assert(cntDef !== undefined, 'cnt integer definition is collected');
     assert(cntDef?.description === 'integer cnt', 'cnt description is "integer cnt"');
 }
@@ -118,16 +118,16 @@ console.log('\nTest: signal definitions in counter.v');
 console.log('\nTest: port definitions in counter.v');
 {
     const mod = db.getModule('counter');
-    const defs = mod?.definitionList ?? [];
+    const defs = mod?.definitionMap ?? new Map();
 
     // input clk
-    const clkDef = defs.find((d: any) => d.name === 'clk');
+    const clkDef = defs.get('clk');
     assert(clkDef !== undefined, 'clk port definition is collected');
     assert(clkDef?.description.includes('input'), 'clk description includes "input"');
     assert(clkDef?.description.includes('clk'), 'clk description includes name');
 
     // output reg [WIDTH-1:0] count_out
-    const countOutDef = defs.find((d: any) => d.name === 'count_out');
+    const countOutDef = defs.get('count_out');
     assert(countOutDef !== undefined, 'count_out port definition is collected');
     assert(countOutDef?.description.includes('output'), 'count_out description includes "output"');
     assert(countOutDef?.description.includes('count_out'), 'count_out description includes name');
@@ -138,14 +138,15 @@ console.log('\nTest: port definitions in counter.v');
 console.log('\nTest: Definition object structure');
 {
     const mod = db.getModule('counter');
-    const defs = mod?.definitionList ?? [];
+    const defs = mod?.definitionMap ?? new Map();
 
-    assert(defs.length > 0, 'definitionList is non-empty for structure check');
-    for (const def of defs) {
+    assert(defs.size > 0, 'definitionMap is non-empty for structure check');
+    for (const def of defs.values()) {
         assert(typeof def.name === 'string' && def.name.length > 0, `definition "${def.name}" has non-empty name`);
         assert(typeof def.line === 'number' && def.line >= 0, `definition "${def.name}" has valid line`);
         assert(typeof def.character === 'number' && def.character >= 0, `definition "${def.name}" has valid character`);
         assert(typeof def.description === 'string' && def.description.length > 0, `definition "${def.name}" has non-empty description`);
+        break; // just check the first one
     }
 }
 

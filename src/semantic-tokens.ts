@@ -34,8 +34,10 @@ const VERILOG_KEYWORDS = new Set([
 ]);
 
 /** Map a signal type string to a semantic token type. */
-function signalTypeToTokenType(signalType: string): string {
+function defTypeToTokenType(signalType: string): string {
     switch (signalType) {
+        case 'parameter': return 'hdlParameter';
+        case 'localparam': return 'hdlParameter';
         case 'reg':     return 'hdlReg';
         case 'wire':    return 'hdlWire';
         case 'integer': return 'hdlInteger';
@@ -73,23 +75,20 @@ export function computeSemanticTokens(
     text: string,
     modules: Module[],
 ): SemanticTokenInfo[] {
-    // Collect parameters from all modules (signals are tracked internally by the parser)
-    const parameters = modules.flatMap(m => m.parameterList);
 
-    // Build fast lookup maps
-    const signalMap = new Map<string, any>();
-    const paramMap = new Map<string, any>();
-    for (const param of parameters) {
-        paramMap.set(param.name, param);
-    }
     // Build position-based lookup for module tokens from Module data
     const moduleTokenMap = buildModuleTokens(modules);
 
     const tokens: SemanticTokenInfo[] = [];
     const lines = text.split('\n');
     let inBlockComment = false;
+    let moduleIdx = 0;
 
     for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+        if (lineNum > module[moduleIdx]?.endline) {
+            moduleIdx++;
+        }
+    
         const line = lines[lineNum];
         let i = 0;
 
@@ -176,42 +175,26 @@ export function computeSemanticTokens(
                     continue;
                 }
 
-                const signal = signalMap.get(word);
-                if (signal) {
+                const mod = modules[moduleIdx];
+                const def = mod?.definitionMap.get(word);
+                if (def) {
                     const modifiers: string[] = [];
-                    if (signal.line === lineNum && signal.character === start) {
+                    if (def.line === lineNum && def.character === start) {
                         modifiers.push('declaration');
                     }
-                    if (signal.direction) {
+                    if (def.type === 'port') {
                         modifiers.push('hdlPort');
                     }
                     tokens.push({
                         line: lineNum,
                         character: start,
                         length: word.length,
-                        tokenType: signalTypeToTokenType(signal.type),
+                        tokenType: defTypeToTokenType(def.type),
                         tokenModifiers: modifiers,
                     });
                     continue;
                 }
-
-                const param = paramMap.get(word);
-                if (param) {
-                    const modifiers: string[] = [];
-                    if (param.line === lineNum && param.character === start) {
-                        modifiers.push('declaration');
-                    }
-                    tokens.push({
-                        line: lineNum,
-                        character: start,
-                        length: word.length,
-                        tokenType: 'hdlParameter',
-                        tokenModifiers: modifiers,
-                    });
-                }
-                continue;
             }
-
             i++;
         }
     }
