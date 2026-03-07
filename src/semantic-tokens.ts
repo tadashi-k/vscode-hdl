@@ -1,6 +1,8 @@
 // Semantic token computation for Verilog identifiers.
 // This module is free of VS Code dependencies for testability.
 
+import type { Module } from './database';
+
 export interface SemanticTokenInfo {
     line: number;
     character: number;
@@ -45,23 +47,45 @@ function signalTypeToTokenType(signalType: string): string {
 }
 
 /**
+ * Build module token positions from Module data.
+ * Extracts module declaration names, instantiated module names, and instance names.
+ */
+function buildModuleTokens(modules: Module[]): Map<string, any> {
+    const moduleTokenMap = new Map<string, any>();
+    for (const mod of modules) {
+        // Module declaration name
+        moduleTokenMap.set(`${mod.line}:${mod.character}`, { name: mod.name });
+        // Instance module names and instance names
+        for (const inst of mod.instanceList) {
+            if (inst.moduleNameLine !== undefined && inst.moduleNameCharacter !== undefined) {
+                moduleTokenMap.set(`${inst.moduleNameLine}:${inst.moduleNameCharacter}`, { name: inst.moduleName });
+            }
+            if (inst.instanceName && inst.line !== undefined && inst.character !== undefined) {
+                moduleTokenMap.set(`${inst.line}:${inst.character}`, { name: inst.instanceName });
+            }
+        }
+    }
+    return moduleTokenMap;
+}
+
+/**
  * Compute semantic tokens for a Verilog document.
  *
  * Scans the document text for identifiers and matches them against the
- * provided signal and parameter arrays.  Returns an array of token
- * descriptors sorted by (line, character).
+ * provided module data.  Returns an array of token descriptors sorted by
+ * (line, character).
  *
- * @param text         Full document text
- * @param signals      Signals from SignalDatabase.getSignalsByUri()
- * @param parameters   Parameters from ParameterDatabase.getParametersByUri()
- * @param moduleTokens Module token positions from parser (module declarations, instantiations, instance names)
+ * @param text    Full document text
+ * @param modules Array of Module objects from the parser
  */
 export function computeSemanticTokens(
     text: string,
-    signals: any[],
-    parameters: any[],
-    moduleTokens: any[] = [],
+    modules: Module[],
 ): SemanticTokenInfo[] {
+    // Collect signals and parameters from all modules
+    const signals = modules.flatMap(m => m.signalList);
+    const parameters = modules.flatMap(m => m.parameterList);
+
     // Build fast lookup maps
     const signalMap = new Map<string, any>();
     for (const sig of signals) {
@@ -71,11 +95,8 @@ export function computeSemanticTokens(
     for (const param of parameters) {
         paramMap.set(param.name, param);
     }
-    // Build position-based lookup for module tokens (line:character -> token info)
-    const moduleTokenMap = new Map<string, any>();
-    for (const mt of moduleTokens) {
-        moduleTokenMap.set(`${mt.line}:${mt.character}`, mt);
-    }
+    // Build position-based lookup for module tokens from Module data
+    const moduleTokenMap = buildModuleTokens(modules);
 
     const tokens: SemanticTokenInfo[] = [];
     const lines = text.split('\n');

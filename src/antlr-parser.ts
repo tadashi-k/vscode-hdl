@@ -84,11 +84,8 @@ const DEFAULT_NET_TYPE = 'wire';
 
 class VerilogSymbolVisitor extends VerilogVisitor {
     uri: string;
-    modules: any[];
-    signals: any[];
-    instances: any[];
-    parameters: any[];
-    moduleTokens: any[];
+    modules: Module[];
+    _currentModule: Module | null;
     _moduleSignalRefs: Map<any, any>;
     _signalRefList: any[];
     assignLvalues: any[];
@@ -97,7 +94,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _moduleParamNames: Map<any, any>;
     _moduleParams: Map<any, any>;
     _moduleGenvarNames: Map<any, any>;
-    _currentModule: any;
     _inProcedural: boolean;
     _inContinuousAssign: boolean;
     _currentParamKind: any;
@@ -108,20 +104,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         super();
         this.uri = uri;
         this.modules = [];
-        this.signals = [];
-        this.instances = [];                 // [{moduleName, instanceName, portConnections[], line, character, parentModuleName}]
-        this.parameters = [];                // [{name, uri, line, character, kind, exprText, value, moduleName}]
+        this._currentModule = null;
         // Per-module signal reference tracking (for warnings)
         this._moduleSignalRefs = new Map();   // moduleName -> Set<signalName>
         this._signalRefList = [];             // [{name, moduleName, line, character}]
         this.assignLvalues = [];             // [{name, moduleName, line, character}] continuous assign lvalues
         this.procLvalues = [];               // [{name, moduleName, line, character}] blocking/non-blocking lvalues
         this._instPortConnections = [];      // [{instModuleName, portName, localSignalName, line, character, moduleName}]
-        this.moduleTokens = [];              // [{name, line, character}] positions for hdlModule semantic tokens
         this._moduleParamNames = new Map();  // moduleName -> Set<paramName>
         this._moduleParams = new Map();      // moduleName -> Map<paramName, value> (for cross-param evaluation)
         this._moduleGenvarNames = new Map(); // moduleName -> Set<genvarName>
-        this._currentModule = null;
         this._inProcedural = false;
         this._inContinuousAssign = false;
         this.widthMismatches = [];           // [{lvalName, lvalWidth, exprWidth, line, character, moduleName}]
@@ -230,16 +222,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const info = this._getIdentifierInfo(ctx.module_identifier().identifier());
         if (!info) return null;
 
-        this._currentModule = {
-            name: info.name,
-            uri: this.uri,
-            line: info.line,
-            character: info.character,
-            ports: []
-        };
-
-        // Track module_identifier for hdlModule semantic token
-        this.moduleTokens.push({ name: info.name, line: info.line, character: info.character });
+        const endLine = ctx.stop ? ctx.stop.line - 1 : info.line;
+        this._currentModule = new Module(info.name, this.uri, info.line, info.character, true);
+        this._currentModule.endLine = endLine;
 
         // Initialize per-module tracking for signal warnings
         this._moduleSignalRefs.set(info.name, new Set());
@@ -280,14 +265,14 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const instModuleName = instModInfo.name;
 
             // Track module_identifier in instantiation for hdlModule semantic token
-            this.moduleTokens.push({ name: instModuleName, line: instModInfo.line, character: instModInfo.character });
+            // (position info stored implicitly via Instance fields)
 
             // Collect named port connections for each instance
             const moduleInstances = this._toArray(ctx.module_instance ? ctx.module_instance() : null);
 
             // Record the start index so we can identify which instances were added
             // by THIS module_instantiation node when applying parameter overrides.
-            const instancesBeforeThisInstantiation = this.instances.length;
+            const instancesBeforeThisInstantiation = this._currentModule.instanceList.length;
 
             for (const inst of moduleInstances) {
                 // Get instance name from name_of_instance
@@ -297,9 +282,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     : null;
 
                 // Track instance name for hdlModule semantic token
-                if (instNameInfo) {
-                    this.moduleTokens.push({ name: instNameInfo.name, line: instNameInfo.line, character: instNameInfo.character });
-                }
+                // (position info stored on the instance object itself)
 
                 const portConnections: any[] = [];
                 const namedPortNames: string[] = [];
@@ -405,11 +388,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     }
                 }
 
-                this.instances.push({
+                this._currentModule.instanceList.push({
                     moduleName: instModuleName,
                     instanceName: instNameInfo ? instNameInfo.name : null,
                     line: instNameInfo ? instNameInfo.line : instModInfo.line,
                     character: instNameInfo ? instNameInfo.character : instModInfo.character,
+                    moduleNameLine: instModInfo.line,
+                    moduleNameCharacter: instModInfo.character,
                     portConnections,
                     namedPortNames,
                     parentModuleName: this._currentModule.name,
@@ -434,7 +419,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 if (namedParamAssigns.length > 0) {
                     const overrides: Record<string, any> = {};
                     const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-                    const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+                    const moduleSignals = this._buildModuleSignalsMap();
                     for (const npa of namedParamAssigns) {
                         const paramIdCtx = npa.parameter_identifier ? npa.parameter_identifier() : null;
                         if (!paramIdCtx) continue;
@@ -452,8 +437,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         // module_instantiation node (identified by the start index).
                         // This avoids incorrectly applying overrides to earlier instances
                         // of the same module that use default parameter values.
-                        for (let i = instancesBeforeThisInstantiation; i < this.instances.length; i++) {
-                            this.instances[i].parameterOverrides = overrides;
+                        for (let i = instancesBeforeThisInstantiation; i < this._currentModule.instanceList.length; i++) {
+                            this._currentModule.instanceList[i].parameterOverrides = overrides;
                         }
                     }
                 }
@@ -517,7 +502,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            const moduleSignals = this._buildModuleSignalsMap();
             this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
             // Check bit width mismatch
             this._checkWidthMismatch(ctx.lvalue(), exprCtx, moduleParams, moduleSignals);
@@ -537,7 +522,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            const moduleSignals = this._buildModuleSignalsMap();
             this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
             // Check bit width mismatch
             this._checkWidthMismatch(ctx.lvalue(), exprCtx, moduleParams, moduleSignals);
@@ -557,7 +542,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            const moduleSignals = this._buildModuleSignalsMap();
             this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
             this._checkWidthMismatch(ctx.lvalue(), exprCtx, moduleParams, moduleSignals);
         }
@@ -571,7 +556,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            const moduleSignals = this._buildModuleSignalsMap();
             this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
         }
         this.visitChildren(ctx);
@@ -584,7 +569,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprs = ctx.expression ? ctx.expression() : null;
         if (exprs) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            const moduleSignals = this._buildModuleSignalsMap();
             const exprsArr = Array.isArray(exprs) ? exprs : [exprs];
             // For WHILE and FOR loops the single expression is the boolean condition.
             // REPEAT uses its expression as a count (not a boolean), so skip width check.
@@ -615,7 +600,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
             const moduleParams = this._moduleParams.get(this._currentModule.name) || new Map();
-            const moduleSignals = this._buildModuleSignalsMap(this._currentModule.name);
+            const moduleSignals = this._buildModuleSignalsMap();
             const exprVal = this._evaluateExpression(exprCtx, moduleParams, moduleSignals);
             if (exprVal && exprVal.width !== null && exprVal.width > 1) {
                 const start = exprCtx.start;
@@ -691,7 +676,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
                     // The kind ('parameter' or 'localparam') is set by the calling context;
                     // default here is 'parameter' and visitLocal_parameter_declaration overrides it.
-                    this.parameters.push({
+                    const param = {
                         name: info.name,
                         uri: this.uri,
                         line: info.line,
@@ -700,7 +685,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         exprText,
                         value,
                         moduleName: this._currentModule.name
-                    });
+                    };
+                    this._currentModule.parameterList.push(param);
+                    this._currentModule.parameterMap.set(param.name, param);
                 }
             }
         }
@@ -777,12 +764,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return this._evaluateExpression(exprCtxToUse, paramMap);
     }
 
-    // Helper: build a map of signal name -> signal object for a given module
-    _buildModuleSignalsMap(moduleName: string): Map<string, any> {
+    // Helper: build a map of signal name -> signal object for the current module
+    _buildModuleSignalsMap(): Map<string, any> {
+        if (!this._currentModule) return new Map();
         return new Map(
-            this.signals
-                .filter(s => s.moduleName === moduleName)
-                .map(s => [s.name, s])
+            this._currentModule.signalList
+                .map((s: any) => [s.name, s])
         );
     }
 
@@ -1217,7 +1204,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         }
 
         this._currentModule.ports.push(signal);
-        this.signals.push(signal);
+        this._currentModule.signalList.push(signal);
+        this._currentModule.signalMap.set(signal.name, signal);
         return null;
     }
 
@@ -1269,7 +1257,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             }
 
             this._currentModule.ports.push(signal);
-            this.signals.push(signal);
+            this._currentModule.signalList.push(signal);
+            this._currentModule.signalMap.set(signal.name, signal);
         }
     }
 
@@ -1291,7 +1280,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const info = this._getIdentifierInfo(netIdCtx.identifier());
             if (!info) continue;
 
-            this.signals.push({
+            const signal: any = {
                 name: info.name,
                 uri: this.uri,
                 line: info.line,
@@ -1300,7 +1289,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 type,
                 bitWidth,
                 moduleName: this._currentModule.name
-            });
+            };
+            this._currentModule.signalList.push(signal);
+            this._currentModule.signalMap.set(signal.name, signal);
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(netIdCtx)) {
@@ -1335,7 +1326,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             // (array dimension) in the list_of_register_identifiers context.
             const isMemory = this._registerIdentifierHasArrayRange(regIdsCtx, regIdCtx);
 
-            this.signals.push({
+            const signal: any = {
                 name: info.name,
                 uri: this.uri,
                 line: info.line,
@@ -1345,7 +1336,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 bitWidth,
                 isMemory,
                 moduleName: this._currentModule.name
-            });
+            };
+            this._currentModule.signalList.push(signal);
+            this._currentModule.signalMap.set(signal.name, signal);
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(regIdCtx)) {
@@ -1375,7 +1368,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const info = this._getIdentifierInfo(intIdCtx.identifier());
             if (!info) continue;
 
-            this.signals.push({
+            const signal: any = {
                 name: info.name,
                 uri: this.uri,
                 line: info.line,
@@ -1384,7 +1377,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 type: 'integer',
                 bitWidth: '32',
                 moduleName: this._currentModule.name
-            });
+            };
+            this._currentModule.signalList.push(signal);
+            this._currentModule.signalMap.set(signal.name, signal);
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(intIdCtx)) {
@@ -1857,7 +1852,7 @@ class AntlrVerilogParser {
     /**
      * Parse Verilog document and extract module symbols.
      * Returns an array of Module objects populated with signals, parameters,
-     * instances, ports, and moduleTokens.
+     * instances, and ports.
      *
      * As a side effect, this.errorListener is populated with syntax errors
      * and this._lastVisitor is stored for use by generateErrors.
@@ -1929,54 +1924,14 @@ class AntlrVerilogParser {
             this._lastVisitor = visitor;
         }
 
-        // Build Module class instances from the visitor data
-        const moduleObjects: Module[] = [];
-        if (visitor) {
-            const moduleTokens = visitor.moduleTokens;
-
-            // Group signals, parameters, instances by module name
-            const signalsByModule = new Map<string, any[]>();
-            for (const sig of visitor.signals) {
-                if (!signalsByModule.has(sig.moduleName)) signalsByModule.set(sig.moduleName, []);
-                signalsByModule.get(sig.moduleName)!.push(sig);
-            }
-            const paramsByModule = new Map<string, any[]>();
-            for (const param of visitor.parameters) {
-                if (!paramsByModule.has(param.moduleName)) paramsByModule.set(param.moduleName, []);
-                paramsByModule.get(param.moduleName)!.push(param);
-            }
-            const instancesByModule = new Map<string, any[]>();
-            for (const inst of visitor.instances) {
-                if (!instancesByModule.has(inst.parentModuleName)) instancesByModule.set(inst.parentModuleName, []);
-                instancesByModule.get(inst.parentModuleName)!.push(inst);
-            }
-
-            for (const parsedMod of visitor.modules) {
-                const mod = new Module(parsedMod.name, uri, parsedMod.line, parsedMod.character, true);
-                mod.ports = parsedMod.ports || [];
-
-                mod.signalList = signalsByModule.get(parsedMod.name) || [];
-                for (const sig of mod.signalList) {
-                    mod.signalMap.set(sig.name, sig);
+        // The visitor now builds fully-populated Module objects directly.
+        // Populate instanceMap from instanceList for each module.
+        const moduleObjects: Module[] = visitor ? visitor.modules : [];
+        for (const mod of moduleObjects) {
+            for (const inst of mod.instanceList) {
+                if (inst.instanceName) {
+                    mod.instanceMap.set(inst.instanceName, inst);
                 }
-
-                mod.parameterList = paramsByModule.get(parsedMod.name) || [];
-                for (const param of mod.parameterList) {
-                    mod.parameterMap.set(param.name, param);
-                }
-
-                mod.instanceList = instancesByModule.get(parsedMod.name) || [];
-                for (const inst of mod.instanceList) {
-                    if (inst.instanceName) {
-                        mod.instanceMap.set(inst.instanceName, inst);
-                    }
-                }
-
-                // Store all module tokens for the file on each module
-                // (tokens are per-file and include all module/instance names)
-                mod.moduleTokens = moduleTokens;
-
-                moduleObjects.push(mod);
             }
         }
 
@@ -2010,47 +1965,56 @@ class AntlrVerilogParser {
      * checks use the correct resolved values.
      */
     _enrichInstanceParamOverrides(visitor: VerilogSymbolVisitor) {
-        for (const inst of visitor.instances) {
-            if (!inst.parameterOverrides) continue;
-            // Only consider 'parameter' declarations for the instantiated module.
-            const instModParams = visitor.parameters.filter(
-                (p: any) => p.moduleName === inst.moduleName && p.kind === 'parameter'
-            );
-            if (instModParams.length === 0) continue;
+        // Build a lookup from module name to its parameter list
+        const paramsByModuleName = new Map<string, any[]>();
+        for (const mod of visitor.modules) {
+            paramsByModuleName.set(mod.name, mod.parameterList);
+        }
 
-            // Build a paramMap with default values first.
-            const paramMap = new Map<string, EvalValue>();
-            for (const p of instModParams) {
-                if (p.value !== null && p.value !== undefined) {
-                    paramMap.set(p.name, { value: p.value, width: null });
-                }
-            }
-            // Apply the explicit overrides.
-            const overriddenNames = new Set(Object.keys(inst.parameterOverrides));
-            for (const [name, value] of Object.entries(inst.parameterOverrides)) {
-                paramMap.set(name, { value: value as number, width: null });
-            }
+        for (const mod of visitor.modules) {
+            for (const inst of mod.instanceList) {
+                if (!inst.parameterOverrides) continue;
+                // Only consider 'parameter' declarations for the instantiated module.
+                const allInstModParams = paramsByModuleName.get(inst.moduleName) || [];
+                const instModParams = allInstModParams.filter(
+                    (p: any) => p.kind === 'parameter'
+                );
+                if (instModParams.length === 0) continue;
 
-            // Iteratively re-evaluate non-overridden params to fixed-point.
-            const enriched: Record<string, number> = { ...(inst.parameterOverrides as Record<string, number>) };
-            let changed = true;
-            while (changed) {
-                changed = false;
+                // Build a paramMap with default values first.
+                const paramMap = new Map<string, EvalValue>();
                 for (const p of instModParams) {
-                    if (overriddenNames.has(p.name)) continue; // explicitly set — leave alone
-                    if (!p.exprText) continue;
-                    const newVal = AntlrVerilogParser._evalSimpleExpr(p.exprText, paramMap);
-                    if (newVal !== null) {
-                        const currentVal = paramMap.get(p.name)?.value ?? null;
-                        if (newVal !== currentVal) {
-                            paramMap.set(p.name, { value: newVal, width: null });
-                            enriched[p.name] = newVal;
-                            changed = true;
+                    if (p.value !== null && p.value !== undefined) {
+                        paramMap.set(p.name, { value: p.value, width: null });
+                    }
+                }
+                // Apply the explicit overrides.
+                const overriddenNames = new Set(Object.keys(inst.parameterOverrides));
+                for (const [name, value] of Object.entries(inst.parameterOverrides)) {
+                    paramMap.set(name, { value: value as number, width: null });
+                }
+
+                // Iteratively re-evaluate non-overridden params to fixed-point.
+                const enriched: Record<string, number> = { ...(inst.parameterOverrides as Record<string, number>) };
+                let changed = true;
+                while (changed) {
+                    changed = false;
+                    for (const p of instModParams) {
+                        if (overriddenNames.has(p.name)) continue; // explicitly set — leave alone
+                        if (!p.exprText) continue;
+                        const newVal = AntlrVerilogParser._evalSimpleExpr(p.exprText, paramMap);
+                        if (newVal !== null) {
+                            const currentVal = paramMap.get(p.name)?.value ?? null;
+                            if (newVal !== currentVal) {
+                                paramMap.set(p.name, { value: newVal, width: null });
+                                enriched[p.name] = newVal;
+                                changed = true;
+                            }
                         }
                     }
                 }
+                inst.parameterOverrides = enriched;
             }
-            inst.parameterOverrides = enriched;
         }
     }
 
@@ -2246,7 +2210,7 @@ class AntlrVerilogParser {
             // Warning 8: missing port in named port connection
             // When using named port connections, if some ports of the instantiated module
             // are not listed at all (not even as empty .port()), warn about them.
-            for (const inst of visitor.instances.filter((i: any) => i.parentModuleName === moduleName)) {
+            for (const inst of module.instanceList) {
                 const instModPorts = modulePortMap.get(inst.moduleName);
                 if (!instModPorts) continue;
                 if (!inst.namedPortNames || inst.namedPortNames.length === 0) continue;
@@ -2271,7 +2235,7 @@ class AntlrVerilogParser {
 
             // Warning 9: module name of instantiation not found in module database
             if (moduleDatabase) {
-                for (const inst of visitor.instances.filter((i: any) => i.parentModuleName === moduleName)) {
+                for (const inst of module.instanceList) {
                     if (!modulePortMap.has(inst.moduleName)) {
                         warnings.push({
                             line: inst.line,
@@ -2289,7 +2253,7 @@ class AntlrVerilogParser {
             // Build a lookup of connection position -> instance for parameter override access
             const connKey = (modName: string, line: number, char: number) => `${modName}:${line}:${char}`;
             const instanceLookup = new Map<string, any>();
-            for (const inst of visitor.instances.filter((i: any) => i.parentModuleName === moduleName)) {
+            for (const inst of module.instanceList) {
                 for (const pc of inst.portConnections) {
                     instanceLookup.set(connKey(inst.moduleName, pc.line, pc.character), inst);
                 }
@@ -2303,9 +2267,10 @@ class AntlrVerilogParser {
                 let portWidth: number | null = null;
                 const inst = instanceLookup.get(connKey(conn.instModuleName, conn.line, conn.character));
                 if (inst && inst.parameterOverrides && instPort.bitWidthRaw) {
-                    // Use the visitor's parsed parameters as defaults for the instantiated module,
+                    // Use the locally-parsed parameters as defaults for the instantiated module,
                     // then fall back to the moduleDatabase for cross-file modules
-                    let instModParams = visitor.parameters.filter((p: any) => p.moduleName === conn.instModuleName);
+                    const localInstMod = modules.find(m => m.name === conn.instModuleName);
+                    let instModParams = localInstMod ? localInstMod.parameterList : [];
                     if (instModParams.length === 0 && moduleDatabase) {
                         const dbMod = moduleDatabase.getModule(conn.instModuleName);
                         if (dbMod) instModParams = dbMod.parameterList;
