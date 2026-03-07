@@ -48,22 +48,13 @@ function signalTypeToTokenType(signalType: string): string {
 
 /**
  * Build module token positions from Module data.
- * Extracts module declaration names, instantiated module names, and instance names.
+ * Extracts module declaration names.
  */
 function buildModuleTokens(modules: Module[]): Map<string, any> {
     const moduleTokenMap = new Map<string, any>();
     for (const mod of modules) {
         // Module declaration name
         moduleTokenMap.set(`${mod.line}:${mod.character}`, { name: mod.name });
-        // Instance module names and instance names
-        for (const inst of mod.instanceList) {
-            if (inst.moduleNameLine !== undefined && inst.moduleNameCharacter !== undefined) {
-                moduleTokenMap.set(`${inst.moduleNameLine}:${inst.moduleNameCharacter}`, { name: inst.moduleName });
-            }
-            if (inst.instanceName && inst.line !== undefined && inst.character !== undefined) {
-                moduleTokenMap.set(`${inst.line}:${inst.character}`, { name: inst.instanceName });
-            }
-        }
     }
     return moduleTokenMap;
 }
@@ -82,15 +73,11 @@ export function computeSemanticTokens(
     text: string,
     modules: Module[],
 ): SemanticTokenInfo[] {
-    // Collect signals and parameters from all modules
-    const signals = modules.flatMap(m => m.signalList);
+    // Collect parameters from all modules (signals are tracked internally by the parser)
     const parameters = modules.flatMap(m => m.parameterList);
 
     // Build fast lookup maps
     const signalMap = new Map<string, any>();
-    for (const sig of signals) {
-        signalMap.set(sig.name, sig);
-    }
     const paramMap = new Map<string, any>();
     for (const param of parameters) {
         paramMap.set(param.name, param);
