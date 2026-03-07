@@ -88,18 +88,24 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
     }
 
     const uri = document.uri.toString();
-    const modules = verilogParser.parseModules(document, fsFileReader);
 
     // Remove existing entries for this file before adding fresh ones
     moduleDatabase.removeModulesFromFile(uri);
 
-    // parseModules returns Module objects with ports and parameters; add them directly
-    for (const mod of modules) {
-        moduleDatabase.addModule(mod);
+    verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
+}
+
+function updateDocumentModules(document: vscode.TextDocument) {
+    if (document.languageId !== 'verilog') {
+        return;
     }
 
-    const parameters = modules.reduce((acc, m) => acc + m.parameterList.length, 0);
-    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${parameters} parameters found`);
+    const uri = document.uri.toString();
+
+    // Remove existing entries for this file before adding fresh ones
+    moduleDatabase.removeModulesFromFile(uri);
+
+    verilogParser.parseModules(document, moduleDatabase, fsFileReader);
 }
 
 /**
@@ -148,8 +154,9 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
  */
 class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
     provideDocumentSymbols(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.DocumentSymbol[] {
-        const modules = verilogParser.parseModules(document, fsFileReader);
+        verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
 
+        const modules = moduleDatabase.getModulesByUri(document.uri.toString());
         return modules.map((module: any) => {
             const line = document.lineAt(module.line);
             const range = new vscode.Range(
@@ -237,7 +244,7 @@ async function scanWorkspaceForModules() {
             try {
                 const depUri = vscode.Uri.parse(mod.uri);
                 const document = await vscode.workspace.openTextDocument(depUri);
-                updateDocumentSymbols(document);
+                updateDocumentModules(document); // simple ANTLR parse to populate ports/parameters for go-to-definition and diagnostics
                 openUris.add(mod.uri);
             } catch (error) {
                 console.error(`Error parsing dependency ${mod.uri}:`, error);
@@ -321,9 +328,9 @@ function updateDiagnostics(document: vscode.TextDocument, diagnosticCollection: 
         return;
     }
 
-    const errors = verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
+    verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
+    const errors = verilogParser.getDiagnostics(moduleDatabase);
     const diagnostics: vscode.Diagnostic[] = [];
-
     for (const error of errors) {
         const range = new vscode.Range(
             new vscode.Position(error.line, error.character),
@@ -392,6 +399,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+            verilogParser.dirty(); // Mark parser state as dirty to allow re-parsing of unchanged files
             updateDocumentSymbols(event.document);
             ensureInstanceDependenciesParsed(event.document);
             updateDiagnostics(event.document, diagnosticCollection);

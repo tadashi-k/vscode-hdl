@@ -1861,10 +1861,15 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 class AntlrVerilogParser {
     errorListener: VerilogErrorListener;
     _lastVisitor: VerilogSymbolVisitor | null;
+    _dirtry: boolean = false;
 
     constructor() {
         this.errorListener = new VerilogErrorListener();
         this._lastVisitor = null;
+    }
+
+    dirty() {
+        this._dirtry = true;
     }
 
     /**
@@ -1899,9 +1904,10 @@ class AntlrVerilogParser {
      * At first it strips document text after first 'wire|reg|integer|genvar' occurence, and add 'endmodule'.
      * The it extracts module definitions.
      * @param {vscode.TextDocument} document
+     * @param {ModuleDatabase} moduleDatabase - module database to update extract modules
      * @param {Function} [fileReader] - Optional file reader for `include resolution
      */
-    parseModules(document: any, fileReader: ((resolvedPath: string) => string | null) | null = null): Module[] {
+    parseModules(document: any, moduleDatabase: ModuleDatabase, fileReader: ((resolvedPath: string) => string | null) | null = null): void {
         const uri = document.uri.toString();
         let text: string = document.getText();
 
@@ -1926,7 +1932,9 @@ class AntlrVerilogParser {
         text = preprocessVerilog(text, basePath, fileReader);
 
         const visitor = this._parse(text, uri, null);
-        return visitor.modules;
+        for (const mod of visitor.modules) {
+            moduleDatabase.addModule(mod);
+        }
     }
 
     /**
@@ -1936,10 +1944,15 @@ class AntlrVerilogParser {
      * @param {vscode.TextDocument} document
      * @param {ModuleDatabase} [moduleDatabase] - module database for confirm port connections of instances
      * @param {Function} [fileReader] - Optional file reader for `include resolution
-     * @returns {any[]} Array of error/warning diagnostic objects
      */
-    parseSymbols(document: any, moduleDatabase: ModuleDatabase | null = null, fileReader: ((resolvedPath: string) => string | null) | null = null): any[] {
+    parseSymbols(document: any, moduleDatabase: ModuleDatabase | null = null, fileReader: ((resolvedPath: string) => string | null) | null = null): void {
         const uri = document.uri.toString();
+        if (this._lastVisitor && this._lastVisitor.uri === uri && this._dirtry === false) {
+            // If the same file is parsed again without being marked dirty
+            return;
+        }
+        this._dirtry = false;
+
         let text: string = document.getText();
 
         // Determine base path for `include resolution
@@ -1954,14 +1967,19 @@ class AntlrVerilogParser {
         text = preprocessVerilog(text, basePath, fileReader);
 
         const visitor = this._parse(text, uri, moduleDatabase);
+        for (const mod of visitor.modules) {
+            moduleDatabase.addModule(mod);
+        }
+    }
 
+    getDiagnostics(moduleDatabase: ModuleDatabase) : any[] {
         // Collect ANTLR syntax errors
         const syntaxErrors = this.errorListener.getErrors();
 
         // Generate signal-usage warnings
-        visitor.generateWarnings(moduleDatabase);
+        this._lastVisitor.generateWarnings(moduleDatabase);
 
-        return [...syntaxErrors, ...visitor.warnings];
+        return [...syntaxErrors, ...this._lastVisitor.warnings];
     }
 
 }
