@@ -111,17 +111,8 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
  */
 function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
     if (document.languageId !== 'verilog') return;
-    // Instance data is tracked internally by the parser visitor.
-    // Get the instances recorded in the last parse of this document.
-    const visitor = verilogParser._lastVisitor;
-    if (!visitor) return;
-
-    const instanced = new Set<string>();
-    for (const [, instanceList] of visitor._moduleInstanceLists) {
-        for (const inst of instanceList) {
-            instanced.add(inst.moduleName);
-        }
-    }
+    // Get the set of instantiated module names from the last parse of this document
+    const instanced = verilogParser.getLastInstancedModuleNames();
 
     const uri = document.uri.toString();
     for (const moduleName of instanced) {
@@ -222,14 +213,7 @@ async function scanWorkspaceForModules() {
 
     // --- Step 4: resolve instances from open files and ANTLR-parse their deps ---
     // Collect instantiated module names from the last-parsed visitors
-    const neededModuleNames = new Set<string>();
-    if (verilogParser._lastVisitor) {
-        for (const [, instanceList] of verilogParser._lastVisitor._moduleInstanceLists) {
-            for (const inst of instanceList) {
-                neededModuleNames.add(inst.moduleName);
-            }
-        }
-    }
+    const neededModuleNames = verilogParser.getLastInstancedModuleNames();
 
     for (const moduleName of neededModuleNames) {
         const mod = moduleDatabase.getModule(moduleName);

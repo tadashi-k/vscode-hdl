@@ -1844,12 +1844,16 @@ class AntlrVerilogParser {
                 const evalValue = paramMap instanceof Map ? paramMap.get(name) : paramMap[name];
                 const val = evalValue && typeof evalValue === 'object' ? evalValue.value : evalValue;
                 if (val !== null && val !== undefined && typeof val === 'number') {
-                    text = text.replace(new RegExp(`\\b${name}\\b`, 'g'), String(val));
+                    // Escape regex metacharacters in the parameter name before building the RegExp
+                    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    text = text.replace(new RegExp(`\\b${escapedName}\\b`, 'g'), String(val));
                 }
             }
         }
         // Remove any remaining identifiers (unresolved params) – bail out
         if (/[a-zA-Z_]/.test(text)) return null;
+        // Only allow digits, arithmetic/bitwise/comparison operators, and parentheses for safety
+        if (!/^[\d\s+\-*/<>=|&^~!?:%()]+$/.test(text)) return null;
         try {
             // eslint-disable-next-line no-new-func
             const result = Function('"use strict"; return (' + text + ')')();
@@ -1966,6 +1970,22 @@ class AntlrVerilogParser {
         visitor.generateWarnings(moduleDatabase);
 
         return [...syntaxErrors, ...visitor.warnings];
+    }
+
+    /**
+     * Return the set of module names that were instantiated during the last
+     * parse call (parseModules or parseSymbols).  Used by the extension to
+     * find which dependency files need to be ANTLR-parsed for port info.
+     */
+    getLastInstancedModuleNames(): Set<string> {
+        const result = new Set<string>();
+        if (!this._lastVisitor) return result;
+        for (const [, instanceList] of this._lastVisitor._moduleInstanceLists) {
+            for (const inst of instanceList) {
+                result.add(inst.moduleName);
+            }
+        }
+        return result;
     }
 
 }
