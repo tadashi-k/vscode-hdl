@@ -36,13 +36,11 @@ function runTests() {
     let totalTests = 0;
     let passedTests = 0;
 
-    // Helper: parse counter.v and return signals/parameters
+    // Helper: parse counter.v and return modules
     const counterPath = path.join(__dirname, '../contents', 'counter.v');
     const counterContent = fs.readFileSync(counterPath, 'utf8');
     const counterDoc = new MockTextDocument(counterContent, counterPath);
     const counterResult = parser.parseSymbols(counterDoc);
-    const counterSignals = counterResult.flatMap((m: any) => m.signalList);
-    const counterParams = counterResult.flatMap((m: any) => m.parameterList);
 
     // Helper: find a 0-based line number by matching line content
     function findLine(text: string, pattern: string): number {
@@ -58,7 +56,7 @@ function runTests() {
         totalTests++;
         console.log('\nTest 1: reg a, b; - both identifiers get hdlReg token at declaration');
 
-        const tokens = computeSemanticTokens(counterContent, counterSignals, counterParams);
+        const tokens = computeSemanticTokens(counterContent, counterResult);
         const declLine = findLine(counterContent, 'reg a, b;');
         const lines = counterContent.split('\n');
         const aChar = lines[declLine].indexOf('a', lines[declLine].indexOf('reg') + 3);
@@ -88,7 +86,7 @@ function runTests() {
         totalTests++;
         console.log('\nTest 2: {a,b} usage - same hdlReg token type (no declaration modifier)');
 
-        const tokens = computeSemanticTokens(counterContent, counterSignals, counterParams);
+        const tokens = computeSemanticTokens(counterContent, counterResult);
         const usageLine = findLine(counterContent, '{a,b}');
         const lines = counterContent.split('\n');
 
@@ -116,7 +114,7 @@ function runTests() {
         totalTests++;
         console.log('\nTest 3: wire signals get hdlWire token');
 
-        const tokens = computeSemanticTokens(counterContent, counterSignals, counterParams);
+        const tokens = computeSemanticTokens(counterContent, counterResult);
         const lines = counterContent.split('\n');
         const enableTokens = tokens.filter(t => {
             return lines[t.line].substring(t.character, t.character + t.length) === 'enable';
@@ -138,7 +136,7 @@ function runTests() {
         totalTests++;
         console.log('\nTest 4: integer signals get hdlInteger token');
 
-        const tokens = computeSemanticTokens(counterContent, counterSignals, counterParams);
+        const tokens = computeSemanticTokens(counterContent, counterResult);
         const lines = counterContent.split('\n');
         const cntTokens = tokens.filter(t => {
             return lines[t.line].substring(t.character, t.character + t.length) === 'cnt';
@@ -160,7 +158,7 @@ function runTests() {
         totalTests++;
         console.log('\nTest 5: parameters get hdlParameter token');
 
-        const tokens = computeSemanticTokens(counterContent, counterSignals, counterParams);
+        const tokens = computeSemanticTokens(counterContent, counterResult);
         const lines = counterContent.split('\n');
         const widthTokens = tokens.filter(t => {
             return lines[t.line].substring(t.character, t.character + t.length) === 'WIDTH';
@@ -190,10 +188,8 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_comments.v');
         const _modules_doc = parser.parseSymbols(doc);
-        const signals = _modules_doc.flatMap((m: any) => m.signalList);
-        const parameters = _modules_doc.flatMap((m: any) => m.parameterList);
 
-        const tokens = computeSemanticTokens(code, signals, parameters);
+        const tokens = computeSemanticTokens(code, _modules_doc);
         // Line 2 (0-based) is the comment line
         const commentLineTokens = tokens.filter(t => t.line === 2);
 
@@ -213,7 +209,7 @@ endmodule
         totalTests++;
         console.log('\nTest 7: port signals get hdlPort modifier');
 
-        const tokens = computeSemanticTokens(counterContent, counterSignals, counterParams);
+        const tokens = computeSemanticTokens(counterContent, counterResult);
         const lines = counterContent.split('\n');
         const clkTokens = tokens.filter(t => {
             return lines[t.line].substring(t.character, t.character + t.length) === 'clk';
@@ -235,7 +231,7 @@ endmodule
         totalTests++;
         console.log('\nTest 8: internal signals do not have hdlPort modifier');
 
-        const tokens = computeSemanticTokens(counterContent, counterSignals, counterParams);
+        const tokens = computeSemanticTokens(counterContent, counterResult);
         const lines = counterContent.split('\n');
         const aTokens = tokens.filter(t => {
             return lines[t.line].substring(t.character, t.character + t.length) === 'a' && t.length === 1;
@@ -266,10 +262,8 @@ endmodule
 `;
         const doc = new MockTextDocument(code, 'test_block_comment.v');
         const _modules_doc = parser.parseSymbols(doc);
-        const signals = _modules_doc.flatMap((m: any) => m.signalList);
-        const parameters = _modules_doc.flatMap((m: any) => m.parameterList);
 
-        const tokens = computeSemanticTokens(code, signals, parameters);
+        const tokens = computeSemanticTokens(code, _modules_doc);
         // Lines 2-3 are the block comment
         const commentTokens = tokens.filter(t => t.line === 2 || t.line === 3);
 
@@ -299,7 +293,7 @@ endmodule
         const doc = new MockTextDocument(code, 'test_module_decl.v');
         const result = parser.parseSymbols(doc);
 
-        const tokens = computeSemanticTokens(code, result.flatMap((m: any) => m.signalList), result.flatMap((m: any) => m.parameterList), result.length > 0 ? result[0].moduleTokens : []);
+        const tokens = computeSemanticTokens(code, result);
         const lines = code.split('\n');
         const modLine = findLine(code, 'module my_counter');
         const modChar = lines[modLine].indexOf('my_counter');
@@ -334,7 +328,7 @@ endmodule
         const doc = new MockTextDocument(code, 'test_module_inst.v');
         const result = parser.parseSymbols(doc);
 
-        const tokens = computeSemanticTokens(code, result.flatMap((m: any) => m.signalList), result.flatMap((m: any) => m.parameterList), result.length > 0 ? result[0].moduleTokens : []);
+        const tokens = computeSemanticTokens(code, result);
         const lines = code.split('\n');
         const instLine = findLine(code, 'child u_child');
         const childChar = lines[instLine].indexOf('child');

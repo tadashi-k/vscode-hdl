@@ -73,28 +73,41 @@ export class Instance {
 export class Module {
     name: string;
     uri: string;
+    line: number; // line of the module name identifier (0-based)
+    character: number; // column of the module name identifier (0-based)
     startLine: number; // start line of the module declaration (line number of the "module" keyword)
     endLine: number; // end line of the module declaration (line number of the "endmodule" keyword)
     scanned: boolean;
 
     /** Ports in declaration order (populated by the ANTLR parser, empty before scan). */
-    ports: Signal[] = [];
+    ports: any[] = [];
+
+    /** Signals as an ordered list. */
+    signalList: any[] = [];
 
     /** Signals grouped by name for fast lookup. */
-    signalMap: Map<string, Signal> = new Map();
+    signalMap: Map<string, any> = new Map();
+
+    /** Parameters as an ordered list. */
+    parameterList: any[] = [];
 
     /** Parameters grouped by name. */
-    parameterMap: Map<string, Parameter> = new Map();
+    parameterMap: Map<string, any> = new Map();
+
+    /** Module instantiations as an ordered list. */
+    instanceList: any[] = [];
 
     /** Module instantiations keyed by instance name. */
-    instanceList: Instance[] = [];
+    instanceMap: Map<string, any> = new Map();
 
-    constructor(name: string, uri: string, startLine: number, endLine: number, scanned = false) {
+    constructor(name: string, uri: string, line: number, character: number, scanned = false) {
         this.name = name;
         this.uri = uri;
-        this.startLine = startLine;
-        this.endLine = endLine;
-        this.scanned = false;
+        this.line = line;
+        this.character = character;
+        this.startLine = line;
+        this.endLine = line;
+        this.scanned = scanned;
     }
 }
 
@@ -152,12 +165,43 @@ export class ModuleDatabase {
     }
 
     getModuleByUriPosition(uri: string, line: number): Module | null {
-        let module: Module | null = null;
         for (const mod of this.getModulesByUri(uri)) {
             if (mod.startLine <= line && line <= mod.endLine) {
-                return module;
+                return mod;
             }
         }
         return null;
+    }
+
+    /** Return all signals from modules in the given file URI. */
+    getSignalsByUri(uri: string): any[] {
+        return this.getModulesByUri(uri).flatMap(m => m.signalList);
+    }
+
+    /** Return all parameters from modules in the given file URI. */
+    getParametersByUri(uri: string): any[] {
+        return this.getModulesByUri(uri).flatMap(m => m.parameterList);
+    }
+
+    /** Return all instances from modules in the given file URI. */
+    getInstancesByUri(uri: string): any[] {
+        return this.getModulesByUri(uri).flatMap(m => m.instanceList);
+    }
+
+    /** Return all signals from all modules. */
+    getAllSignals(): any[] {
+        return this.getAllModules().flatMap(m => m.signalList);
+    }
+
+    /** Return signals for a specific module by name. */
+    getSignals(moduleName: string): any[] {
+        const mod = this.moduleMap.get(moduleName);
+        return mod ? mod.signalList : [];
+    }
+
+    /** Return parameters for a specific module by name. */
+    getParameters(moduleName: string): any[] {
+        const mod = this.moduleMap.get(moduleName);
+        return mod ? mod.parameterList : [];
     }
 }

@@ -318,10 +318,8 @@ class VerilogSemanticTokensProvider implements vscode.DocumentSemanticTokensProv
 
     provideDocumentSemanticTokens(document: vscode.TextDocument): vscode.SemanticTokens {
         const uri = document.uri.toString();
-        const signals = moduleDatabase.getSignalsByUri(uri);
-        const params = moduleDatabase.getParametersByUri(uri);
-        const modTokens = moduleDatabase.getModuleTokensByUri(uri);
-        const tokenData = computeSemanticTokens(document.getText(), signals, params, modTokens);
+        const modules = moduleDatabase.getModulesByUri(uri);
+        const tokenData = computeSemanticTokens(document.getText(), modules);
 
         const builder = new vscode.SemanticTokensBuilder(semanticTokensLegend);
         for (const t of tokenData) {
