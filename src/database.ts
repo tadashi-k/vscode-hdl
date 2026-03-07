@@ -9,25 +9,17 @@
  */
 
 export class BitRange {
-    rawMsb: string;
-    rawLsb: string;
-    msb: number | null;
+    exprMsb: string;
+    exprLsb: string;
+    msb: number | null; // null if the expression has paramerters, e.g. [WIDTH-1:0]
     lsb: number | null;
-
-    constructor(rawMsb: string, rawLsb: string) {
-        this.rawMsb = rawMsb;
-        this.rawLsb = rawLsb;
-        this.msb = null;
-        this.lsb = null;
-    }
 }
 
-export class Signal {
+export class Port {
     name: string;
     line: number;
     character: number;
-    type: 'wire' | 'reg' | 'integer' | 'real';
-    direction: 'input' | 'output' | 'inout' | null; // null for internal signals
+    direction: 'input' | 'output' | 'inout';
     bitRange: BitRange | null; // treated as 1-bit if null
 }
 
@@ -35,32 +27,9 @@ export class Parameter {
     name: string;
     line: number;
     character: number;
-    kind: 'parameter' | 'localparam';
     bitRange: BitRange | null; // treated as [31:0] if null
-    rawValue: string;
+    exprText: string;
     value: number | null;
-}
-
-export class Instance {
-    moduleName: string;
-    instanceName: string;
-    startLine: number; // start line of the instance declaration (line number of the module instantiation)
-    endLine: number; // end line of the instance declaration (line number of the last line of the module instantiation)
-    paramOrderedConnections: string[] | null = null; // parsed parameter value assignment in order, e.g. ["8", "16"] for parameter_value_assignment #(8, 16)
-    paramNamedConnections: Map<string, string> | null = null; // parsed parameter value assignment, e.g. {"WIDTH": "8", "DEPTH": "16"}
-    signalOrderedConnections: string[] | null = null; // parsed signal connection in order, e.g. ["data_in", "data_out"] for ordered port connection .e.g. module_instance data_in(data_in, data_out)
-    signalNamedConnections: Map<string, string> | null = null; // parsed signal connection, e.g. {"data_in": "data_in", "data_out": "data_out"} for named port connection .e.g. module_instance data_in(.data_in(data_in), .data_out(data_out))
-
-    constructor(mouleName: string, instanceName: string, startLine: number, endLine: number) {
-        this.moduleName = mouleName;
-        this.instanceName = instanceName;
-        this.startLine = startLine;
-        this.endLine = endLine;
-    }
-
-    hasLine(line: number): boolean {
-        return this.startLine <= line && line <= this.endLine;
-    }
 }
 
 /**
@@ -75,38 +44,21 @@ export class Module {
     uri: string;
     line: number; // line of the module name identifier (0-based)
     character: number; // column of the module name identifier (0-based)
-    startLine: number; // start line of the module declaration (line number of the "module" keyword)
-    endLine: number; // end line of the module declaration (line number of the "endmodule" keyword)
+    endLine: number; // line of the module end (0-based)
     scanned: boolean;
 
     /** Ports in declaration order (populated by the ANTLR parser, empty before scan). */
-    ports: any[] = [];
-
-    /** Signals as an ordered list. */
-    signalList: any[] = [];
-
-    /** Signals grouped by name for fast lookup. */
-    signalMap: Map<string, any> = new Map();
+    ports: Port[] = [];
 
     /** Parameters as an ordered list. */
     parameterList: any[] = [];
 
-    /** Parameters grouped by name. */
-    parameterMap: Map<string, any> = new Map();
-
-    /** Module instantiations as an ordered list. */
-    instanceList: any[] = [];
-
-    /** Module instantiations keyed by instance name. */
-    instanceMap: Map<string, any> = new Map();
-
-    constructor(name: string, uri: string, line: number, character: number, scanned = false) {
+    constructor(name: string, uri: string, line: number, character: number, endLine: number, scanned = false) {
         this.name = name;
         this.uri = uri;
         this.line = line;
         this.character = character;
-        this.startLine = line;
-        this.endLine = line;
+        this.endLine = endLine;
         this.scanned = scanned;
     }
 }
@@ -166,42 +118,10 @@ export class ModuleDatabase {
 
     getModuleByUriPosition(uri: string, line: number): Module | null {
         for (const mod of this.getModulesByUri(uri)) {
-            if (mod.startLine <= line && line <= mod.endLine) {
+            if (mod.line <= line && line <= mod.endLine) {
                 return mod;
             }
         }
         return null;
-    }
-
-    /** Return all signals from modules in the given file URI. */
-    getSignalsByUri(uri: string): any[] {
-        return this.getModulesByUri(uri).flatMap(m => m.signalList);
-    }
-
-    /** Return all parameters from modules in the given file URI. */
-    getParametersByUri(uri: string): any[] {
-        return this.getModulesByUri(uri).flatMap(m => m.parameterList);
-    }
-
-    /** Return all instances from modules in the given file URI. */
-    getInstancesByUri(uri: string): any[] {
-        return this.getModulesByUri(uri).flatMap(m => m.instanceList);
-    }
-
-    /** Return all signals from all modules. */
-    getAllSignals(): any[] {
-        return this.getAllModules().flatMap(m => m.signalList);
-    }
-
-    /** Return signals for a specific module by name. */
-    getSignals(moduleName: string): any[] {
-        const mod = this.moduleMap.get(moduleName);
-        return mod ? mod.signalList : [];
-    }
-
-    /** Return parameters for a specific module by name. */
-    getParameters(moduleName: string): any[] {
-        const mod = this.moduleMap.get(moduleName);
-        return mod ? mod.parameterList : [];
     }
 }
