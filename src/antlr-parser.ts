@@ -2303,6 +2303,7 @@ class AntlrVerilogParser {
      * @returns {Array} Array of diagnostic objects (syntax errors + signal warnings)
      */
     generateErrors(document: any, moduleDatabase: ModuleDatabase | null = null, fileReader: ((resolvedPath: string) => string | null) | null = null): any[] {
+        // parseSymbols populates this._lastVisitor as a side effect
         this.parseSymbols(document, fileReader);
         if (this._lastVisitor) {
             this._lastVisitor.errors = [...this.errorListener.getErrors()];
