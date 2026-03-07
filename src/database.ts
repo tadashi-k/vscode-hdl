@@ -32,6 +32,13 @@ export class Parameter {
     value: number | null;
 }
 
+export class Definition {
+    name: string;
+    line: number;
+    character: number;
+    description: string;
+}
+
 /**
  * A Verilog module definition stored in the workspace-wide database.
  *
