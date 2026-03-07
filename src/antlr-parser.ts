@@ -769,7 +769,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // which handles right-associativity correctly
         if (exprText && exprText.includes('?') && exprText.includes(':')) {
             // Try text-based parsing first for ternary expressions
-            const simpleVal = AntlrVerilogParser._evalSimpleExpr(exprText, paramMap);
+            const simpleVal = this._evalSimpleExpr(exprText, paramMap);
             if (simpleVal !== null) {
                 return { value: simpleVal, width: null };
             }
@@ -791,6 +791,78 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const match = bitWidth.match(/^\[(\d+):(\d+)\]$/);
         if (!match) return null;
         return Math.abs(parseInt(match[1], 10) - parseInt(match[2], 10)) + 1;
+    }
+
+    // Evaluate a simple expression string using a parameter map.
+    // Used as a fallback text-based evaluator for ternary and other expressions.
+    // @param exprText  Expression text (e.g. "WIDTH-1", "(1<<8)-1")
+    // @param paramMap  Map of parameter name -> EvalValue
+    _evalSimpleExpr(exprText: string, paramMap: any): number | null {
+        if (!exprText) return null;
+        let text = exprText.trim();
+        // Replace parameter names with their numeric values
+        if (paramMap) {
+            // Iterate params from longest name to shortest to avoid partial replacement
+            const names: string[] = [];
+            if (paramMap instanceof Map) {
+                for (const [k] of paramMap) names.push(String(k));
+            } else {
+                names.push(...Object.keys(paramMap));
+            }
+            names.sort((a, b) => b.length - a.length);
+            for (const name of names) {
+                const evalValue = paramMap instanceof Map ? paramMap.get(name) : paramMap[name];
+                const val = evalValue && typeof evalValue === 'object' ? evalValue.value : evalValue;
+                if (val !== null && val !== undefined && typeof val === 'number') {
+                    text = text.replace(new RegExp(`\\b${name}\\b`, 'g'), String(val));
+                }
+            }
+        }
+        // Remove any remaining identifiers (unresolved params) – bail out
+        if (/[a-zA-Z_]/.test(text)) return null;
+        try {
+            // eslint-disable-next-line no-new-func
+            const result = Function('"use strict"; return (' + text + ')')();
+            if (typeof result === 'number' && isFinite(result)) {
+                return Math.trunc(result);
+            }
+        } catch {
+            // ignore evaluation errors
+        }
+        return null;
+    }
+
+    // Evaluate the bit-width of a port given instance-level parameter overrides.
+    // @param port      Port object with bitWidthRaw (e.g. "[WIDTH-1:0]") and/or bitWidth
+    // @param params    Default parameter list of the instantiated module
+    // @param overrides Instance-level parameter overrides (e.g. { WIDTH: 16 })
+    evaluatePortWidth(port: any, params: any[], overrides: any): number | null {
+        const rawWidth = port.bitWidthRaw || port.bitWidth;
+        if (!rawWidth) return 1;
+        const match = (rawWidth as string).match(/^\[(.+):(.+)\]$/);
+        if (!match) return 1;
+
+        // Build param map: defaults from params, then overrides
+        const paramMap = new Map<string, any>();
+        if (Array.isArray(params)) {
+            for (const p of params) {
+                if (p.name && p.value !== null && p.value !== undefined) {
+                    paramMap.set(p.name, { value: p.value, width: null });
+                }
+            }
+        }
+        if (overrides && typeof overrides === 'object') {
+            for (const [name, value] of Object.entries(overrides)) {
+                paramMap.set(name, { value, width: null });
+            }
+        }
+
+        const msb = this._evalSimpleExpr(match[1], paramMap);
+        const lsb = this._evalSimpleExpr(match[2], paramMap);
+        if (msb !== null && lsb !== null) {
+            return msb - lsb + 1;
+        }
+        return null;
     }
 
     // Compute the bit width of an lvalue context.
@@ -1727,7 +1799,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         const dbMod = moduleDatabase.getModule(conn.instModuleName);
                         if (dbMod) instModParams = dbMod.parameterList;
                     }
-                    portWidth = AntlrVerilogParser.evaluatePortWidth(instPort, instModParams, inst.parameterOverrides);
+                    portWidth = this.evaluatePortWidth(instPort, instModParams, inst.parameterOverrides);
                 }
                 if (portWidth === null) {
                     portWidth = this._getSignalWidth(instPort.bitWidth) ?? 1;
@@ -1819,82 +1891,6 @@ class AntlrVerilogParser {
 
         this._lastVisitor = visitor;
         return visitor;
-    }
-
-    /**
-     * Evaluate a simple expression string using a parameter map.
-     * Used as a fallback text-based evaluator for ternary and other expressions.
-     * @param exprText  Expression text (e.g. "WIDTH-1", "(1<<8)-1")
-     * @param paramMap  Map of parameter name -> EvalValue
-     */
-    static _evalSimpleExpr(exprText: string, paramMap: any): number | null {
-        if (!exprText) return null;
-        let text = exprText.trim();
-        // Replace parameter names with their numeric values
-        if (paramMap) {
-            // Iterate params from longest name to shortest to avoid partial replacement
-            const names: string[] = [];
-            if (paramMap instanceof Map) {
-                for (const [k] of paramMap) names.push(String(k));
-            } else {
-                names.push(...Object.keys(paramMap));
-            }
-            names.sort((a, b) => b.length - a.length);
-            for (const name of names) {
-                const evalValue = paramMap instanceof Map ? paramMap.get(name) : paramMap[name];
-                const val = evalValue && typeof evalValue === 'object' ? evalValue.value : evalValue;
-                if (val !== null && val !== undefined && typeof val === 'number') {
-                    text = text.replace(new RegExp(`\\b${name}\\b`, 'g'), String(val));
-                }
-            }
-        }
-        // Remove any remaining identifiers (unresolved params) – bail out
-        if (/[a-zA-Z_]/.test(text)) return null;
-        try {
-            // eslint-disable-next-line no-new-func
-            const result = Function('"use strict"; return (' + text + ')')();
-            if (typeof result === 'number' && isFinite(result)) {
-                return Math.trunc(result);
-            }
-        } catch {
-            // ignore evaluation errors
-        }
-        return null;
-    }
-
-    /**
-     * Evaluate the bit-width of a port given instance-level parameter overrides.
-     * @param port      Port object with bitWidthRaw (e.g. "[WIDTH-1:0]") and/or bitWidth
-     * @param params    Default parameter list of the instantiated module
-     * @param overrides Instance-level parameter overrides (e.g. { WIDTH: 16 })
-     */
-    static evaluatePortWidth(port: any, params: any[], overrides: any): number | null {
-        const rawWidth = port.bitWidthRaw || port.bitWidth;
-        if (!rawWidth) return 1;
-        const match = (rawWidth as string).match(/^\[(.+):(.+)\]$/);
-        if (!match) return 1;
-
-        // Build param map: defaults from params, then overrides
-        const paramMap = new Map<string, any>();
-        if (Array.isArray(params)) {
-            for (const p of params) {
-                if (p.name && p.value !== null && p.value !== undefined) {
-                    paramMap.set(p.name, { value: p.value, width: null });
-                }
-            }
-        }
-        if (overrides && typeof overrides === 'object') {
-            for (const [name, value] of Object.entries(overrides)) {
-                paramMap.set(name, { value, width: null });
-            }
-        }
-
-        const msb = AntlrVerilogParser._evalSimpleExpr(match[1], paramMap);
-        const lsb = AntlrVerilogParser._evalSimpleExpr(match[2], paramMap);
-        if (msb !== null && lsb !== null) {
-            return msb - lsb + 1;
-        }
-        return null;
     }
 
     /**
