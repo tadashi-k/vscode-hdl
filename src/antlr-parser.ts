@@ -7,7 +7,7 @@ import { preprocessVerilog } from './verilog-scanner';
 import { VerilogLexer } from '../antlr/generated/VerilogLexer';
 import { VerilogParser } from '../antlr/generated/VerilogParser';
 import { VerilogVisitor } from '../antlr/generated/VerilogVisitor';
-import { Module, ModuleDatabase } from './database';
+import { Module, ModuleDatabase, Definition } from './database';
 
 let vscode: typeof vsCodeModule;
 try {
@@ -230,6 +230,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _toArray(raw: any) {
         if (!raw) return [];
         return Array.isArray(raw) ? raw : [raw];
+    }
+
+    // Build a Definition object for a port signal.
+    // Description format: "{direction} {type} {bitWidth} {name}" with empty parts omitted.
+    _makePortDefinition(signal: any): Definition {
+        const parts = [signal.direction];
+        if (signal.type && signal.type !== DEFAULT_NET_TYPE) parts.push(signal.type);
+        if (signal.bitWidth) parts.push(signal.bitWidth);
+        parts.push(signal.name);
+        return new Definition(signal.name, signal.line, signal.character, parts.join(' '));
     }
 
     visitModule_declaration(ctx: any) {
@@ -703,6 +713,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     if (evalResult !== null && evalResult !== undefined) {
                         moduleParams.set(info.name, evalResult);
                     }
+                    // Create a Definition for hover and goto-definition
+                    const kind = param.kind;
+                    const descValue = value !== null ? String(value) : exprText;
+                    const paramDesc = descValue ? `${kind} ${info.name} = ${descValue}` : `${kind} ${info.name}`;
+                    this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, paramDesc));
                 }
             }
         }
@@ -1290,6 +1305,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._currentModule.ports.push(signal);
         this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
         this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
+        this._currentModule.addDefinition(this._makePortDefinition(signal));
         return null;
     }
 
@@ -1343,6 +1359,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             this._currentModule.ports.push(signal);
             this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
             this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
+            this._currentModule.addDefinition(this._makePortDefinition(signal));
         }
     }
 
@@ -1376,6 +1393,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             };
             this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
             this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
+            const netDesc = [type, bitWidth, info.name].filter(Boolean).join(' ');
+            this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, netDesc));
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(netIdCtx)) {
@@ -1423,6 +1442,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             };
             this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
             this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
+            const regDesc = ['reg', bitWidth, info.name].filter(Boolean).join(' ');
+            this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, regDesc));
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(regIdCtx)) {
@@ -1464,6 +1485,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             };
             this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
             this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
+            this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, `integer ${info.name}`));
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(intIdCtx)) {
