@@ -8,6 +8,61 @@
  * No VS Code dependency – safe for use in tests.
  */
 
+export class BitRange {
+    rawMsb: string;
+    rawLsb: string;
+    msb: number | null;
+    lsb: number | null;
+
+    constructor(rawMsb: string, rawLsb: string) {
+        this.rawMsb = rawMsb;
+        this.rawLsb = rawLsb;
+        this.msb = null;
+        this.lsb = null;
+    }
+}
+
+export class Signal {
+    name: string;
+    line: number;
+    character: number;
+    type: 'wire' | 'reg' | 'integer' | 'real';
+    direction: 'input' | 'output' | 'inout' | null; // null for internal signals
+    bitRange: BitRange | null; // treated as 1-bit if null
+}
+
+export class Parameter {
+    name: string;
+    line: number;
+    character: number;
+    kind: 'parameter' | 'localparam';
+    bitRange: BitRange | null; // treated as [31:0] if null
+    rawValue: string;
+    value: number | null;
+}
+
+export class Instance {
+    moduleName: string;
+    instanceName: string;
+    startLine: number; // start line of the instance declaration (line number of the module instantiation)
+    endLine: number; // end line of the instance declaration (line number of the last line of the module instantiation)
+    paramOrderedConnections: string[] | null = null; // parsed parameter value assignment in order, e.g. ["8", "16"] for parameter_value_assignment #(8, 16)
+    paramNamedConnections: Map<string, string> | null = null; // parsed parameter value assignment, e.g. {"WIDTH": "8", "DEPTH": "16"}
+    signalOrderedConnections: string[] | null = null; // parsed signal connection in order, e.g. ["data_in", "data_out"] for ordered port connection .e.g. module_instance data_in(data_in, data_out)
+    signalNamedConnections: Map<string, string> | null = null; // parsed signal connection, e.g. {"data_in": "data_in", "data_out": "data_out"} for named port connection .e.g. module_instance data_in(.data_in(data_in), .data_out(data_out))
+
+    constructor(mouleName: string, instanceName: string, startLine: number, endLine: number) {
+        this.moduleName = mouleName;
+        this.instanceName = instanceName;
+        this.startLine = startLine;
+        this.endLine = endLine;
+    }
+
+    hasLine(line: number): boolean {
+        return this.startLine <= line && line <= this.endLine;
+    }
+}
+
 /**
  * A Verilog module definition stored in the workspace-wide database.
  *
@@ -18,40 +73,28 @@
 export class Module {
     name: string;
     uri: string;
-    line: number;
-    character: number;
+    startLine: number; // start line of the module declaration (line number of the "module" keyword)
+    endLine: number; // end line of the module declaration (line number of the "endmodule" keyword)
     scanned: boolean;
-    /** Ports list (populated by the ANTLR parser, empty before scan). */
-    ports: any[];
-    /** Signals grouped by name for fast lookup. */
-    signalMap: Map<string, any>;
-    /** Signals in declaration order. */
-    signalList: any[];
-    /** Parameters grouped by name. */
-    parameterMap: Map<string, any>;
-    /** Parameters in declaration order. */
-    parameterList: any[];
-    /** Module instantiations keyed by instance name. */
-    instanceMap: Map<string, any>;
-    /** Module instantiations in declaration order. */
-    instanceList: any[];
-    /** Module-token positions (for hdlModule semantic highlighting). */
-    moduleTokens: any[];
 
-    constructor(name: string, uri: string, line: number, character: number, scanned: boolean = false) {
+    /** Ports in declaration order (populated by the ANTLR parser, empty before scan). */
+    ports: Signal[] = [];
+
+    /** Signals grouped by name for fast lookup. */
+    signalMap: Map<string, Signal> = new Map();
+
+    /** Parameters grouped by name. */
+    parameterMap: Map<string, Parameter> = new Map();
+
+    /** Module instantiations keyed by instance name. */
+    instanceList: Instance[] = [];
+
+    constructor(name: string, uri: string, startLine: number, endLine: number, scanned = false) {
         this.name = name;
         this.uri = uri;
-        this.line = line;
-        this.character = character;
-        this.scanned = scanned;
-        this.ports = [];
-        this.signalMap = new Map();
-        this.signalList = [];
-        this.parameterMap = new Map();
-        this.parameterList = [];
-        this.instanceMap = new Map();
-        this.instanceList = [];
-        this.moduleTokens = [];
+        this.startLine = startLine;
+        this.endLine = endLine;
+        this.scanned = false;
     }
 }
 
@@ -63,131 +106,58 @@ export class Module {
  * instances directly from the Module object.
  */
 export class ModuleDatabase {
-    modules: Map<string, Module>;
+    moduleMap: Map<string, Module>;
+    moduleUriMap: Map<string, Module[]>; // for fast lookup of modules by file URI
+    
 
     constructor() {
-        this.modules = new Map<string, Module>();
+        this.moduleMap = new Map<string, Module>();
+        this.moduleUriMap = new Map<string, Module[]>();
     }
 
-    /** Add or replace a module entry. */
+    /** Add a module entry. */
     addModule(module: Module) {
-        this.modules.set(module.name, module);
+        this.moduleMap.set(module.name, module);
+        let modules = this.moduleUriMap.get(module.uri);
+        if (!modules) {
+            modules = [];
+            this.moduleUriMap.set(module.uri, modules);
+        }
+        modules.push(module);
     }
 
     /** Retrieve a module by name. */
     getModule(name: string): Module | undefined {
-        return this.modules.get(name);
+        return this.moduleMap.get(name);
     }
 
     /** Remove all modules whose uri matches the given file URI. */
     removeModulesFromFile(uri: string) {
-        for (const [name, mod] of this.modules.entries()) {
+        for (const [name, mod] of this.moduleMap.entries()) {
             if (mod.uri === uri) {
-                this.modules.delete(name);
+                this.moduleMap.delete(name);
             }
         }
+        this.moduleUriMap.delete(uri);
     }
 
     /** Return all modules as an array. */
     getAllModules(): Module[] {
-        return Array.from(this.modules.values());
+        return Array.from(this.moduleMap.values());
     }
 
-    // ----- Convenience accessors (mirror the old per-category databases) -----
+    /** Get all modules belonging to modules defined in the given file URI. */
+    getModulesByUri(uri: string): Module[] {
+        return this.moduleUriMap.get(uri) || [];
+    }
 
-    /** Get all signals belonging to modules defined in the given file URI. */
-    getSignalsByUri(uri: string): any[] {
-        const result: any[] = [];
-        for (const mod of this.modules.values()) {
-            if (mod.uri === uri && mod.scanned) {
-                result.push(...mod.signalList);
+    getModuleByUriPosition(uri: string, line: number): Module | null {
+        let module: Module | null = null;
+        for (const mod of this.getModulesByUri(uri)) {
+            if (mod.startLine <= line && line <= mod.endLine) {
+                return module;
             }
         }
-        return result;
-    }
-
-    /** Get all parameters belonging to modules defined in the given file URI. */
-    getParametersByUri(uri: string): any[] {
-        const result: any[] = [];
-        for (const mod of this.modules.values()) {
-            if (mod.uri === uri && mod.scanned) {
-                result.push(...mod.parameterList);
-            }
-        }
-        return result;
-    }
-
-    /** Get all instances belonging to modules defined in the given file URI. */
-    getInstancesByUri(uri: string): any[] {
-        const result: any[] = [];
-        for (const mod of this.modules.values()) {
-            if (mod.uri === uri && mod.scanned) {
-                result.push(...mod.instanceList);
-            }
-        }
-        return result;
-    }
-
-    /** Get module-token positions for the given file URI. */
-    getModuleTokensByUri(uri: string): any[] {
-        // Module tokens are per-file (shared across all modules in the file).
-        // Return from the first scanned module found for this URI.
-        for (const mod of this.modules.values()) {
-            if (mod.uri === uri && mod.scanned) {
-                return mod.moduleTokens;
-            }
-        }
-        return [];
-    }
-
-    /** Get signals for a specific module by name. */
-    getSignals(moduleName: string): any[] {
-        const mod = this.modules.get(moduleName);
-        return mod && mod.scanned ? mod.signalList : [];
-    }
-
-    /** Get parameters for a specific module by name. */
-    getParameters(moduleName: string): any[] {
-        const mod = this.modules.get(moduleName);
-        return mod && mod.scanned ? mod.parameterList : [];
-    }
-
-    /** Get instances for a specific module by name. */
-    getInstances(moduleName: string): any[] {
-        const mod = this.modules.get(moduleName);
-        return mod && mod.scanned ? mod.instanceList : [];
-    }
-
-    /** Get all signals across all modules. */
-    getAllSignals(): any[] {
-        const result: any[] = [];
-        for (const mod of this.modules.values()) {
-            if (mod.scanned) {
-                result.push(...mod.signalList);
-            }
-        }
-        return result;
-    }
-
-    /** Get all parameters across all modules. */
-    getAllParameters(): any[] {
-        const result: any[] = [];
-        for (const mod of this.modules.values()) {
-            if (mod.scanned) {
-                result.push(...mod.parameterList);
-            }
-        }
-        return result;
-    }
-
-    /** Get all instances across all modules. */
-    getAllInstances(): any[] {
-        const result: any[] = [];
-        for (const mod of this.modules.values()) {
-            if (mod.scanned) {
-                result.push(...mod.instanceList);
-            }
-        }
-        return result;
+        return null;
     }
 }
