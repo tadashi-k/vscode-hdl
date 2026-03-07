@@ -275,6 +275,18 @@ class VerilogDefinitionProvider implements vscode.DefinitionProvider {
             const pos = new vscode.Position(moduleSymbol.line, moduleSymbol.character || 0);
             return new vscode.Location(uri, pos);
         }
+
+        // Check for signal/parameter definitions in the current module
+        const docUri = document.uri.toString();
+        const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
+        if (currentModule) {
+            const def = currentModule.definitionMap.get(word);
+            if (def) {
+                const uri = vscode.Uri.parse(currentModule.uri);
+                const pos = new vscode.Position(def.line, def.character);
+                return new vscode.Location(uri, pos);
+            }
+        }
         
         return null;
     }
@@ -524,6 +536,16 @@ export function activate(context: vscode.ExtensionContext) {
                                 hoverContent += `module ${mod.name}`;
                                 return new vscode.Hover(hoverContent);
                             }
+                        }
+                    }
+
+                    // Check for signal/parameter definitions in the current module
+                    const docUri = document.uri.toString();
+                    const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
+                    if (currentModule) {
+                        const def = currentModule.definitionMap.get(word);
+                        if (def) {
+                            return new vscode.Hover(new vscode.MarkdownString(`\`\`\`verilog\n${def.description}\n\`\`\``));
                         }
                     }
                 }

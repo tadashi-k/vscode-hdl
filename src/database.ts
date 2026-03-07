@@ -37,6 +37,13 @@ export class Definition {
     line: number;
     character: number;
     description: string;
+
+    constructor(name: string, line: number, character: number, description: string) {
+        this.name = name;
+        this.line = line;
+        this.character = character;
+        this.description = description;
+    }
 }
 
 /**
@@ -60,6 +67,12 @@ export class Module {
     /** Parameters as an ordered list. */
     parameterList: any[] = [];
 
+    /** Definitions (signals, parameters, localparams) for hover and goto-definition. */
+    definitionList: Definition[] = [];
+
+    /** Map from definition name to Definition for O(1) lookup. */
+    definitionMap: Map<string, Definition> = new Map();
+
     constructor(name: string, uri: string, line: number, character: number, endLine: number, scanned = false) {
         this.name = name;
         this.uri = uri;
@@ -67,6 +80,12 @@ export class Module {
         this.character = character;
         this.endLine = endLine;
         this.scanned = scanned;
+    }
+
+    /** Add a definition to both the list and the map. */
+    addDefinition(def: Definition) {
+        this.definitionList.push(def);
+        this.definitionMap.set(def.name, def);
     }
 }
 
