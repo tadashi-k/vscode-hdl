@@ -378,16 +378,10 @@ export function activate(context: vscode.ExtensionContext) {
     // Create semantic token provider (needs to be referenced from event handlers)
     const semanticTokensProvider = new VerilogSemanticTokensProvider();
 
-    // Track line counts per document for edit optimization.
-    // Only re-scan with ANTLR when line count changes (line added/deleted).
-    const documentLineCounts = new Map<string, number>();
-
     // Listen for document open events
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(document => {
-            if (document.languageId === 'verilog') {
-                documentLineCounts.set(document.uri.toString(), document.lineCount);
-            }
+            if (document.languageId !== 'verilog') return;
             updateDocumentSymbols(document);
             ensureInstanceDependenciesParsed(document);
             updateDiagnostics(document, diagnosticCollection);
@@ -396,25 +390,36 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // Listen for document change events
+    let changed: boolean = false;
     context.subscriptions.push(
         vscode.workspace.onDidChangeTextDocument(event => {
             if (event.document.languageId !== 'verilog') return;
+            changed = true;
+        })
+    );
 
-            const uri = event.document.uri.toString();
-            const previousLineCount = documentLineCounts.get(uri);
-            const currentLineCount = event.document.lineCount;
-            documentLineCounts.set(uri, currentLineCount);
+    // Listen for cursor selection changes
+    let lastCursorLine : number = 0;
+    context.subscriptions.push(
+        vscode.window.onDidChangeTextEditorSelection(event => {
+            const doc = event.textEditor.document;
+            if (doc.languageId !== 'verilog') return;
 
-            // Only re-scan with ANTLR when lines are added or deleted.
-            // In-line edits (same line count) are skipped for performance.
-            if (previousLineCount !== undefined && previousLineCount === currentLineCount) {
+            const pos = event.selections && event.selections[0] ? event.selections[0].active : null;
+            if (!pos) return;
+
+            if (lastCursorLine === pos.line) {
                 return;
             }
+            lastCursorLine = pos.line;
 
-            verilogParser.dirty(); // Mark parser state as dirty to allow re-parsing of unchanged files
-            updateDocumentSymbols(event.document);
-            ensureInstanceDependenciesParsed(event.document);
-            updateDiagnostics(event.document, diagnosticCollection);
+            if (!changed) {
+                return;
+            }
+            verilogParser.dirty();
+            updateDocumentSymbols(doc);
+            ensureInstanceDependenciesParsed(doc);
+            updateDiagnostics(doc, diagnosticCollection);
             semanticTokensProvider.notifyChanged();
         })
     );
