@@ -73,7 +73,9 @@ function fileReader(resolvedPath: string): string | null {
 
 console.log('\nTest: parseSymbols on test_errors.v (syntax errors)');
 {
-    const diags = parser.parseSymbols(makeDoc('test_errors.v'), null, null);
+    const db = new ModuleDatabase();
+    parser.parseSymbols(makeDoc('test_errors.v'), db, null);
+    const diags = parser.getDiagnostics(db);
 
     const errors = diags.filter((d: any) => d.severity === SEVERITY_ERROR);
     assert(errors.length > 0, 'at least one syntax error reported');
@@ -91,7 +93,9 @@ console.log('\nTest: parseSymbols on test_errors.v (syntax errors)');
 
 console.log('\nTest: parseSymbols on counter.v (valid module, expect no errors)');
 {
-    const diags = parser.parseSymbols(makeDoc('counter.v'), null, null);
+    const db = new ModuleDatabase();
+    parser.parseSymbols(makeDoc('counter.v'), db, null);
+    const diags = parser.getDiagnostics(db);
     const errors = diags.filter((d: any) => d.severity === SEVERITY_ERROR);
     assert(errors.length === 0, 'no syntax errors in counter.v');
 }
@@ -100,17 +104,21 @@ console.log('\nTest: parseSymbols on counter.v (valid module, expect no errors)'
 
 console.log('\nTest: parseSymbols on full_adder.v (valid module, expect no errors)');
 {
-    const diags = parser.parseSymbols(makeDoc('full_adder.v'), null, null);
+    const db = new ModuleDatabase();
+    parser.parseSymbols(makeDoc('full_adder.v'), db, null);
+    const diags = parser.getDiagnostics(db);
     const errors = diags.filter((d: any) => d.severity === SEVERITY_ERROR);
     assert(errors.length === 0, 'no syntax errors in full_adder.v');
 }
 
-// ── Test 4: parseSymbols returns array of diagnostic objects ──────────────
+// ── Test 4: getDiagnostics returns array of diagnostic objects ────────────
 
-console.log('\nTest: parseSymbols return value structure');
+console.log('\nTest: getDiagnostics return value structure');
 {
-    const diags = parser.parseSymbols(makeDoc('counter.v'), null, null);
-    assert(Array.isArray(diags), 'parseSymbols returns an array');
+    const db = new ModuleDatabase();
+    parser.parseSymbols(makeDoc('counter.v'), db, null);
+    const diags = parser.getDiagnostics(db);
+    assert(Array.isArray(diags), 'getDiagnostics returns an array');
 }
 
 // ── Test 5: test_instance.v – port-connection warnings with module DB ─────
@@ -119,12 +127,10 @@ console.log('\nTest: parseSymbols on test_instance.v (port-connection warnings)'
 {
     // Build a module database containing the counter module
     const db = new ModuleDatabase();
-    const counterModules = parser.parseModules(makeDoc('counter.v'), null);
-    for (const m of counterModules) {
-        db.addModule(m);
-    }
+    parser.parseModules(makeDoc('counter.v'), db);
 
-    const diags = parser.parseSymbols(makeDoc('test_instance.v'), db, null);
+    parser.parseSymbols(makeDoc('test_instance.v'), db, null);
+    const diags = parser.getDiagnostics(db);
     const warnings = diags.filter((d: any) => d.severity === SEVERITY_WARNING);
 
     // counter_i_2 has .count_out port missing (warning 8: unconnected)
@@ -140,8 +146,9 @@ console.log('\nTest: parseSymbols on test_instance.v (port-connection warnings)'
 
 console.log('\nTest: parseSymbols on test_instance.v without module DB');
 {
-    const diags = parser.parseSymbols(makeDoc('test_instance.v'), null, null);
-    const warnings = diags.filter((d: any) => d.severity === SEVERITY_WARNING);
+    const db = new ModuleDatabase();
+    parser.parseSymbols(makeDoc('test_instance.v'), db, null);
+    const diags = parser.getDiagnostics(db);
 
     // Without the database, counter should generate "not defined" warning
     // (Warning 9: instantiated module not found)
@@ -154,7 +161,9 @@ console.log('\nTest: parseSymbols on test_instance.v without module DB');
 
 console.log('\nTest: parseSymbols on test_symbols.v (signal-usage warnings)');
 {
-    const diags = parser.parseSymbols(makeDoc('test_symbols.v'), null, null);
+    const db = new ModuleDatabase();
+    parser.parseSymbols(makeDoc('test_symbols.v'), db, null);
+    const diags = parser.getDiagnostics(db);
 
     // test_symbols.v has signals that are declared but not fully used
     // (e.g. addr, int_signal, ext_signal are declared but not assigned)

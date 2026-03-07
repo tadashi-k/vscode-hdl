@@ -16,6 +16,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const AntlrVerilogParser = require('../src/antlr-parser');
+const { ModuleDatabase } = require('../src/database');
 
 // ── Simple test harness ────────────────────────────────────────────────────
 
@@ -62,7 +63,9 @@ function makeDoc(filename: string) {
 
 console.log('\nTest: parseModules on counter.v');
 {
-    const modules = parser.parseModules(makeDoc('counter.v'), null);
+    const db = new ModuleDatabase();
+    parser.parseModules(makeDoc('counter.v'), db);
+    const modules = db.getAllModules();
 
     assert(modules.length === 1, 'finds exactly one module');
     assert(modules[0].name === 'counter', 'module name is "counter"');
@@ -86,7 +89,9 @@ console.log('\nTest: parseModules on counter.v');
 
 console.log('\nTest: parseModules on full_adder.v');
 {
-    const modules = parser.parseModules(makeDoc('full_adder.v'), null);
+    const db = new ModuleDatabase();
+    parser.parseModules(makeDoc('full_adder.v'), db);
+    const modules = db.getAllModules();
 
     assert(modules.length === 2, 'finds two modules (full_adder and dff)');
 
@@ -107,7 +112,9 @@ console.log('\nTest: parseModules on full_adder.v');
 
 console.log('\nTest: parseModules on test_paramter.v');
 {
-    const modules = parser.parseModules(makeDoc('test_paramter.v'), null);
+    const db = new ModuleDatabase();
+    parser.parseModules(makeDoc('test_paramter.v'), db);
+    const modules = db.getAllModules();
 
     assert(modules.length >= 1, 'finds at least one module');
     const m = modules.find((m: any) => m.name === 'test_parameter');
@@ -134,7 +141,9 @@ console.log('\nTest: parseModules on test_paramter.v');
 
 console.log('\nTest: parseModules returns Module with only ports and parameterList');
 {
-    const modules = parser.parseModules(makeDoc('counter.v'), null);
+    const db = new ModuleDatabase();
+    parser.parseModules(makeDoc('counter.v'), db);
+    const modules = db.getAllModules();
     const m = modules[0];
 
     assert(Array.isArray(m.ports), 'Module.ports is an array');
@@ -148,7 +157,9 @@ console.log('\nTest: parseModules returns Module with only ports and parameterLi
 
 console.log('\nTest: parseModules on test_symbols.v');
 {
-    const modules = parser.parseModules(makeDoc('test_symbols.v'), null);
+    const db = new ModuleDatabase();
+    parser.parseModules(makeDoc('test_symbols.v'), db);
+    const modules = db.getAllModules();
 
     assert(modules.length >= 1, 'finds at least one module');
     const tm = modules.find((m: any) => m.name === 'test_module');
