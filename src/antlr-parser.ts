@@ -104,7 +104,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
      * @param uri file
      * @param modules module database for confirm port connections of instances
      */
-    constructor(uri: string, modules: Module[] | null) {
+    constructor(uri: string, modules: ModuleDatabase | null) {
         super();
         this.uri = uri;
         this.modules = [];
