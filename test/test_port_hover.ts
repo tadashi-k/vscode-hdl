@@ -195,11 +195,11 @@ endmodule
         ];
 
         // With override WIDTH=16
-        const width16 = parser.evaluatePortWidth(port, defaultParams, { WIDTH: 16 });
+        const width16 = AntlrVerilogParser.evaluatePortWidth(port, defaultParams, { WIDTH: 16 });
         // With override WIDTH=32
-        const width32 = parser.evaluatePortWidth(port, defaultParams, { WIDTH: 32 });
+        const width32 = AntlrVerilogParser.evaluatePortWidth(port, defaultParams, { WIDTH: 32 });
         // Without overrides (use defaults)
-        const widthDefault = parser.evaluatePortWidth(port, defaultParams, null);
+        const widthDefault = AntlrVerilogParser.evaluatePortWidth(port, defaultParams, null);
 
         const pass = width16 === 16 && width32 === 32 && widthDefault === 8;
 
@@ -217,7 +217,7 @@ endmodule
         console.log('\nTest 5: evaluatePortWidth for scalar port');
 
         const port = { name: 'clk', bitWidth: null };
-        const width = parser.evaluatePortWidth(port, [], null);
+        const width = AntlrVerilogParser.evaluatePortWidth(port, [], null);
 
         const pass = width === 1;
 
@@ -235,7 +235,7 @@ endmodule
         console.log('\nTest 6: evaluatePortWidth for fixed-width port');
 
         const port = { name: 'data', bitWidth: '[7:0]' };
-        const width = parser.evaluatePortWidth(port, [], null);
+        const width = AntlrVerilogParser.evaluatePortWidth(port, [], null);
 
         const pass = width === 8;
 

@@ -571,7 +571,7 @@ export function activate(context: vscode.ExtensionContext) {
                                 if (port) {
                                     // Evaluate port width with parameter overrides
                                     const instModParams = moduleDatabase.getParameters(inst.moduleName);
-                                    const portWidth = verilogParser.evaluatePortWidth(port, instModParams, inst.parameterOverrides);
+                                    const portWidth = AntlrVerilogParser.evaluatePortWidth(port, instModParams, inst.parameterOverrides);
                                     const widthStr = portWidth !== null && portWidth > 1
                                         ? `[${portWidth - 1}:0]`
                                         : (portWidth === 1 ? '' : (port.bitWidth || ''));
