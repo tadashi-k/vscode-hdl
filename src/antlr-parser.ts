@@ -96,6 +96,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _moduleParamNames: Map<any, any>;
     _moduleParams: Map<any, any>;
     _moduleGenvarNames: Map<any, any>;
+    _moduleSignalLists: Map<string, any[]>;   // moduleName -> signal[]
+    _moduleSignalMaps: Map<string, Map<string, any>>;  // moduleName -> signalName -> signal
+    _moduleInstanceLists: Map<string, any[]>; // moduleName -> instance[]
     _inProcedural: boolean;
     _inContinuousAssign: boolean;
     _currentParamKind: any;
@@ -122,6 +125,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._moduleParamNames = new Map();  // moduleName -> Set<paramName>
         this._moduleParams = new Map();      // moduleName -> Map<paramName, value> (for cross-param evaluation)
         this._moduleGenvarNames = new Map(); // moduleName -> Set<genvarName>
+        this._moduleSignalLists = new Map(); // moduleName -> signal[]
+        this._moduleSignalMaps = new Map();  // moduleName -> Map<signalName, signal>
+        this._moduleInstanceLists = new Map(); // moduleName -> instance[]
         this._inProcedural = false;
         this._inContinuousAssign = false;
         this.widthMismatches = [];           // [{lvalName, lvalWidth, exprWidth, line, character, moduleName}]
@@ -231,14 +237,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!info) return null;
 
         const endLine = ctx.stop ? ctx.stop.line - 1 : info.line;
-        this._currentModule = new Module(info.name, this.uri, info.line, info.character, true);
-        this._currentModule.endLine = endLine;
+        this._currentModule = new Module(info.name, this.uri, info.line, info.character, endLine, true);
 
         // Initialize per-module tracking for signal warnings
         this._moduleSignalRefs.set(info.name, new Set());
         this._moduleParamNames.set(info.name, new Set());
         this._moduleParams.set(info.name, new Map());
         this._moduleGenvarNames.set(info.name, new Set());
+        this._moduleSignalLists.set(info.name, []);
+        this._moduleSignalMaps.set(info.name, new Map());
+        this._moduleInstanceLists.set(info.name, []);
 
         this.visitChildren(ctx);
 
@@ -280,7 +288,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
             // Record the start index so we can identify which instances were added
             // by THIS module_instantiation node when applying parameter overrides.
-            const instancesBeforeThisInstantiation = this._currentModule.instanceList.length;
+            const moduleInstanceList = this._moduleInstanceLists.get(this._currentModule.name)!;
+            const instancesBeforeThisInstantiation = moduleInstanceList.length;
 
             for (const inst of moduleInstances) {
                 // Get instance name from name_of_instance
@@ -396,7 +405,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     }
                 }
 
-                this._currentModule.instanceList.push({
+                moduleInstanceList.push({
                     moduleName: instModuleName,
                     instanceName: instNameInfo ? instNameInfo.name : null,
                     line: instNameInfo ? instNameInfo.line : instModInfo.line,
@@ -445,8 +454,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         // module_instantiation node (identified by the start index).
                         // This avoids incorrectly applying overrides to earlier instances
                         // of the same module that use default parameter values.
-                        for (let i = instancesBeforeThisInstantiation; i < this._currentModule.instanceList.length; i++) {
-                            this._currentModule.instanceList[i].parameterOverrides = overrides;
+                        for (let i = instancesBeforeThisInstantiation; i < moduleInstanceList.length; i++) {
+                            moduleInstanceList[i].parameterOverrides = overrides;
                         }
                     }
                 }
@@ -677,11 +686,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     const evalResult = ceCtx ? this._evaluateConstantExpression(ceCtx, moduleParams) : null;
                     const value = evalResult !== null ? evalResult.value : null;
 
-                    // Store EvalValue for subsequent parameters in the same module
-                    if (evalResult !== null && evalResult !== undefined) {
-                        moduleParams.set(info.name, evalResult);
-                    }
-
                     // The kind ('parameter' or 'localparam') is set by the calling context;
                     // default here is 'parameter' and visitLocal_parameter_declaration overrides it.
                     const param = {
@@ -695,7 +699,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         moduleName: this._currentModule.name
                     };
                     this._currentModule.parameterList.push(param);
-                    this._currentModule.parameterMap.set(param.name, param);
+                    // Store EvalValue for subsequent parameters in the same module
+                    if (evalResult !== null && evalResult !== undefined) {
+                        moduleParams.set(info.name, evalResult);
+                    }
                 }
             }
         }
@@ -775,10 +782,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Helper: build a map of signal name -> signal object for the current module
     _buildModuleSignalsMap(): Map<string, any> {
         if (!this._currentModule) return new Map();
-        return new Map(
-            this._currentModule.signalList
-                .map((s: any) => [s.name, s])
-        );
+        return this._moduleSignalMaps.get(this._currentModule.name) || new Map();
     }
 
     // Helper: extract the numeric bit-width from a bitWidth string (e.g. "[7:0]" -> 8)
@@ -1212,8 +1216,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         }
 
         this._currentModule.ports.push(signal);
-        this._currentModule.signalList.push(signal);
-        this._currentModule.signalMap.set(signal.name, signal);
+        this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
+        this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
         return null;
     }
 
@@ -1265,8 +1269,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             }
 
             this._currentModule.ports.push(signal);
-            this._currentModule.signalList.push(signal);
-            this._currentModule.signalMap.set(signal.name, signal);
+            this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
+            this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
         }
     }
 
@@ -1298,8 +1302,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 bitWidth,
                 moduleName: this._currentModule.name
             };
-            this._currentModule.signalList.push(signal);
-            this._currentModule.signalMap.set(signal.name, signal);
+            this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
+            this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(netIdCtx)) {
@@ -1345,8 +1349,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 isMemory,
                 moduleName: this._currentModule.name
             };
-            this._currentModule.signalList.push(signal);
-            this._currentModule.signalMap.set(signal.name, signal);
+            this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
+            this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(regIdCtx)) {
@@ -1386,8 +1390,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 bitWidth: '32',
                 moduleName: this._currentModule.name
             };
-            this._currentModule.signalList.push(signal);
-            this._currentModule.signalMap.set(signal.name, signal);
+            this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
+            this._moduleSignalMaps.get(this._currentModule.name)!.set(signal.name, signal);
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(intIdCtx)) {
@@ -1493,8 +1497,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
         for (const module of this.modules) {
             const moduleName = module.name;
-            const declaredSignals = module.signalList;
-            const declaredByName = new Map(declaredSignals.map((s: any) => [s.name, s]));
+            const declaredSignals: any[] = this._moduleSignalLists.get(moduleName) || [];
+            const declaredByName = new Map<string, any>(declaredSignals.map((s: any) => [s.name, s]));
+            const moduleInstanceList: any[] = this._moduleInstanceLists.get(moduleName) || [];
             const paramNames = this._moduleParamNames.get(moduleName) || new Set();
             const genvarNames = this._moduleGenvarNames.get(moduleName) || new Set();
             const refNames = this._moduleSignalRefs.get(moduleName) || new Set();
@@ -1657,7 +1662,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             // Warning 8: missing port in named port connection
             // When using named port connections, if some ports of the instantiated module
             // are not listed at all (not even as empty .port()), warn about them.
-            for (const inst of module.instanceList) {
+            for (const inst of moduleInstanceList) {
                 const instModPorts = modulePortMap.get(inst.moduleName);
                 if (!instModPorts) continue;
                 if (!inst.namedPortNames || inst.namedPortNames.length === 0) continue;
@@ -1682,7 +1687,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
             // Warning 9: module name of instantiation not found in module database
             if (moduleDatabase) {
-                for (const inst of module.instanceList) {
+                for (const inst of moduleInstanceList) {
                     if (!modulePortMap.has(inst.moduleName)) {
                         this.warnings.push({
                             line: inst.line,
@@ -1696,11 +1701,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             }
 
             // Warning 12: bit width mismatch between connected signal and instantiated module port
-            const moduleParams = this._moduleParams.get(moduleName) || new Map();
+            const moduleParams = this._moduleParams.get(moduleName) || new Map<string, any>();
             // Build a lookup of connection position -> instance for parameter override access
             const connKey = (modName: string, line: number, char: number) => `${modName}:${line}:${char}`;
             const instanceLookup = new Map<string, any>();
-            for (const inst of module.instanceList) {
+            for (const inst of moduleInstanceList) {
                 for (const pc of inst.portConnections) {
                     instanceLookup.set(connKey(inst.moduleName, pc.line, pc.character), inst);
                 }
@@ -1791,6 +1796,108 @@ class AntlrVerilogParser {
     }
 
     /**
+     * Run the ANTLR parser on preprocessed text and return the populated visitor.
+     * @param text       Preprocessed Verilog source text
+     * @param uri        Document URI string
+     * @param moduleDatabase  Optional module database for cross-file lookup
+     */
+    private _parse(text: string, uri: string, moduleDatabase: ModuleDatabase | null = null): VerilogSymbolVisitor {
+        const chars = new antlr4.InputStream(text);
+        const lexer = new VerilogLexer(chars as any);
+        const tokens = new antlr4.CommonTokenStream(lexer as any);
+        const parser = new VerilogParser(tokens);
+
+        // Remove default error listeners and attach our custom one
+        this.errorListener.clearErrors();
+        (parser as any).removeErrorListeners();
+        (parser as any).addErrorListener(this.errorListener);
+
+        const tree = parser.source_text();
+
+        const visitor = new VerilogSymbolVisitor(uri, moduleDatabase || new ModuleDatabase());
+        visitor.visit(tree);
+
+        this._lastVisitor = visitor;
+        return visitor;
+    }
+
+    /**
+     * Evaluate a simple expression string using a parameter map.
+     * Used as a fallback text-based evaluator for ternary and other expressions.
+     * @param exprText  Expression text (e.g. "WIDTH-1", "(1<<8)-1")
+     * @param paramMap  Map of parameter name -> EvalValue
+     */
+    static _evalSimpleExpr(exprText: string, paramMap: any): number | null {
+        if (!exprText) return null;
+        let text = exprText.trim();
+        // Replace parameter names with their numeric values
+        if (paramMap) {
+            // Iterate params from longest name to shortest to avoid partial replacement
+            const names: string[] = [];
+            if (paramMap instanceof Map) {
+                for (const [k] of paramMap) names.push(String(k));
+            } else {
+                names.push(...Object.keys(paramMap));
+            }
+            names.sort((a, b) => b.length - a.length);
+            for (const name of names) {
+                const evalValue = paramMap instanceof Map ? paramMap.get(name) : paramMap[name];
+                const val = evalValue && typeof evalValue === 'object' ? evalValue.value : evalValue;
+                if (val !== null && val !== undefined && typeof val === 'number') {
+                    text = text.replace(new RegExp(`\\b${name}\\b`, 'g'), String(val));
+                }
+            }
+        }
+        // Remove any remaining identifiers (unresolved params) – bail out
+        if (/[a-zA-Z_]/.test(text)) return null;
+        try {
+            // eslint-disable-next-line no-new-func
+            const result = Function('"use strict"; return (' + text + ')')();
+            if (typeof result === 'number' && isFinite(result)) {
+                return Math.trunc(result);
+            }
+        } catch {
+            // ignore evaluation errors
+        }
+        return null;
+    }
+
+    /**
+     * Evaluate the bit-width of a port given instance-level parameter overrides.
+     * @param port      Port object with bitWidthRaw (e.g. "[WIDTH-1:0]") and/or bitWidth
+     * @param params    Default parameter list of the instantiated module
+     * @param overrides Instance-level parameter overrides (e.g. { WIDTH: 16 })
+     */
+    static evaluatePortWidth(port: any, params: any[], overrides: any): number | null {
+        const rawWidth = port.bitWidthRaw || port.bitWidth;
+        if (!rawWidth) return 1;
+        const match = (rawWidth as string).match(/^\[(.+):(.+)\]$/);
+        if (!match) return 1;
+
+        // Build param map: defaults from params, then overrides
+        const paramMap = new Map<string, any>();
+        if (Array.isArray(params)) {
+            for (const p of params) {
+                if (p.name && p.value !== null && p.value !== undefined) {
+                    paramMap.set(p.name, { value: p.value, width: null });
+                }
+            }
+        }
+        if (overrides && typeof overrides === 'object') {
+            for (const [name, value] of Object.entries(overrides)) {
+                paramMap.set(name, { value, width: null });
+            }
+        }
+
+        const msb = AntlrVerilogParser._evalSimpleExpr(match[1], paramMap);
+        const lsb = AntlrVerilogParser._evalSimpleExpr(match[2], paramMap);
+        if (msb !== null && lsb !== null) {
+            return msb - lsb + 1;
+        }
+        return null;
+    }
+
+    /**
      * Parse Verilog document and extract module definitions with only parameters and ports.
      * Returns an array of Module objects populated with parameters and ports.
      * At first it strips document text after first 'wire|reg|integer|genvar' occurence, and add 'endmodule'.
@@ -1799,6 +1906,31 @@ class AntlrVerilogParser {
      * @param {Function} [fileReader] - Optional file reader for `include resolution
      */
     parseModules(document: any, fileReader: ((resolvedPath: string) => string | null) | null = null): Module[] {
+        const uri = document.uri.toString();
+        let text: string = document.getText();
+
+        // Determine base path for `include resolution
+        let basePath: string | null = null;
+        if (fileReader && uri.startsWith('file://')) {
+            const path = require('path') as typeof import('path');
+            const fsPath = decodeURIComponent(uri.replace(/^file:\/\//, ''));
+            basePath = path.dirname(fsPath);
+        }
+
+        // Strip document body after the first body-level wire/reg/integer/genvar declaration.
+        // These keywords at the start of a line (after optional whitespace) indicate the module
+        // body rather than port declarations, which always have a direction keyword before them.
+        const bodyRe = /\n[ \t]*(wire|reg|integer|genvar)\b/;
+        const bodyMatch = bodyRe.exec(text);
+        if (bodyMatch && bodyMatch.index !== undefined) {
+            text = text.substring(0, bodyMatch.index) + '\nendmodule\n';
+        }
+
+        // Preprocess (handle `include, `define, etc.)
+        text = preprocessVerilog(text, basePath, fileReader);
+
+        const visitor = this._parse(text, uri, null);
+        return visitor.modules;
     }
 
     /**
@@ -1806,11 +1938,34 @@ class AntlrVerilogParser {
      * Returns an array of error objects with line, character, length, message, and severity.
      *
      * @param {vscode.TextDocument} document
-     * @param {ModuleDatabase} [modules] - module database for confirm port connections of instances
+     * @param {ModuleDatabase} [moduleDatabase] - module database for confirm port connections of instances
      * @param {Function} [fileReader] - Optional file reader for `include resolution
-     * @returns {Module[]} Array of Module objects
+     * @returns {any[]} Array of error/warning diagnostic objects
      */
-    parseSymbols(document: any, modules: ModuleDatabase, fileReader: ((resolvedPath: string) => string | null) | null = null): any[] {
+    parseSymbols(document: any, moduleDatabase: ModuleDatabase | null = null, fileReader: ((resolvedPath: string) => string | null) | null = null): any[] {
+        const uri = document.uri.toString();
+        let text: string = document.getText();
+
+        // Determine base path for `include resolution
+        let basePath: string | null = null;
+        if (fileReader && uri.startsWith('file://')) {
+            const path = require('path') as typeof import('path');
+            const fsPath = decodeURIComponent(uri.replace(/^file:\/\//, ''));
+            basePath = path.dirname(fsPath);
+        }
+
+        // Preprocess (handle `include, `define, etc.)
+        text = preprocessVerilog(text, basePath, fileReader);
+
+        const visitor = this._parse(text, uri, moduleDatabase);
+
+        // Collect ANTLR syntax errors
+        const syntaxErrors = this.errorListener.getErrors();
+
+        // Generate signal-usage warnings
+        visitor.generateWarnings(moduleDatabase);
+
+        return [...syntaxErrors, ...visitor.warnings];
     }
 
 }

@@ -88,20 +88,18 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
     }
 
     const uri = document.uri.toString();
-    const modules = verilogParser.parseSymbols(document, fsFileReader);
+    const modules = verilogParser.parseModules(document, fsFileReader);
 
     // Remove existing entries for this file before adding fresh ones
     moduleDatabase.removeModulesFromFile(uri);
 
-    // parseSymbols returns fully-populated Module objects; add them directly
+    // parseModules returns Module objects with ports and parameters; add them directly
     for (const mod of modules) {
         moduleDatabase.addModule(mod);
     }
 
-    const signals = modules.reduce((acc, m) => acc + m.signalList.length, 0);
-    const instances = modules.reduce((acc, m) => acc + m.instanceList.length, 0);
     const parameters = modules.reduce((acc, m) => acc + m.parameterList.length, 0);
-    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${signals} signals, ${instances} instances, ${parameters} parameters found`);
+    console.log(`Updated symbols for ${uri}: ${modules.length} modules, ${parameters} parameters found`);
 }
 
 /**
@@ -113,11 +111,21 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
  */
 function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
     if (document.languageId !== 'verilog') return;
-    const uri = document.uri.toString();
-    const instances = moduleDatabase.getInstancesByUri(uri);
+    // Instance data is tracked internally by the parser visitor.
+    // Get the instances recorded in the last parse of this document.
+    const visitor = verilogParser._lastVisitor;
+    if (!visitor) return;
 
-    for (const instance of instances) {
-        const mod = moduleDatabase.getModule(instance.moduleName);
+    const instanced = new Set<string>();
+    for (const [, instanceList] of visitor._moduleInstanceLists) {
+        for (const inst of instanceList) {
+            instanced.add(inst.moduleName);
+        }
+    }
+
+    const uri = document.uri.toString();
+    for (const moduleName of instanced) {
+        const mod = moduleDatabase.getModule(moduleName);
         if (mod && !mod.scanned && mod.uri && mod.uri !== uri) {
             try {
                 const depFsPath = vscode.Uri.parse(mod.uri).fsPath;
@@ -129,7 +137,7 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
                 };
                 updateDocumentSymbols(depDoc);
             } catch (error) {
-                console.error(`Error parsing dependency ${instance.moduleName} from ${mod.uri}:`, error);
+                console.error(`Error parsing dependency ${moduleName} from ${mod.uri}:`, error);
             }
         }
     }
@@ -140,10 +148,9 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
  */
 class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
     provideDocumentSymbols(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.DocumentSymbol[] {
-        const modules = verilogParser.parseSymbols(document, fsFileReader);
-        const signals = modules.flatMap((m: any) => m.signalList);
+        const modules = verilogParser.parseModules(document, fsFileReader);
 
-        const moduleSymbols = modules.map((module: any) => {
+        return modules.map((module: any) => {
             const line = document.lineAt(module.line);
             const range = new vscode.Range(
                 new vscode.Position(module.line, line.firstNonWhitespaceCharacterIndex),
@@ -151,21 +158,6 @@ class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
             );
             return new vscode.DocumentSymbol(module.name, 'module', vscode.SymbolKind.Module, range, range);
         });
-
-        const signalSymbols = signals.map((signal: any) => {
-            const line = document.lineAt(signal.line);
-            const range = new vscode.Range(
-                new vscode.Position(signal.line, line.firstNonWhitespaceCharacterIndex),
-                new vscode.Position(signal.line, line.text.length)
-            );
-
-            const displayName = signal.bitWidth ? `${signal.name}${signal.bitWidth}` : signal.name;
-            const detail = signal.direction ? `${signal.direction} ${signal.type}` : signal.type;
-
-            return new vscode.DocumentSymbol(displayName, detail, vscode.SymbolKind.Variable, range, range);
-        });
-
-        return [...moduleSymbols, ...signalSymbols];
     }
 }
 
@@ -208,7 +200,7 @@ async function scanWorkspaceForModules() {
                     // Only add if not already present (ANTLR entry takes priority).
                     if (!moduleDatabase.getModule(entry.name)) {
                         moduleDatabase.addModule(
-                            new Module(entry.name, entry.uri, entry.line, entry.character, false)
+                            new Module(entry.name, entry.uri, entry.line, entry.character, -1, false)
                         );
                     }
                 }
@@ -229,10 +221,13 @@ async function scanWorkspaceForModules() {
     }
 
     // --- Step 4: resolve instances from open files and ANTLR-parse their deps ---
+    // Collect instantiated module names from the last-parsed visitors
     const neededModuleNames = new Set<string>();
-    for (const uri of openUris) {
-        for (const instance of moduleDatabase.getInstancesByUri(uri)) {
-            neededModuleNames.add(instance.moduleName);
+    if (verilogParser._lastVisitor) {
+        for (const [, instanceList] of verilogParser._lastVisitor._moduleInstanceLists) {
+            for (const inst of instanceList) {
+                neededModuleNames.add(inst.moduleName);
+            }
         }
     }
 
@@ -264,26 +259,6 @@ class VerilogDefinitionProvider implements vscode.DefinitionProvider {
         }
         
         const word = document.getText(wordRange);
-        
-        // First, check for signal definitions (wire/reg) in all modules of the current document
-        const currentDocSignals = moduleDatabase.getSignalsByUri(document.uri.toString());
-        const localSignal = currentDocSignals.find((s: any) => s.name === word);
-        
-        if (localSignal) {
-            const uri = vscode.Uri.parse(localSignal.uri);
-            const pos = new vscode.Position(localSignal.line, localSignal.character || 0);
-            return new vscode.Location(uri, pos);
-        }
-
-        // Check for parameter/localparam definitions in the current document
-        const currentDocParams = moduleDatabase.getParametersByUri(document.uri.toString());
-        const localParam = currentDocParams.find((p: any) => p.name === word);
-
-        if (localParam) {
-            const uri = vscode.Uri.parse(localParam.uri);
-            const pos = new vscode.Position(localParam.line, localParam.character || 0);
-            return new vscode.Location(uri, pos);
-        }
         
         // Check for module definitions in the module database (workspace-wide)
         const moduleSymbol = moduleDatabase.getModule(word);
@@ -346,7 +321,7 @@ function updateDiagnostics(document: vscode.TextDocument, diagnosticCollection: 
         return;
     }
 
-    const errors = verilogParser.generateErrors(document, moduleDatabase, fsFileReader);
+    const errors = verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
     const diagnostics: vscode.Diagnostic[] = [];
 
     for (const error of errors) {
@@ -439,7 +414,7 @@ export function activate(context: vscode.ExtensionContext) {
                     for (const entry of regexEntries) {
                         if (!moduleDatabase.getModule(entry.name)) {
                             moduleDatabase.addModule(
-                                new Module(entry.name, entry.uri, entry.line, entry.character, false)
+                                new Module(entry.name, entry.uri, entry.line, entry.character, -1, false)
                             );
                         }
                     }
@@ -501,26 +476,17 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('verilog.showSymbols', function () {
             const MAX_PREVIEW_LENGTH = 200;
             const allModules = moduleDatabase.getAllModules();
-            const allSignals = moduleDatabase.getAllSignals();
-            const totalSymbols = allModules.length + allSignals.length;
             
             const moduleInfo = allModules.map((m: any) => `module: ${m.name} (line ${m.line + 1})`).join('\n');
-            const signalInfo = allSignals.map((s: any) => `${s.type}: ${s.name} (line ${s.line + 1})`).join('\n');
             
-            let symbolInfo = '';
-            if (moduleInfo) symbolInfo += moduleInfo;
-            if (moduleInfo && signalInfo) symbolInfo += '\n';
-            if (signalInfo) symbolInfo += signalInfo;
-            
-            const preview = symbolInfo.length > MAX_PREVIEW_LENGTH 
-                ? symbolInfo.substring(0, MAX_PREVIEW_LENGTH) + '...' 
-                : symbolInfo;
+            const preview = moduleInfo.length > MAX_PREVIEW_LENGTH 
+                ? moduleInfo.substring(0, MAX_PREVIEW_LENGTH) + '...' 
+                : moduleInfo;
             vscode.window.showInformationMessage(
-                `Found ${totalSymbols} symbols (${allModules.length} modules, ${allSignals.length} signals):\n${preview}`,
+                `Found ${allModules.length} modules:\n${preview}`,
                 { modal: false }
             );
             console.log('Module database:', allModules);
-            console.log('Signals:', allSignals);
         })
     );
 
@@ -531,22 +497,6 @@ export function activate(context: vscode.ExtensionContext) {
                 const wordRange = document.getWordRangeAtPosition(position);
                 const word = document.getText(wordRange);
 
-                // Check for parameter/localparam first
-                const params = moduleDatabase.getParametersByUri(document.uri.toString());
-                const param = params.find((p: any) => p.name === word);
-
-                if (param) {
-                    let hoverContent = `**${param.name}** (${param.kind})\n\n`;
-                    if (param.exprText !== null && param.exprText !== undefined) {
-                        hoverContent += `= ${param.exprText}`;
-                        if (param.value !== null && param.value !== undefined && String(param.value) !== param.exprText) {
-                            hoverContent += ` = ${param.value}`;
-                        }
-                    }
-                    hoverContent += `\n\nat line ${param.line + 1}`;
-                    return new vscode.Hover(hoverContent);
-                }
-
                 // Check if hovered word is a port_identifier in a named_port_connection
                 // Pattern: ".portName(" preceded by an instance context
                 if (wordRange) {
@@ -554,59 +504,20 @@ export function activate(context: vscode.ExtensionContext) {
                     const charBefore = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
                     if (charBefore === '.') {
                         // This looks like a named port connection: .portName(...)
-                        // Find which instance this belongs to by scanning instances in this file
-                        const uri = document.uri.toString();
-                        const instances = moduleDatabase.getInstancesByUri(uri);
-                        for (const inst of instances) {
-                            if (!inst.namedPortNames || !inst.namedPortNames.includes(word)) continue;
-                            // Use port connection line position to match the correct instance
-                            // when multiple instances have the same port name
-                            const connOnLine = inst.portConnections.some((pc: any) =>
-                                pc.portName === word && pc.line === position.line);
-                            const emptyConn = !inst.portConnections.some((pc: any) => pc.portName === word);
-                            if (!connOnLine && !emptyConn) continue;
-                            const mod = moduleDatabase.getModule(inst.moduleName);
-                            if (mod && mod.ports) {
-                                const port = mod.ports.find((p: any) => p.name === word);
-                                if (port) {
-                                    // Evaluate port width with parameter overrides
-                                    const instModParams = moduleDatabase.getParameters(inst.moduleName);
-                                    const portWidth = AntlrVerilogParser.evaluatePortWidth(port, instModParams, inst.parameterOverrides);
-                                    const widthStr = portWidth !== null && portWidth > 1
-                                        ? `[${portWidth - 1}:0]`
-                                        : (portWidth === 1 ? '' : (port.bitWidth || ''));
-                                    const dirStr = port.direction || '';
-                                    let hoverContent = `**${port.name}**\n\n`;
-                                    hoverContent += `${dirStr}${widthStr ? widthStr : ''}\n`;
-                                    hoverContent += `module ${inst.moduleName}`;
-                                    return new vscode.Hover(hoverContent);
-                                }
+                        // Look up all known modules for a port with this name
+                        for (const mod of moduleDatabase.getAllModules()) {
+                            const port = mod.ports.find((p: any) => p.name === word);
+                            if (port) {
+                                const portAny = port as any;
+                                const widthStr = portAny.bitWidth ? portAny.bitWidth : '';
+                                const dirStr = port.direction || '';
+                                let hoverContent = `**${port.name}**\n\n`;
+                                hoverContent += `${dirStr}${widthStr ? widthStr : ''}\n`;
+                                hoverContent += `module ${mod.name}`;
+                                return new vscode.Hover(hoverContent);
                             }
                         }
                     }
-                }
-
-                // Fetch signals for the current document from signal database
-                const signals = moduleDatabase.getSignalsByUri(document.uri.toString());
-
-                // Find the signal matching the hovered word
-                const signal = signals.find((s: any) => s.name === word);
-
-                if (signal) {
-                    // Build hover content
-                    let hoverContent = `**${signal.name}**\n\n`;
-                    if (signal.direction) {
-                        hoverContent += `${signal.direction}\n`;
-                    }
-                    if (signal.type) {
-                        hoverContent += `${signal.type}\n`;
-                    }
-                    if (signal.bitWidth) {
-                        hoverContent += `${signal.bitWidth}\n`;
-                    }
-                    hoverContent += `at line ${signal.line + 1}`;
-
-                    return new vscode.Hover(hoverContent);
                 }
 
                 return null;

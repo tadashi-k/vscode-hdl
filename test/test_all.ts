@@ -7,6 +7,8 @@ import { spawnSync } from 'child_process';
 import * as path from 'path';
 
 const testFiles = [
+    'test_parse_modules.ts',
+    'test_parse_symbols.ts',
 ];
 
 const total = testFiles.length;
