@@ -90,9 +90,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _moduleDatabase: ModuleDatabase;
     _currentModule: Module | null;
     _moduleSignalRefs: Map<any, any>;
-    _signalRefList: any[];
-    assignLvalues: any[];
-    procLvalues: any[];
+    _signalRefPositions: Map<string, Map<string, {line: number, character: number}>>;
+    _assignLvalPositions: Map<string, Map<string, {line: number, character: number}>>;
+    _procLvalPositions: Map<string, Map<string, {line: number, character: number}>>;
     _instPortConnections: any[];
     _moduleParamNames: Map<any, any>;
     _moduleParams: Map<any, any>;
@@ -119,10 +119,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._moduleDatabase = modules;
         this._currentModule = null;
         // Per-module signal reference tracking (for warnings)
-        this._moduleSignalRefs = new Map();   // moduleName -> Set<signalName>
-        this._signalRefList = [];             // [{name, moduleName, line, character}]
-        this.assignLvalues = [];             // [{name, moduleName, line, character}] continuous assign lvalues
-        this.procLvalues = [];               // [{name, moduleName, line, character}] blocking/non-blocking lvalues
+        this._moduleSignalRefs = new Map();   // moduleName -> Set<signalName> (r-value refs, for Warning 2)
+        this._signalRefPositions = new Map(); // moduleName -> Map<signalName, {line, character}> (for Warning 1)
+        this._assignLvalPositions = new Map(); // moduleName -> Map<signalName, {line, character}> (continuous assign lvalues)
+        this._procLvalPositions = new Map();   // moduleName -> Map<signalName, {line, character}> (procedural lvalues)
         this._instPortConnections = [];      // [{instModuleName, portName, localSignalName, line, character, moduleName}]
         this._moduleParamNames = new Map();  // moduleName -> Set<paramName>
         this._moduleParams = new Map();      // moduleName -> Map<paramName, value> (for cross-param evaluation)
@@ -142,7 +142,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const refs = this._moduleSignalRefs.get(moduleName);
         if (refs && !refs.has(name)) {
             refs.add(name);
-            this._signalRefList.push({ name, moduleName, line, character });
+        }
+        const positions = this._signalRefPositions.get(moduleName);
+        if (positions && !positions.has(name)) {
+            positions.set(name, { line, character });
         }
     }
 
@@ -265,6 +268,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._moduleSignalLists.set(info.name, []);
         this._moduleSignalMaps.set(info.name, new Map());
         this._moduleInstanceLists.set(info.name, []);
+        this._signalRefPositions.set(info.name, new Map());
+        this._assignLvalPositions.set(info.name, new Map());
+        this._procLvalPositions.set(info.name, new Map());
 
         this.visitChildren(ctx);
 
@@ -378,10 +384,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                             // Track for undeclared-identifier checking (Warning 1)
                             // without adding to _moduleSignalRefs (preserves Warning 2
                             // behavior: output-port connections must not count as "used").
-                            this._signalRefList.push({
-                                name: localSignalInfo.name, moduleName: this._currentModule.name,
-                                line: localSignalInfo.line, character: localSignalInfo.character
-                            });
+                            const refPositions = this._signalRefPositions.get(this._currentModule.name);
+                            if (refPositions && !refPositions.has(localSignalInfo.name)) {
+                                refPositions.set(localSignalInfo.name, { line: localSignalInfo.line, character: localSignalInfo.character });
+                            }
                         } else if (exprCtx) {
                             // Check for concatenation: .port({sig_a, sig_b})
                             // Each identifier in the concat must be tracked via _instPortConnections
@@ -406,10 +412,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                         moduleName: this._currentModule.name
                                     });
                                     // Track for undeclared-identifier checking (Warning 1)
-                                    this._signalRefList.push({
-                                        name: localSignalInfo.name, moduleName: this._currentModule.name,
-                                        line: localSignalInfo.line, character: localSignalInfo.character
-                                    });
+                                    const refPositions = this._signalRefPositions.get(this._currentModule.name);
+                                    if (refPositions && !refPositions.has(localSignalInfo.name)) {
+                                        refPositions.set(localSignalInfo.name, { line: localSignalInfo.line, character: localSignalInfo.character });
+                                    }
                                 }
                             } else {
                                 // Complex expression (not a simple identifier or concatenation): visit
@@ -525,12 +531,18 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     visitAssignment(ctx: any) {
         if (!this._currentModule) return null;
         const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
+        const moduleName = this._currentModule.name;
         for (const lvalInfo of lvalIdentifiers) {
-            const entry = { ...lvalInfo, moduleName: this._currentModule.name };
             if (this._inContinuousAssign) {
-                this.assignLvalues.push(entry);
+                const lvals = this._assignLvalPositions.get(moduleName);
+                if (lvals && !lvals.has(lvalInfo.name)) {
+                    lvals.set(lvalInfo.name, { line: lvalInfo.line, character: lvalInfo.character });
+                }
             } else if (this._inProcedural) {
-                this.procLvalues.push(entry);
+                const lvals = this._procLvalPositions.get(moduleName);
+                if (lvals && !lvals.has(lvalInfo.name)) {
+                    lvals.set(lvalInfo.name, { line: lvalInfo.line, character: lvalInfo.character });
+                }
             }
         }
         // Evaluate r-value expression
@@ -550,8 +562,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     visitBlocking_assignment(ctx: any) {
         if (!this._currentModule) return null;
         const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
+        const procLvals = this._procLvalPositions.get(this._currentModule.name);
         for (const lvalInfo of lvalIdentifiers) {
-            this.procLvalues.push({ ...lvalInfo, moduleName: this._currentModule.name });
+            if (procLvals && !procLvals.has(lvalInfo.name)) {
+                procLvals.set(lvalInfo.name, { line: lvalInfo.line, character: lvalInfo.character });
+            }
         }
         // Evaluate r-value expression
         const exprCtx = ctx.expression ? ctx.expression() : null;
@@ -570,8 +585,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     visitNon_blocking_assignment(ctx: any) {
         if (!this._currentModule) return null;
         const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
+        const procLvals = this._procLvalPositions.get(this._currentModule.name);
         for (const lvalInfo of lvalIdentifiers) {
-            this.procLvalues.push({ ...lvalInfo, moduleName: this._currentModule.name });
+            if (procLvals && !procLvals.has(lvalInfo.name)) {
+                procLvals.set(lvalInfo.name, { line: lvalInfo.line, character: lvalInfo.character });
+            }
         }
         // Evaluate r-value expression and check bit width mismatch
         const exprCtx = ctx.expression ? ctx.expression() : null;
@@ -1406,10 +1424,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(netIdCtx)) {
-                this.assignLvalues.push({
-                    ...info,
-                    moduleName: this._currentModule.name
-                });
+                const assignLvals = this._assignLvalPositions.get(this._currentModule.name);
+                if (assignLvals && !assignLvals.has(info.name)) {
+                    assignLvals.set(info.name, { line: info.line, character: info.character });
+                }
             }
         }
         this.visitChildren(ctx);
@@ -1455,10 +1473,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(regIdCtx)) {
-                this.procLvalues.push({
-                    ...info,
-                    moduleName: this._currentModule.name
-                });
+                const procLvals = this._procLvalPositions.get(this._currentModule.name);
+                if (procLvals && !procLvals.has(info.name)) {
+                    procLvals.set(info.name, { line: info.line, character: info.character });
+                }
             }
         }
         this.visitChildren(ctx);
@@ -1497,10 +1515,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
             // Mark as assigned if it has an initial value
             if (idsWithInit.has(intIdCtx)) {
-                this.procLvalues.push({
-                    ...info,
-                    moduleName: this._currentModule.name
-                });
+                const procLvals = this._procLvalPositions.get(this._currentModule.name);
+                if (procLvals && !procLvals.has(info.name)) {
+                    procLvals.set(info.name, { line: info.line, character: info.character });
+                }
             }
         }
         this.visitChildren(ctx);
@@ -1627,19 +1645,18 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             // Build the set of assigned signals: all explicit l-values plus signals driven
             // by output or inout ports of instantiated modules (used for Warnings 2 and 7).
             const assignedSignals = new Set(assignedViaPortOutput);
-            for (const lval of [...this.assignLvalues, ...this.procLvalues].filter((l: any) => l.moduleName === moduleName)) {
-                assignedSignals.add(lval.name);
-            }
+            const assignLvals = this._assignLvalPositions.get(moduleName) || new Map();
+            const procLvals = this._procLvalPositions.get(moduleName) || new Map();
+            for (const name of assignLvals.keys()) assignedSignals.add(name);
+            for (const name of procLvals.keys()) assignedSignals.add(name);
 
             // Warning 1: signal reference without declaration
-            const reportedUndefined = new Set();
-            for (const refEntry of this._signalRefList.filter((r: any) => r.moduleName === moduleName)) {
-                const name = refEntry.name;
-                if (!declaredByName.has(name) && !paramNames.has(name) && !genvarNames.has(name) && !reportedUndefined.has(name)) {
-                    reportedUndefined.add(name);
+            const refPositions = this._signalRefPositions.get(moduleName) || new Map();
+            for (const [name, pos] of refPositions) {
+                if (!declaredByName.has(name) && !paramNames.has(name) && !genvarNames.has(name)) {
                     this.warnings.push({
-                        line: refEntry.line,
-                        character: refEntry.character,
+                        line: pos.line,
+                        character: pos.character,
                         length: name.length,
                         message: `Signal '${name}' is referenced but not declared`,
                         severity: vscode.DiagnosticSeverity.Warning
@@ -1671,34 +1688,28 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             }
 
             // Warning 3: continuous assign statement l-value is a reg
-            const reportedAssignReg = new Set();
-            for (const lval of this.assignLvalues.filter((l: any) => l.moduleName === moduleName)) {
-                if (reportedAssignReg.has(lval.name)) continue;
-                const sig = declaredByName.get(lval.name);
+            for (const [name, pos] of assignLvals) {
+                const sig = declaredByName.get(name);
                 if (sig && (sig.type === 'reg' || sig.type === 'integer')) {
-                    reportedAssignReg.add(lval.name);
                     this.warnings.push({
-                        line: lval.line,
-                        character: lval.character,
-                        length: lval.name.length,
-                        message: `Assign statement l-value '${lval.name}' is a ${sig.type}`,
+                        line: pos.line,
+                        character: pos.character,
+                        length: name.length,
+                        message: `Assign statement l-value '${name}' is a ${sig.type}`,
                         severity: vscode.DiagnosticSeverity.Warning
                     });
                 }
             }
 
             // Warning 4: procedural (always/initial) l-value is a wire
-            const reportedProcWire = new Set();
-            for (const lval of this.procLvalues.filter((l: any) => l.moduleName === moduleName)) {
-                if (reportedProcWire.has(lval.name)) continue;
-                const sig = declaredByName.get(lval.name);
+            for (const [name, pos] of procLvals) {
+                const sig = declaredByName.get(name);
                 if (sig && wireTypes.has(sig.type)) {
-                    reportedProcWire.add(lval.name);
                     this.warnings.push({
-                        line: lval.line,
-                        character: lval.character,
-                        length: lval.name.length,
-                        message: `Procedural assignment l-value '${lval.name}' is a wire`,
+                        line: pos.line,
+                        character: pos.character,
+                        length: name.length,
+                        message: `Procedural assignment l-value '${name}' is a wire`,
                         severity: vscode.DiagnosticSeverity.Warning
                     });
                 }
@@ -1706,15 +1717,15 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
             // Warning 5: input signal used as l-value in assign or procedural block
             const reportedInputLval = new Set();
-            for (const lval of [...this.assignLvalues, ...this.procLvalues].filter((l: any) => l.moduleName === moduleName)) {
-                if (reportedInputLval.has(lval.name)) continue;
-                if (declaredSignals.some((s: any) => s.name === lval.name && s.direction === 'input')) {
-                    reportedInputLval.add(lval.name);
+            for (const [name, pos] of [...assignLvals.entries(), ...procLvals.entries()]) {
+                if (reportedInputLval.has(name)) continue;
+                if (declaredSignals.some((s: any) => s.name === name && s.direction === 'input')) {
+                    reportedInputLval.add(name);
                     this.warnings.push({
-                        line: lval.line,
-                        character: lval.character,
-                        length: lval.name.length,
-                        message: `Input signal '${lval.name}' cannot be used as l-value`,
+                        line: pos.line,
+                        character: pos.character,
+                        length: name.length,
+                        message: `Input signal '${name}' cannot be used as l-value`,
                         severity: vscode.DiagnosticSeverity.Warning
                     });
                 }
