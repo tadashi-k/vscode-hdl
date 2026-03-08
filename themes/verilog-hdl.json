@@ -13,14 +13,14 @@
     {
       "scope": "variable.other.reg.verilog",
       "settings": {
-        "foreground": "#CE9178",
+        "foreground": "#C99198",
         "fontStyle": ""
       }
     },
     {
       "scope": "variable.other.integer.verilog",
       "settings": {
-        "foreground": "#B5CEA8",
+        "foreground": "#B58E78",
         "fontStyle": ""
       }
     },
@@ -46,24 +46,17 @@
       }
     },
     {
+      "scope": "storage.type.verilog",
+      "settings": {
+        "foreground": "#569CD6",
+        "fontStyle": ""
+      }
+    },
+    {
       "scope": "keyword.control.verilog",
       "settings": {
         "foreground": "#569CD6",
-        "fontStyle": "bold"
-      }
-    },
-    {
-      "scope": "storage.type.wire.verilog",
-      "settings": {
-        "foreground": "#9CDCFE",
-        "fontStyle": "bold"
-      }
-    },
-    {
-      "scope": "storage.type.reg.verilog",
-      "settings": {
-        "foreground": "#D7BA7D",
-        "fontStyle": "bold"
+        "fontStyle": ""
       }
     },
     {

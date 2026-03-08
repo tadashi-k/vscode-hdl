@@ -162,6 +162,23 @@ export function computeSemanticTokens(
 
                 if (VERILOG_KEYWORDS.has(word)) continue;
 
+                const mod = modules[moduleIdx];
+                const def = mod?.definitionMap.get(word);
+                if (def) {
+                    const modifiers: string[] = [];
+                    if (def.line === lineNum && def.character === start) {
+                        modifiers.push('declaration');
+                    }
+                    tokens.push({
+                        line: lineNum,
+                        character: start,
+                        length: word.length,
+                        tokenType: defTypeToTokenType(def.type),
+                        tokenModifiers: modifiers,
+                    });
+                    continue;
+                }
+
                 // Check for module token (module declaration name, instantiated module name, instance name)
                 const moduleToken = moduleTokenMap.get(`${lineNum}:${start}`);
                 if (moduleToken) {
@@ -171,26 +188,6 @@ export function computeSemanticTokens(
                         length: word.length,
                         tokenType: 'hdlModule',
                         tokenModifiers: [],
-                    });
-                    continue;
-                }
-
-                const mod = modules[moduleIdx];
-                const def = mod?.definitionMap.get(word);
-                if (def) {
-                    const modifiers: string[] = [];
-                    if (def.line === lineNum && def.character === start) {
-                        modifiers.push('declaration');
-                    }
-                    if (def.type === 'port') {
-                        modifiers.push('hdlPort');
-                    }
-                    tokens.push({
-                        line: lineNum,
-                        character: start,
-                        length: word.length,
-                        tokenType: defTypeToTokenType(def.type),
-                        tokenModifiers: modifiers,
                     });
                     continue;
                 }

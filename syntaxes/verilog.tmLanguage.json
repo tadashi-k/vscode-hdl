@@ -60,48 +60,6 @@
         }
       ]
     },
-    "signal-declarations": {
-      "patterns": [
-        {
-          "match": "\\b(wire)\\b\\s*(?:\\[[^\\]]*\\]\\s*)?([a-zA-Z_][a-zA-Z0-9_$]*)",
-          "captures": {
-            "1": { "name": "storage.type.wire.verilog" },
-            "2": { "name": "variable.other.wire.verilog" }
-          }
-        },
-        {
-          "match": "\\b(reg)\\b\\s*(?:\\[[^\\]]*\\]\\s*)?([a-zA-Z_][a-zA-Z0-9_$]*)",
-          "captures": {
-            "1": { "name": "storage.type.reg.verilog" },
-            "2": { "name": "variable.other.reg.verilog" }
-          }
-        },
-        {
-          "match": "\\b(integer)\\s+([a-zA-Z_][a-zA-Z0-9_$]*)",
-          "captures": {
-            "1": { "name": "storage.type.integer.verilog" },
-            "2": { "name": "variable.other.integer.verilog" }
-          }
-        }
-      ]
-    },
-    "module-instantiation": {
-      "patterns": [
-        {
-          "match": "\\b([a-zA-Z_]\\w*)\\s+#\\s*\\(",
-          "captures": {
-            "1": { "name": "entity.name.tag.module-instance.verilog" }
-          }
-        },
-        {
-          "match": "\\b([a-zA-Z_]\\w*)\\s+([a-zA-Z_]\\w*)\\s*\\(",
-          "captures": {
-            "1": { "name": "entity.name.tag.module-instance.verilog" },
-            "2": { "name": "variable.other.instance.verilog" }
-          }
-        }
-      ]
-    },
     "blocks": {
       "patterns": [
         {

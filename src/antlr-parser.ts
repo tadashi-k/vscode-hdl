@@ -239,7 +239,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (signal.type && signal.type !== DEFAULT_NET_TYPE) parts.push(signal.type);
         if (signal.bitWidth) parts.push(signal.bitWidth);
         parts.push(signal.name);
-        return new Definition(signal.name, signal.line, signal.character, 'port', parts.join(' '));
+        return new Definition(signal.name, signal.line, signal.character, signal.type, parts.join(' '));
     }
 
     visitModule_declaration(ctx: any) {
