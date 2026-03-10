@@ -228,6 +228,34 @@ console.log('\nTest: parseSymbols on test_instance.v (no false warnings for conc
         "no 'never assigned' warning for count_l (driven by output port via concat)");
 }
 
+// ── Test 9: test_bitwidth.v – arrayed wire bit-width checks ───────────────
+
+console.log('\nTest: parseSymbols on test_bitwidth.v (arrayed wire bit-width)');
+{
+    // test_bitwidth.v defines: wire[7:0] array[3:0];
+    // array[0] and array[1] are 8-bit elements, so:
+    //   assign array[0] = data_out;  (line 13, 0-indexed 12) → should NOT warn (8 bits = 8 bits)
+    //   data_out <= array[1];        (line 21, 0-indexed 20) → should NOT warn (8 bits = 8 bits)
+    const db = new ModuleDatabase();
+    parser.parseSymbols(makeDoc('counter.v'), db, null);
+    parser.parseSymbols(makeDoc('test_bitwidth.v'), db, null);
+    const diags = parser.getDiagnostics(db);
+    const warnings = diags.filter((d: any) => d.severity === SEVERITY_WARNING);
+
+    // array[0] = data_out: both 8 bits → no width-mismatch warning
+    const arrayLvalWarning = warnings.find((w: any) =>
+        w.message.includes("array[0]") && w.message.includes('Bit width mismatch'));
+    assert(arrayLvalWarning === undefined,
+        "no bit-width warning for 'assign array[0] = data_out' (both 8 bits)");
+
+    // data_out <= array[1]: both 8 bits → no width-mismatch warning on line 20 (0-indexed)
+    const arrayRvalWarning = warnings.find((w: any) =>
+        w.line === 20 && w.message.includes('Bit width mismatch') &&
+        w.message.includes("'data_out'") && w.message.includes('width 1'));
+    assert(arrayRvalWarning === undefined,
+        "no bit-width warning for 'data_out <= array[1]' (both 8 bits)");
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
