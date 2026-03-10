@@ -125,19 +125,42 @@ console.log('\nTest: getDiagnostics return value structure');
 
 console.log('\nTest: parseSymbols on test_instance.v (port-connection warnings)');
 {
-    // Build a module database containing the counter module
+    // test_instance.v defines both test_instance and ram in the same file.
+    // ram_i_1 uses DEPTH=16 → ADR_WIDTH=4 (4-bit addr port), ram_i_2 uses DEPTH=32 → ADR_WIDTH=5.
     const db = new ModuleDatabase();
-    parser.parseModules(makeDoc('counter.v'), db);
-
     parser.parseSymbols(makeDoc('test_instance.v'), db, null);
     const diags = parser.getDiagnostics(db);
     const warnings = diags.filter((d: any) => d.severity === SEVERITY_WARNING);
 
-    // counter_i_2 has .count_out port missing (warning 8: unconnected)
+    // ram_i_2 has .we port missing (warning 8: unconnected)
     const unconnectedWarning = warnings.find((w: any) =>
-        w.message.includes('unconnected') && w.message.includes('count_out'));
+        w.message.includes('unconnected') && w.message.includes('we'));
     assert(unconnectedWarning !== undefined,
-        'warning: count_out is unconnected in counter_i_2');
+        'warning: we is unconnected in ram_i_2');
+
+    // ram_i_1: addr port has width 4 (DEPTH=16 → ADR_WIDTH=4), but addr signal has width 5
+    // → should warn (line 25, 0-indexed)
+    const addrWidthWarning = warnings.find((w: any) =>
+        w.message.includes("Port 'addr'") && w.message.includes('width 4') &&
+        w.message.includes("'addr'") && w.message.includes('width 5'));
+    assert(addrWidthWarning !== undefined,
+        'warning: addr width mismatch in ram_i_1 (port 4 bits vs signal 5 bits)');
+    assert(addrWidthWarning !== undefined && addrWidthWarning.line === 25,
+        'addr width warning is at line 25 (ram_i_1, 0-indexed)');
+
+    // ram_i_2: addr port has width 5 (DEPTH=32 → ADR_WIDTH=5), addr signal has width 5
+    // → should NOT warn
+    const addrWidthWarningRam2 = warnings.find((w: any) =>
+        w.message.includes("Port 'addr'") && w.line === 36);
+    assert(addrWidthWarningRam2 === undefined,
+        'no addr width warning for ram_i_2 (DEPTH=32, ADR_WIDTH=5, port 5 bits = signal 5 bits)');
+
+    // Concatenated connections {init_h, init_l} and {count_h, count_l} each have
+    // combined width 8, matching the 8-bit data_in / data_out ports → NO width warning
+    const concatWidthWarning = warnings.find((w: any) =>
+        w.message.includes("Port 'data_in'") || w.message.includes("Port 'data_out'"));
+    assert(concatWidthWarning === undefined,
+        'no width warning for 8-bit concatenated connections to 8-bit ports');
 
     assert(warnings.length > 0, 'at least one warning generated for test_instance.v');
 }

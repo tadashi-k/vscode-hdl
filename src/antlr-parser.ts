@@ -390,8 +390,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                             }
                         } else if (exprCtx) {
                             // Check for concatenation: .port({sig_a, sig_b})
-                            // Each identifier in the concat must be tracked via _instPortConnections
-                            // (not as an r-value ref) so output-port assignments are detected.
+                            // Each identifier in the concat must be tracked for undeclared-identifier
+                            // checking, but for width comparison we use the full concatenation width.
                             const _exprPrimary = exprCtx.primary ? exprCtx.primary() : null;
                             const _concatCtx = _exprPrimary?.concatenation ? _exprPrimary.concatenation() : null;
                             const concatIdents = _concatCtx ? this._getConcatenationIdentifiers(_concatCtx) : null;
@@ -403,20 +403,24 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                         line: localSignalInfo.line,
                                         character: localSignalInfo.character
                                     });
-                                    this._instPortConnections.push({
-                                        instModuleName,
-                                        portName: portInfo.name,
-                                        localSignalName: localSignalInfo.name,
-                                        line: localSignalInfo.line,
-                                        character: localSignalInfo.character,
-                                        moduleName: this._currentModule.name
-                                    });
                                     // Track for undeclared-identifier checking (Warning 1)
                                     const refPositions = this._signalRefPositions.get(this._currentModule.name);
                                     if (refPositions && !refPositions.has(localSignalInfo.name)) {
                                         refPositions.set(localSignalInfo.name, { line: localSignalInfo.line, character: localSignalInfo.character });
                                     }
                                 }
+                                // For width comparison, push ONE entry for the full concatenation
+                                // so the combined width (sum of all member widths) is compared
+                                // against the port width instead of each member individually.
+                                this._instPortConnections.push({
+                                    instModuleName,
+                                    portName: portInfo.name,
+                                    localSignalName: exprCtx.getText(),
+                                    line: concatIdents[0].line,
+                                    character: concatIdents[0].character,
+                                    moduleName: this._currentModule.name,
+                                    exprCtx
+                                });
                             } else {
                                 // Complex expression (not a simple identifier or concatenation): visit
                                 // it so its identifiers are tracked as r-value refs in _moduleSignalRefs.
@@ -895,6 +899,19 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (overrides && typeof overrides === 'object') {
             for (const [name, value] of Object.entries(overrides)) {
                 paramMap.set(name, { value, width: null });
+            }
+        }
+        // Re-evaluate derived parameters in declaration order so that parameters
+        // whose values depend on overridden parameters are recomputed correctly.
+        // (e.g. ADR_WIDTH = f(DEPTH) must be recomputed when DEPTH is overridden)
+        if (Array.isArray(params) && overrides && typeof overrides === 'object') {
+            for (const p of params) {
+                if (p.exprText && p.name && !(p.name in overrides)) {
+                    const reeval = this._evalSimpleExpr(p.exprText, paramMap);
+                    if (reeval !== null) {
+                        paramMap.set(p.name, { value: reeval, width: null });
+                    }
+                }
             }
         }
 
