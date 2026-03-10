@@ -4,6 +4,7 @@ module test_instance (
     output reg[7:0] count_out
 );
 
+reg[4:0] addr;
 reg[3:0] init_h, init_l;
 wire[3:0] count_h, count_l;
 
@@ -11,27 +12,57 @@ always @(posedge clk) begin
     {init_h,init_l} <= 8'h45;
 
     count_out <= {count_h, count_l};
+
+    addr <= addr + 1;
 end
 
-counter #(
+ram #(
+    .DEPTH(16),
     .WIDTH(8)
-)
-counter_i_1 (
+) ram_i_1 (
     .clk(clk),
-    .reset(reset),
-    .count_in({init_h, init_l}),
-    .count_out({count_h, count_l})
+    .we(1'b0),
+    .re(1'b0),
+    .addr(addr),
+    .data_in({init_h, init_l}),
+    .data_out({count_h, count_l})
 );
 
-// need .count_out otherwise show warning at counter_i_2
-// .reset() is OK because it means unconnected port obviously
-counter #(
+ram #(
+    .DEPTH(32),
     .WIDTH(8)
-)
-counter_i_2 (
+) ram_i_2 (
     .clk(clk),
-    .reset(),
-    .count_in({init_l, init_h})
+    .re(1'b0),
+    .addr(addr),
+    .data_in({init_h, init_l}),
+    .data_out({count_h, count_l})
 );
+
+endmodule
+
+module ram #(
+    parameter DEPTH = 32,
+    parameter WIDTH = 8,
+    parameter ADR_WIDTH = (DEPTH == 16) ? 4 : (DEPTH == 32) ? 5 : (DEPTH == 64) ? 6 : 0
+)
+(
+    input clk,
+    input[ADR_WIDTH-1:0] addr,
+    input [WIDTH-1:0] data_in,
+    input we,
+    input re,
+    output reg [WIDTH-1:0] data_out
+);
+
+reg[WIDTH-1:0] mem[0:DEPTH-1];
+
+always @(posedge clk) begin
+    if (we) begin
+        mem[addr] <= data_in;
+    end else if (re) begin
+        data_out <= mem[addr];
+    end
+end
 
 endmodule
