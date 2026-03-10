@@ -8,13 +8,17 @@ module test_bitwidth(
 
 reg [15:0] counter_int;
 
+wire[7:0] array[3:0];
+
+assign array[0] = data_out; // correct, should not warn because both bits are 8 bits
+
 always @(posedge clk) begin
     if (reset) begin
         data_out <= {8'b0,valid}; // need to warn bit width mismatch: from 9 bits to 8 bits
     end else if (valid) begin
         data_out <= valid; // need to warn bit width mismatch: from 1 bit to 8 bits
     end else begin
-        data_out <= data_in + 8'b0;
+        data_out <= array[1]; // correct, should not warn because both bits are 8 bits
     end
 
     // need to warn bit width mismatch: from 3 bits to 1 bit
@@ -23,6 +27,7 @@ always @(posedge clk) begin
         counter_int[9:0] <= {data_in, data_out}; // need to warn bit width mismatch: from 16 bits to 10 bits
     end
 end
+
 
 assign valid = data_in[0]; // should not warn because both bits are 1 bit
 
