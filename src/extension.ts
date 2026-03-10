@@ -416,6 +416,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (!changed) {
                 return;
             }
+            changed = false;
             verilogParser.dirty();
             updateDocumentSymbols(doc);
             ensureInstanceDependenciesParsed(doc);
