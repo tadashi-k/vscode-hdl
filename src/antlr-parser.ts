@@ -412,6 +412,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 // For width comparison, push ONE entry for the full concatenation
                                 // so the combined width (sum of all member widths) is compared
                                 // against the port width instead of each member individually.
+                                // concatMembers stores the individual signal names so that
+                                // _generateWarnings can correctly mark each member as "used" or
+                                // "assigned" depending on the port direction.
                                 this._instPortConnections.push({
                                     instModuleName,
                                     portName: portInfo.name,
@@ -419,7 +422,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                     line: concatIdents[0].line,
                                     character: concatIdents[0].character,
                                     moduleName: this._currentModule.name,
-                                    exprCtx
+                                    exprCtx,
+                                    concatMembers: concatIdents.map((id: any) => id.name)
                                 });
                             } else {
                                 // Complex expression (not a simple identifier or concatenation): visit
@@ -1651,11 +1655,14 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 if (!instModPorts) continue;
                 const instPort = instModPorts.get(conn.portName);
                 if (!instPort) continue;
+                // For concatenated connections (.port({a, b})), conn.concatMembers holds
+                // the individual signal names; otherwise use conn.localSignalName directly.
+                const signalNames: string[] = conn.concatMembers || [conn.localSignalName];
                 if (instPort.direction === 'input' || instPort.direction === 'inout') {
-                    usedViaPortInput.add(conn.localSignalName);
+                    for (const name of signalNames) usedViaPortInput.add(name);
                 }
                 if (instPort.direction === 'output' || instPort.direction === 'inout') {
-                    assignedViaPortOutput.add(conn.localSignalName);
+                    for (const name of signalNames) assignedViaPortOutput.add(name);
                 }
             }
 
@@ -1757,17 +1764,20 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 const instPort = instModPorts.get(conn.portName);
                 if (!instPort || (instPort.direction !== 'output' && instPort.direction !== 'inout')) continue;
 
-                if (!reportedOutputPortReg.has(conn.localSignalName) &&
-                    declaredSignals.some((s: any) => s.name === conn.localSignalName && (s.type === 'reg' || s.type === 'integer'))) {
-                    reportedOutputPortReg.add(conn.localSignalName);
-                    const dirLabel = instPort.direction.charAt(0).toUpperCase() + instPort.direction.slice(1);
-                    this.warnings.push({
-                        line: conn.line,
-                        character: conn.character,
-                        length: conn.localSignalName.length,
-                        message: `${dirLabel} port '${conn.portName}' of instantiated module cannot be connected to reg signal '${conn.localSignalName}'`,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
+                const signalNames: string[] = conn.concatMembers || [conn.localSignalName];
+                for (const sigName of signalNames) {
+                    if (!reportedOutputPortReg.has(sigName) &&
+                        declaredSignals.some((s: any) => s.name === sigName && (s.type === 'reg' || s.type === 'integer'))) {
+                        reportedOutputPortReg.add(sigName);
+                        const dirLabel = instPort.direction.charAt(0).toUpperCase() + instPort.direction.slice(1);
+                        this.warnings.push({
+                            line: conn.line,
+                            character: conn.character,
+                            length: sigName.length,
+                            message: `${dirLabel} port '${conn.portName}' of instantiated module cannot be connected to reg signal '${sigName}'`,
+                            severity: vscode.DiagnosticSeverity.Warning
+                        });
+                    }
                 }
             }
 

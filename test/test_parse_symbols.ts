@@ -194,6 +194,40 @@ console.log('\nTest: parseSymbols on test_symbols.v (signal-usage warnings)');
     assert(warnings.length > 0, 'signal-usage warnings generated for test_symbols.v');
 }
 
+// ── Test 8: test_instance.v – no false warnings for concatenated signals ──
+
+console.log('\nTest: parseSymbols on test_instance.v (no false warnings for concat signals)');
+{
+    // test_instance.v: init_h, init_l are reg assigned via {init_h,init_l} <= 8'h45
+    // and connected as input to .data_in({init_h, init_l}) — should NOT warn "never used".
+    // count_h, count_l are wire connected as output from .data_out({count_h, count_l})
+    // and used in count_out <= {count_h, count_l} — should NOT warn "never assigned".
+    const db = new ModuleDatabase();
+    parser.parseSymbols(makeDoc('test_instance.v'), db, null);
+    const diags = parser.getDiagnostics(db);
+    const warnings = diags.filter((d: any) => d.severity === SEVERITY_WARNING);
+
+    const initHNeverUsed = warnings.find((w: any) =>
+        w.message.includes("'init_h'") && w.message.includes('never used'));
+    assert(initHNeverUsed === undefined,
+        "no 'never used' warning for init_h (connected to input port via concat)");
+
+    const initLNeverUsed = warnings.find((w: any) =>
+        w.message.includes("'init_l'") && w.message.includes('never used'));
+    assert(initLNeverUsed === undefined,
+        "no 'never used' warning for init_l (connected to input port via concat)");
+
+    const countHNeverAssigned = warnings.find((w: any) =>
+        w.message.includes("'count_h'") && w.message.includes('never assigned'));
+    assert(countHNeverAssigned === undefined,
+        "no 'never assigned' warning for count_h (driven by output port via concat)");
+
+    const countLNeverAssigned = warnings.find((w: any) =>
+        w.message.includes("'count_l'") && w.message.includes('never assigned'));
+    assert(countLNeverAssigned === undefined,
+        "no 'never assigned' warning for count_l (driven by output port via concat)");
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
