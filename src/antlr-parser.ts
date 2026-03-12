@@ -1428,6 +1428,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const info = this._getIdentifierInfo(netIdCtx.identifier());
             if (!info) continue;
 
+            // Detect array wire: wire [W:0] arr [0:N-1] — the identifier has a range
+            // (array dimension) in the list_of_net_identifiers context.
+            const isMemory = this._registerIdentifierHasArrayRange(netIdsCtx, netIdCtx);
+
             const signal: any = {
                 name: info.name,
                 uri: this.uri,
@@ -1436,6 +1440,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 direction: null,
                 type,
                 bitWidth,
+                isMemory,
                 moduleName: this._currentModule.name
             };
             this._moduleSignalLists.get(this._currentModule.name)!.push(signal);
