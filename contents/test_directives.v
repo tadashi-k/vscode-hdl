@@ -1,8 +1,10 @@
 // Verilog file with compile directives for testing
 `timescale 1ns / 1ps
 
-`define BUS_WIDTH 8
+`define BUS_WIDTH 16
 `define CLK_PERIOD 10
+
+`undef CLOCK_PERIOD
 
 `include "defines.vh"
 
@@ -26,6 +28,10 @@ module test_directives (
         else
             addr <= addr + 1;
         
+    end
+
+    initial begin
+        #(`CLK_PERIOD * 100); // should show error for undefined `CLK_PERIOD
     end
 
 endmodule
