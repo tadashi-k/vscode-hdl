@@ -11,6 +11,7 @@ const testFiles = [
     'test_parse_symbols.ts',
     'test_definitions.ts',
     'test_directive.ts',
+    'test_warning.ts',
 ];
 
 const total = testFiles.length;
