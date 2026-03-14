@@ -123,10 +123,8 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
     if (!visitor) return;
 
     const instanced = new Set<string>();
-    for (const [, instanceList] of visitor._moduleInstanceLists) {
-        for (const inst of instanceList) {
-            instanced.add(inst.moduleName);
-        }
+    for (const inst of visitor._allInstances) {
+        instanced.add(inst.moduleName);
     }
 
     const uri = document.uri.toString();
@@ -231,10 +229,8 @@ async function scanWorkspaceForModules() {
     // Collect instantiated module names from the last-parsed visitors
     const neededModuleNames = new Set<string>();
     if (verilogParser._lastVisitor) {
-        for (const [, instanceList] of verilogParser._lastVisitor._moduleInstanceLists) {
-            for (const inst of instanceList) {
-                neededModuleNames.add(inst.moduleName);
-            }
+        for (const inst of verilogParser._lastVisitor._allInstances) {
+            neededModuleNames.add(inst.moduleName);
         }
     }
 
