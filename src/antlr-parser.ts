@@ -3,6 +3,7 @@
 
 import type * as vsCodeModule from 'vscode';
 import antlr4 from 'antlr4';
+import { fileURLToPath } from 'url';
 import { preprocessVerilog } from './verilog-scanner';
 import { VerilogLexer } from '../antlr/generated/VerilogLexer';
 import { VerilogParser } from '../antlr/generated/VerilogParser';
@@ -1994,7 +1995,7 @@ class AntlrVerilogParser {
         let basePath: string | null = null;
         if (fileReader && uri.startsWith('file://')) {
             const path = require('path') as typeof import('path');
-            const fsPath = decodeURIComponent(uri.replace(/^file:\/\//, ''));
+            const fsPath = fileURLToPath(uri);
             basePath = path.dirname(fsPath);
         }
 
@@ -2038,7 +2039,7 @@ class AntlrVerilogParser {
         let basePath: string | null = null;
         if (fileReader && uri.startsWith('file://')) {
             const path = require('path') as typeof import('path');
-            const fsPath = decodeURIComponent(uri.replace(/^file:\/\//, ''));
+            const fsPath = fileURLToPath(uri);
             basePath = path.dirname(fsPath);
         }
 
