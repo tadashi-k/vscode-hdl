@@ -102,9 +102,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _signalList: any[];            // signal[] for current module
     _signalMap: Map<string, any>;  // signalName -> signal for current module
     _instanceList: any[];          // instance[] for current module
-    // Pending per-module data saved by _generateWarnings, processed by _finalizeWarnings
-    _pendingModuleData: any[];
     // Accumulated across all modules (available after parse completes)
+    _pendingModuleData: any[];     // minimal per-module data for cross-module warnings
     _allInstances: any[];          // all instances from all modules
     _inProcedural: boolean;
     _inContinuousAssign: boolean;
@@ -1593,46 +1592,123 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     /**
-     * Save the current module's warning-relevant state for deferred processing.
+     * Generate per-module signal-usage warnings directly using live state,
+     * and save minimal data for cross-module warnings.
      * Called from visitModule_declaration after visitChildren.
-     * The actual warning generation is deferred to _finalizeWarnings() to ensure
-     * all modules in the file are available for cross-module port checks.
+     * Warnings that depend only on the current module's data (1, 3, 4, 5, 10, 11)
+     * are generated immediately. Cross-module warnings (2, 6, 7, 8, 9, 12) that
+     * require all modules' port information are deferred to _finalizeWarnings().
+     * Populates this.warnings for per-module warnings.
      */
     _generateWarnings() {
         if (!this._currentModule) return;
-        // Save a snapshot of the current module's flat warning state.
-        // Using spread/copy so that subsequent module resets don't affect saved data.
+
+        const wireTypes = new Set(['wire', 'tri', 'supply0', 'supply1']);
+        const declaredByName = new Map<string, any>(this._signalList.map((s: any) => [s.name, s]));
+
+        // Warning 1: signal reference without declaration
+        for (const [name, pos] of this._signalRefPositions) {
+            if (!declaredByName.has(name) && !this._paramNames.has(name) && !this._genvarNames.has(name)) {
+                this.warnings.push({
+                    line: pos.line,
+                    character: pos.character,
+                    length: name.length,
+                    message: `Signal '${name}' is referenced but not declared`,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
+            }
+        }
+
+        // Warning 3: continuous assign statement l-value is a reg
+        for (const [name, pos] of this._assignLvalPositions) {
+            const sig = declaredByName.get(name);
+            if (sig && (sig.type === 'reg' || sig.type === 'integer')) {
+                this.warnings.push({
+                    line: pos.line,
+                    character: pos.character,
+                    length: name.length,
+                    message: `Assign statement l-value '${name}' is a ${sig.type}`,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
+            }
+        }
+
+        // Warning 4: procedural (always/initial) l-value is a wire
+        for (const [name, pos] of this._procLvalPositions) {
+            const sig = declaredByName.get(name);
+            if (sig && wireTypes.has(sig.type)) {
+                this.warnings.push({
+                    line: pos.line,
+                    character: pos.character,
+                    length: name.length,
+                    message: `Procedural assignment l-value '${name}' is a wire`,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
+            }
+        }
+
+        // Warning 5: input signal used as l-value in assign or procedural block
+        const reportedInputLval = new Set();
+        for (const [name, pos] of [...this._assignLvalPositions.entries(), ...this._procLvalPositions.entries()]) {
+            if (reportedInputLval.has(name)) continue;
+            if (this._signalList.some((s: any) => s.name === name && s.direction === 'input')) {
+                reportedInputLval.add(name);
+                this.warnings.push({
+                    line: pos.line,
+                    character: pos.character,
+                    length: name.length,
+                    message: `Input signal '${name}' cannot be used as l-value`,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
+            }
+        }
+
+        // Warning 10: bit width mismatch between lvalue and expression
+        for (const mismatch of this.widthMismatches) {
+            this.warnings.push({
+                line: mismatch.line,
+                character: mismatch.character,
+                length: mismatch.length,
+                message: `Bit width mismatch: '${mismatch.lvalText}' has width ${mismatch.lvalWidth}, but expression has width ${mismatch.exprWidth}`,
+                severity: vscode.DiagnosticSeverity.Warning
+            });
+        }
+
+        // Warning 11: condition expression in if/while/for has width > 1 bit
+        for (const cw of this.condWidthWarnings) {
+            this.warnings.push({
+                line: cw.line,
+                character: cw.character,
+                length: cw.length,
+                message: `Condition expression '${cw.exprText}' has width ${cw.exprWidth} bits; condition should be 1-bit`,
+                severity: vscode.DiagnosticSeverity.Warning
+            });
+        }
+
+        // Save minimal data needed for cross-module warnings (2, 6, 7, 8, 9, 12).
+        // These require the full modulePortMap which is only available after all modules
+        // in the file have been visited.
         this._pendingModuleData.push({
-            module: this._currentModule,
             signalList: this._signalList.slice(),
             signalRefs: new Set(this._signalRefs),
-            signalRefPositions: new Map(this._signalRefPositions),
-            assignLvalPositions: new Map(this._assignLvalPositions),
-            procLvalPositions: new Map(this._procLvalPositions),
+            assignedNames: new Set(this._assignLvalPositions.keys()),
+            proceduralNames: new Set(this._procLvalPositions.keys()),
             instPortConnections: this._instPortConnections.slice(),
-            paramNames: new Set(this._paramNames),
-            params: new Map(this._params),
-            genvarNames: new Set(this._genvarNames),
             instanceList: this._instanceList.slice(),
-            widthMismatches: this.widthMismatches.slice(),
-            condWidthWarnings: this.condWidthWarnings.slice()
+            params: new Map(this._params)
         });
     }
 
     /**
-     * Generate signal-usage warnings for all modules using the saved per-module data.
+     * Generate cross-module warnings for all modules using the saved per-module data.
      * Called once after all modules have been visited, so that all locally-defined
      * module ports are available for cross-module instantiation checks.
-     * Wire and reg assignment warnings (Warnings 3, 4, 5) are generated
-     * fully internally. Instance port related warnings (Warnings 6, 8, 9, 12)
-     * are generated by referring to this._moduleDatabase.
-     * If an instanced module name is not in the database, a 'module not found'
-     * warning is shown.
+     * Handles warnings 2 (never used), 6 (output port to reg), 7 (never assigned),
+     * 8 (missing port), 9 (module not found), 12 (port width mismatch).
      * Populates this.warnings.
      */
     _finalizeWarnings() {
         const moduleDatabase = this._moduleDatabase;
-        const wireTypes = new Set(['wire', 'tri', 'supply0', 'supply1']);
 
         // Build a map of module name -> port name -> port object for instantiation checks.
         // First populate from all locally-parsed modules, then fill in missing entries from
@@ -1653,15 +1729,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const {
                 signalList: declaredSignals,
                 signalRefs: refNames,
-                signalRefPositions: refPositions,
-                assignLvalPositions: assignLvals,
-                procLvalPositions: procLvals,
+                assignedNames,
+                proceduralNames,
                 instPortConnections,
-                paramNames,
-                genvarNames,
                 instanceList: moduleInstanceList,
-                widthMismatches,
-                condWidthWarnings,
                 params: moduleParams
             } = data;
             const declaredByName = new Map<string, any>(declaredSignals.map((s: any) => [s.name, s]));
@@ -1691,21 +1762,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             // Build the set of assigned signals: all explicit l-values plus signals driven
             // by output or inout ports of instantiated modules (used for Warnings 2 and 7).
             const assignedSignals = new Set(assignedViaPortOutput);
-            for (const name of assignLvals.keys()) assignedSignals.add(name);
-            for (const name of procLvals.keys()) assignedSignals.add(name);
-
-            // Warning 1: signal reference without declaration
-            for (const [name, pos] of refPositions) {
-                if (!declaredByName.has(name) && !paramNames.has(name) && !genvarNames.has(name)) {
-                    this.warnings.push({
-                        line: pos.line,
-                        character: pos.character,
-                        length: name.length,
-                        message: `Signal '${name}' is referenced but not declared`,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
-                }
-            }
+            for (const name of assignedNames) assignedSignals.add(name);
+            for (const name of proceduralNames) assignedSignals.add(name);
 
             // Warning 2: signal declared but never used.
             // A signal is "used" if it appears as an r-value in an expression (refNames)
@@ -1725,50 +1783,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         character: signal.character,
                         length: signal.name.length,
                         message: `Signal '${signal.name}' is declared but never used`,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
-                }
-            }
-
-            // Warning 3: continuous assign statement l-value is a reg
-            for (const [name, pos] of assignLvals) {
-                const sig = declaredByName.get(name);
-                if (sig && (sig.type === 'reg' || sig.type === 'integer')) {
-                    this.warnings.push({
-                        line: pos.line,
-                        character: pos.character,
-                        length: name.length,
-                        message: `Assign statement l-value '${name}' is a ${sig.type}`,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
-                }
-            }
-
-            // Warning 4: procedural (always/initial) l-value is a wire
-            for (const [name, pos] of procLvals) {
-                const sig = declaredByName.get(name);
-                if (sig && wireTypes.has(sig.type)) {
-                    this.warnings.push({
-                        line: pos.line,
-                        character: pos.character,
-                        length: name.length,
-                        message: `Procedural assignment l-value '${name}' is a wire`,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
-                }
-            }
-
-            // Warning 5: input signal used as l-value in assign or procedural block
-            const reportedInputLval = new Set();
-            for (const [name, pos] of [...assignLvals.entries(), ...procLvals.entries()]) {
-                if (reportedInputLval.has(name)) continue;
-                if (declaredSignals.some((s: any) => s.name === name && s.direction === 'input')) {
-                    reportedInputLval.add(name);
-                    this.warnings.push({
-                        line: pos.line,
-                        character: pos.character,
-                        length: name.length,
-                        message: `Input signal '${name}' cannot be used as l-value`,
                         severity: vscode.DiagnosticSeverity.Warning
                     });
                 }
@@ -1856,28 +1870,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         });
                     }
                 }
-            }
-
-            // Warning 10: bit width mismatch between lvalue and expression
-            for (const mismatch of widthMismatches) {
-                this.warnings.push({
-                    line: mismatch.line,
-                    character: mismatch.character,
-                    length: mismatch.length,
-                    message: `Bit width mismatch: '${mismatch.lvalText}' has width ${mismatch.lvalWidth}, but expression has width ${mismatch.exprWidth}`,
-                    severity: vscode.DiagnosticSeverity.Warning
-                });
-            }
-
-            // Warning 11: condition expression in if/while/for has width > 1 bit
-            for (const cw of condWidthWarnings) {
-                this.warnings.push({
-                    line: cw.line,
-                    character: cw.character,
-                    length: cw.length,
-                    message: `Condition expression '${cw.exprText}' has width ${cw.exprWidth} bits; condition should be 1-bit`,
-                    severity: vscode.DiagnosticSeverity.Warning
-                });
             }
 
             // Warning 12: bit width mismatch between connected signal and instantiated module port
@@ -1985,8 +1977,7 @@ class AntlrVerilogParser {
 
         const visitor = new VerilogSymbolVisitor(uri, moduleDatabase || new ModuleDatabase());
         visitor.visit(tree);
-        // Generate warnings for all modules now that the complete module list is available
-        // for cross-module port connection checks.
+        // Generate cross-module warnings now that all modules in the file are available.
         visitor._finalizeWarnings();
 
         this._lastVisitor = visitor;
