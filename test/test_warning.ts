@@ -70,14 +70,27 @@ function getWarnings(verilog: string, name: string, db?: any): any[] {
 console.log('\nWarning 1: signal referenced but not declared');
 {
     const verilog = `
+module submod1(input wire a, input wire b, output wire c);
+  assign c = a & b;
+endmodule
+
 module warn1(input wire clk, output wire out);
-  assign out = undeclared_sig;
+  assign out = undeclared_sig1;
+
+  submod1 inst1(.a(clk), .b(undeclared_sig2) .c(result));
+  submod1 inst2(.a(clk), .b({clk,undeclared_sig3}) .c(result));
 endmodule
 `;
     const warnings = getWarnings(verilog, 'warn1.v');
-    const w = warnings.find((w: any) =>
-        w.message.includes("'undeclared_sig'") && w.message.includes('not declared'));
-    assert(w !== undefined, "warning for 'undeclared_sig' is referenced but not declared");
+    const w1 = warnings.find((w: any) =>
+        w.message.includes("'undeclared_sig1'") && w.message.includes('not declared'));
+    assert(w1 !== undefined, "warning for 'undeclared_sig1' is referenced but not declared");
+    const w2 = warnings.find((w: any) =>
+        w.message.includes("'undeclared_sig2'") && w.message.includes('not declared'));
+    assert(w2 !== undefined, "warning for 'undeclared_sig2' is referenced but not declared");
+    const w3 = warnings.find((w: any) =>
+        w.message.includes("'undeclared_sig3'") && w.message.includes('not declared'));
+    assert(w3 !== undefined, "warning for 'undeclared_sig3' is referenced but not declared");
 }
 
 // ── Warning 2: signal declared but never used ─────────────────────────────

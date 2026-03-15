@@ -89,10 +89,15 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
 
     const uri = document.uri.toString();
 
-    // Remove existing entries for this file before adding fresh ones
-    moduleDatabase.removeModulesFromFile(uri);
-
+    const currentModules = moduleDatabase.getModulesByUri(uri);
     verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
+
+    // Remove modules that were previously parsed from this file but are no longer present after re-parsing
+    for (const mod of currentModules) {
+        if (!moduleDatabase.getModule(mod.name)) {
+            moduleDatabase.removeModule(mod.name);
+        }
+    }
 }
 
 function updateDocumentModules(document: vscode.TextDocument) {
@@ -102,10 +107,15 @@ function updateDocumentModules(document: vscode.TextDocument) {
 
     const uri = document.uri.toString();
 
-    // Remove existing entries for this file before adding fresh ones
-    moduleDatabase.removeModulesFromFile(uri);
-
+    const currentModules = moduleDatabase.getModulesByUri(uri);
     verilogParser.parseModules(document, moduleDatabase, fsFileReader);
+
+    // Remove modules that were previously parsed from this file but are no longer present after re-parsing
+    for (const mod of currentModules) {
+        if (!moduleDatabase.getModule(mod.name)) {
+            moduleDatabase.removeModule(mod.name);
+        }
+    }
 }
 
 /**
@@ -426,6 +436,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.workspace.onDidCloseTextDocument(document => {
             if (document.languageId === 'verilog') {
                 const uri = document.uri.toString();
+/*
                 moduleDatabase.removeModulesFromFile(uri);
                 diagnosticCollection.delete(document.uri);
 
@@ -441,7 +452,7 @@ export function activate(context: vscode.ExtensionContext) {
                         }
                     }
                 }
-
+*/
                 console.log(`Removed symbols for ${uri}`);
             }
         })

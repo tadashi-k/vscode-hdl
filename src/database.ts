@@ -102,7 +102,6 @@ export class Module {
 export class ModuleDatabase {
     moduleMap: Map<string, Module>;
     moduleUriMap: Map<string, Module[]>; // for fast lookup of modules by file URI
-    
 
     constructor() {
         this.moduleMap = new Map<string, Module>();
@@ -120,12 +119,30 @@ export class ModuleDatabase {
         modules.push(module);
     }
 
+    removeModule(name: string) {
+        const mod = this.moduleMap.get(name);
+        if (mod) {
+            this.moduleMap.delete(name);
+            const modules = this.moduleUriMap.get(mod.uri);
+            if (modules) {
+                const index = modules.findIndex(m => m.name === name);
+                if (index !== -1) {
+                    modules.splice(index, 1);
+                } 
+                if (modules.length === 0) {
+                    this.moduleUriMap.delete(mod.uri);
+                } 
+            }
+        }
+    }
+
     /** Retrieve a module by name. */
     getModule(name: string): Module | undefined {
         return this.moduleMap.get(name);
     }
 
     /** Remove all modules whose uri matches the given file URI. */
+    /*
     removeModulesFromFile(uri: string) {
         for (const [name, mod] of this.moduleMap.entries()) {
             if (mod.uri === uri) {
@@ -134,6 +151,7 @@ export class ModuleDatabase {
         }
         this.moduleUriMap.delete(uri);
     }
+    */
 
     /** Return all modules as an array. */
     getAllModules(): Module[] {

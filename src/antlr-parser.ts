@@ -92,7 +92,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _currentModule: Module | null;
     // Per-current-module signal reference tracking (reset at each module entry)
     _signalRefs: Set<string>;                                          // r-value signal references (for Warning 2)
-    _signalRefPositions: Map<string, {line: number, character: number}>; // signalName -> first-ref position (for Warning 1)
     _assignLvalPositions: Map<string, {line: number, character: number}>; // continuous assign lvalues
     _procLvalPositions: Map<string, {line: number, character: number}>;   // procedural lvalues
     _instPortConnections: any[];   // [{instModuleName, portName, localSignalName, line, character}]
@@ -123,7 +122,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._moduleDatabase = modules;
         this._currentModule = null;
         this._signalRefs = new Set();
-        this._signalRefPositions = new Map();
         this._assignLvalPositions = new Map();
         this._procLvalPositions = new Map();
         this._instPortConnections = [];
@@ -145,8 +143,17 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!this._signalRefs.has(name)) {
             this._signalRefs.add(name);
         }
-        if (!this._signalRefPositions.has(name)) {
-            this._signalRefPositions.set(name, { line, character });
+
+        const signal = this._signalList.find((s) => s.name === name);
+        if (!signal) {
+            // Warning 1: signal reference without declaration
+            this.warnings.push({
+                line: line,
+                character: character,
+                length: name.length,
+                message: `Signal '${name}' is referenced but not declared`,
+                severity: vscode.DiagnosticSeverity.Warning
+            });
         }
     }
 
@@ -266,7 +273,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._signalList = [];
         this._signalMap = new Map();
         this._instanceList = [];
-        this._signalRefPositions = new Map();
         this._assignLvalPositions = new Map();
         this._procLvalPositions = new Map();
         this._instPortConnections = [];
@@ -366,6 +372,18 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                             : null
                     );
 
+                    const module = this._moduleDatabase.getModule(instModuleName);
+                    if (!module) {
+                        // Warning 9: module name of instantiation not found in module database
+                        this.warnings.push({
+                            line: instModInfo.line,
+                            character: instModInfo.character,
+                            length: instModInfo.name.length,
+                            message: `Module '${instModuleName}' is not defined`,
+                            severity: vscode.DiagnosticSeverity.Warning
+                        });
+                    }
+
                     // Track all named port names (including empty connections like .reset())
 
                     for (const conn of namedConns) {
@@ -379,6 +397,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         const exprCtx = conn.expression ? conn.expression() : null;
                         const localSignalInfo = this._getPrimaryIdentifier(exprCtx);
                         if (localSignalInfo) {
+                            this._addSignalRef(localSignalInfo.name, localSignalInfo.line, localSignalInfo.character);
                             portConnections.push({
                                 portName: portInfo.name,
                                 localSignalName: localSignalInfo.name,
@@ -394,17 +413,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 exprCtx
                             });
                             const signal = this._signalList.find(s => s.name === localSignalInfo.name);
-                            const module = this._moduleDatabase.getModule(instModuleName);
                             const port = module?.ports.find((p: any) => p.name === portInfo.name);
                             if (signal && port && signal.type === 'reg' && port.direction === 'output') {
                                 this._warningOutputConnection(module.name, localSignalInfo, port);
-                            }
-
-                            // Track for undeclared-identifier checking (Warning 1)
-                            // without adding to _signalRefs (preserves Warning 2
-                            // behavior: output-port connections must not count as "used").
-                            if (!this._signalRefPositions.has(localSignalInfo.name)) {
-                                this._signalRefPositions.set(localSignalInfo.name, { line: localSignalInfo.line, character: localSignalInfo.character });
                             }
                         } else if (exprCtx) {
                             // Check for concatenation: .port({sig_a, sig_b})
@@ -421,10 +432,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                         line: localSignalInfo.line,
                                         character: localSignalInfo.character
                                     });
-                                    // Track for undeclared-identifier checking (Warning 1)
-                                    if (!this._signalRefPositions.has(localSignalInfo.name)) {
-                                        this._signalRefPositions.set(localSignalInfo.name, { line: localSignalInfo.line, character: localSignalInfo.character });
-                                    }
+                                    this._addSignalRef(localSignalInfo.name, localSignalInfo.line, localSignalInfo.character);
                                 }
                                 // For width comparison, push ONE entry for the full concatenation
                                 // so the combined width (sum of all member widths) is compared
@@ -465,6 +473,27 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     parentModuleName: this._currentModule.name,
                     parameterOverrides: null // filled in below after parameter_value_assignment is parsed
                 });
+
+                const ports = this._moduleDatabase.getModule(instModuleName)?.ports;
+                if (ports) {
+                    const missingPorts: string[] = [];
+                    for (const port of ports) {
+                        if (!namedPortNames.includes(port.name)) {
+                            missingPorts.push(port.name);
+                        }
+                    }
+                    if (missingPorts.length > 0) {
+                        const message = missingPorts.map(p => `'${p}' unconnected`).join('\n');
+                        // Warning 8: missing port in named port connection
+                        this.warnings.push({
+                            line: instModInfo.line,
+                            character: instModInfo.character,
+                            length: instModInfo.name.length,
+                            message,
+                            severity: vscode.DiagnosticSeverity.Warning
+                        });
+                    }
+                }
             }
 
             // Visit parameter_value_assignment expressions so identifiers inside
@@ -1705,19 +1734,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             assignedSignals.add(name);
         }
 
-        // Warning 1: signal reference without declaration
-        for (const [name, pos] of this._signalRefPositions) {
-            if (!declaredByName.has(name) && !this._paramNames.has(name) && !this._genvarNames.has(name)) {
-                this.warnings.push({
-                    line: pos.line,
-                    character: pos.character,
-                    length: name.length,
-                    message: `Signal '${name}' is referenced but not declared`,
-                    severity: vscode.DiagnosticSeverity.Warning
-                });
-            }
-        }
-
         // Warning 2: signal declared but never used.
         // A signal is "used" if it appears as an r-value in an expression (refNames)
         // or is connected to an input/inout port of an instantiated module (usedViaPortInput).
@@ -1753,47 +1769,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     character: signal.character,
                     length: signal.name.length,
                     message: `Signal '${signal.name}' is never assigned`,
-                    severity: vscode.DiagnosticSeverity.Warning
-                });
-            }
-        }
-
-        // Warning 8: missing port in named port connection
-        // When using named port connections, if some ports of the instantiated module
-        // are not listed at all (not even as empty .port()), warn about them.
-        for (const inst of this._instanceList) {
-            const instance = this._moduleDatabase.getModule(inst.moduleName);
-            if (!instance) continue;
-            const instModPorts = instance.ports;
-            if (!instModPorts) continue;
-            if (!inst.namedPortNames || inst.namedPortNames.length === 0) continue;
-            const namedSet = new Set(inst.namedPortNames);
-            const missingPorts: string[] = [];
-            for (const portName of instModPorts) {
-                if (!namedSet.has(portName)) {
-                    missingPorts.push(portName.name);
-                }
-            }
-            if (missingPorts.length > 0) {
-                const message = missingPorts.map(p => `'${p}' unconnected`).join('\n');
-                this.warnings.push({
-                    line: inst.line,
-                    character: inst.character,
-                    length: (inst.instanceName || inst.moduleName).length,
-                    message,
-                    severity: vscode.DiagnosticSeverity.Warning
-                });
-            }
-        }
-
-        // Warning 9: module name of instantiation not found in module database
-        for (const inst of this._instanceList) {
-            if (!this._moduleDatabase.getModule(inst.moduleName)) {
-                this.warnings.push({
-                    line: inst.line,
-                    character: inst.character,
-                    length: (inst.instanceName || inst.moduleName).length,
-                    message: `Module '${inst.moduleName}' is not defined`,
                     severity: vscode.DiagnosticSeverity.Warning
                 });
             }
