@@ -130,6 +130,8 @@ console.log('\nTest: parseSymbols on test_instance.v (no false warnings for conc
     // count_h, count_l are wire connected as output from .data_out({count_h, count_l})
     // and used in count_out <= {count_h, count_l} — should NOT warn "never assigned".
     const db = new ModuleDatabase();
+    parser.parseSymbols(makeDoc('test_instance.v'), db, null); // need module ram
+    parser.dirty();
     parser.parseSymbols(makeDoc('test_instance.v'), db, null);
     const diags = parser.getDiagnostics(db);
     const warnings = diags.filter((d: any) => d.severity === SEVERITY_WARNING);

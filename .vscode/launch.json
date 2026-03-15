@@ -16,8 +16,21 @@
     {
       "type": "pwa-node",
       "request": "launch",
-      "name": "Debug test/test_directive.ts (tsx)",
-      "program": "${workspaceFolder}/test/test_directive.ts",
+      "name": "Debug test_parse_symbols (tsx)",
+      "program": "${workspaceFolder}/test/test_parse_symbols.ts",
+      "runtimeArgs": [
+        "--import=tsx"
+      ],
+      "runtimeExecutable": "node",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "pwa-node",
+      "request": "launch",
+      "name": "Debug test_warning (tsx)",
+      "program": "${workspaceFolder}/test/test_warning.ts",
       "runtimeArgs": [
         "--import=tsx"
       ],

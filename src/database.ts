@@ -13,6 +13,10 @@ export class BitRange {
     exprLsb: string;
     msb: number | null; // null if the expression has paramerters, e.g. [WIDTH-1:0]
     lsb: number | null;
+
+    toString() : string {
+        return '[' + this.exprMsb + ':' + this.exprLsb + ']';
+    }
 }
 
 export class Port {
@@ -21,6 +25,7 @@ export class Port {
     character: number;
     direction: 'input' | 'output' | 'inout';
     bitRange: BitRange | null; // treated as 1-bit if null
+    bitWidth: string | null; // ToDo: should be removed
 }
 
 export class Parameter {

@@ -134,7 +134,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._signalList = [];
         this._signalMap = new Map();
         this._instanceList = [];
-        this._pendingModuleData = [];
         this._allInstances = [];
         this._inProcedural = false;
         this._inContinuousAssign = false;
@@ -1606,6 +1605,39 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const wireTypes = new Set(['wire', 'tri', 'supply0', 'supply1']);
         const declaredByName = new Map<string, any>(this._signalList.map((s: any) => [s.name, s]));
 
+        // Build sets of signals that are "used" or "assigned" via port connections
+        // to instantiated modules, using cross-file port information from modulePortMap.
+        // - Signals connected to input or inout ports are "used" (the submodule reads them).
+        // - Signals connected to output or inout ports are "assigned" (the submodule drives them).
+        const usedViaPortInput = new Set();
+        const assignedViaPortOutput = new Set();
+        for (const conn of this._instPortConnections) {
+            const instance = this._moduleDatabase.getModule(conn.instModuleName);
+            if (!instance) continue;
+            const instModPorts = instance.ports;
+            if (!instModPorts) continue;
+            const instPort = instModPorts.find(p => p.name === conn.portName);
+            if (!instPort) continue;
+            // For concatenated connections (.port({a, b})), conn.concatMembers holds
+            // the individual signal names; otherwise use conn.localSignalName directly.
+            const signalNames: string[] = conn.concatMembers || [conn.localSignalName];
+            if (instPort.direction === 'input' || instPort.direction === 'inout') {
+                for (const name of signalNames) usedViaPortInput.add(name);
+            }
+            if (instPort.direction === 'output' || instPort.direction === 'inout') {
+                for (const name of signalNames) assignedViaPortOutput.add(name);
+            }
+        }
+        // Build the set of assigned signals: all explicit l-values plus signals driven
+        // by output or inout ports of instantiated modules (used for Warnings 2 and 7).
+        const assignedSignals = new Set(assignedViaPortOutput);
+        for (const name of this._assignLvalPositions.keys()) {
+            assignedSignals.add(name);
+        }
+        for (const name of this._procLvalPositions.keys()) {
+            assignedSignals.add(name);
+        }
+
         // Warning 1: signal reference without declaration
         for (const [name, pos] of this._signalRefPositions) {
             if (!declaredByName.has(name) && !this._paramNames.has(name) && !this._genvarNames.has(name)) {
@@ -1614,6 +1646,29 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     character: pos.character,
                     length: name.length,
                     message: `Signal '${name}' is referenced but not declared`,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
+            }
+        }
+
+        // Warning 2: signal declared but never used.
+        // A signal is "used" if it appears as an r-value in an expression (refNames)
+        // or is connected to an input/inout port of an instantiated module (usedViaPortInput).
+        // L-value assignments and connections to output ports do NOT count as "using" a signal.
+        // Exception: output/inout port signals that are assigned are considered used externally.
+        for (const signal of this._signalList) {
+            if (!this._signalRefs.has(signal.name) && !usedViaPortInput.has(signal.name)) {
+                // Output/inout ports that are assigned drive the module interface;
+                // they are consumed externally and must not trigger "never used".
+                if ((signal.direction === 'output' || signal.direction === 'inout') &&
+                    assignedSignals.has(signal.name)) {
+                    continue;
+                }
+                this.warnings.push({
+                    line: signal.line,
+                    character: signal.character,
+                    length: signal.name.length,
+                    message: `Signal '${signal.name}' is declared but never used`,
                     severity: vscode.DiagnosticSeverity.Warning
                 });
             }
@@ -1663,6 +1718,92 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             }
         }
 
+        // Warning 6: output or inout port of instantiated module connected to reg signal
+        // A reg cannot be driven by a submodule's output/inout port.
+        const reportedOutputPortReg = new Set();
+        for (const conn of this._instPortConnections) {
+            const instance = this._moduleDatabase.getModule(conn.instModuleName);
+            if (!instance) continue;
+            const instModPorts = instance.ports;
+            if (!instModPorts) continue;
+            const instPort = instModPorts.find(p => p.name === conn.portName);
+            if (!instPort || (instPort.direction !== 'output' && instPort.direction !== 'inout')) continue;
+
+            const signalNames: string[] = conn.concatMembers || [conn.localSignalName];
+            for (const sigName of signalNames) {
+                if (!reportedOutputPortReg.has(sigName) &&
+                    this._signalList.some((s: any) => s.name === sigName && (s.type === 'reg' || s.type === 'integer'))) {
+                    reportedOutputPortReg.add(sigName);
+                    const dirLabel = instPort.direction.charAt(0).toUpperCase() + instPort.direction.slice(1);
+                    this.warnings.push({
+                        line: conn.line,
+                        character: conn.character,
+                        length: sigName.length,
+                        message: `${dirLabel} port '${conn.portName}' of instantiated module cannot be connected to reg signal '${sigName}'`,
+                        severity: vscode.DiagnosticSeverity.Warning
+                    });
+                }
+            }
+        }
+
+        // Warning 7: output or internal signal never assigned
+        const reportedNeverAssigned = new Set();
+        for (const signal of this._signalList) {
+            if (signal.direction === 'input' || signal.direction === 'inout') continue;
+            if (reportedNeverAssigned.has(signal.name)) continue;
+            if (!assignedSignals.has(signal.name)) {
+                reportedNeverAssigned.add(signal.name);
+                this.warnings.push({
+                    line: signal.line,
+                    character: signal.character,
+                    length: signal.name.length,
+                    message: `Signal '${signal.name}' is never assigned`,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
+            }
+        }
+
+        // Warning 8: missing port in named port connection
+        // When using named port connections, if some ports of the instantiated module
+        // are not listed at all (not even as empty .port()), warn about them.
+        for (const inst of this._instanceList) {
+            const instance = this._moduleDatabase.getModule(inst.moduleName);
+            if (!instance) continue;
+            const instModPorts = instance.ports;
+            if (!instModPorts) continue;
+            if (!inst.namedPortNames || inst.namedPortNames.length === 0) continue;
+            const namedSet = new Set(inst.namedPortNames);
+            const missingPorts: string[] = [];
+            for (const portName of instModPorts) {
+                if (!namedSet.has(portName)) {
+                    missingPorts.push(portName.name);
+                }
+            }
+            if (missingPorts.length > 0) {
+                const message = missingPorts.map(p => `'${p}' unconnected`).join('\n');
+                this.warnings.push({
+                    line: inst.line,
+                    character: inst.character,
+                    length: (inst.instanceName || inst.moduleName).length,
+                    message,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
+            }
+        }
+
+        // Warning 9: module name of instantiation not found in module database
+        for (const inst of this._instanceList) {
+            if (!this._moduleDatabase.getModule(inst.moduleName)) {
+                this.warnings.push({
+                    line: inst.line,
+                    character: inst.character,
+                    length: (inst.instanceName || inst.moduleName).length,
+                    message: `Module '${inst.moduleName}' is not defined`,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
+            }
+        }
+
         // Warning 10: bit width mismatch between lvalue and expression
         for (const mismatch of this.widthMismatches) {
             this.warnings.push({
@@ -1685,247 +1826,61 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             });
         }
 
-        // Save minimal data needed for cross-module warnings (2, 6, 7, 8, 9, 12).
-        // These require the full modulePortMap which is only available after all modules
-        // in the file have been visited.
-        this._pendingModuleData.push({
-            signalList: this._signalList.slice(),
-            signalRefs: new Set(this._signalRefs),
-            assignedNames: new Set(this._assignLvalPositions.keys()),
-            proceduralNames: new Set(this._procLvalPositions.keys()),
-            instPortConnections: this._instPortConnections.slice(),
-            instanceList: this._instanceList.slice(),
-            params: new Map(this._params)
-        });
-    }
-
-    /**
-     * Generate cross-module warnings for all modules using the saved per-module data.
-     * Called once after all modules have been visited, so that all locally-defined
-     * module ports are available for cross-module instantiation checks.
-     * Handles warnings 2 (never used), 6 (output port to reg), 7 (never assigned),
-     * 8 (missing port), 9 (module not found), 12 (port width mismatch).
-     * Populates this.warnings.
-     */
-    _finalizeWarnings() {
-        const moduleDatabase = this._moduleDatabase;
-
-        // Build a map of module name -> port name -> port object for instantiation checks.
-        // First populate from all locally-parsed modules, then fill in missing entries from
-        // the workspace-wide moduleDatabase (cross-file module support).
-        const modulePortMap = new Map();
-        for (const mod of this.modules) {
-            modulePortMap.set(mod.name, new Map(mod.ports.map((p: any) => [p.name, p])));
-        }
-        if (moduleDatabase) {
-            for (const mod of moduleDatabase.getAllModules()) {
-                if (!modulePortMap.has(mod.name)) {
-                    modulePortMap.set(mod.name, new Map(mod.ports.map((p: any) => [p.name, p])));
-                }
+        // Warning 12: bit width mismatch between connected signal and instantiated module port
+        // Build a lookup of connection position -> instance for parameter override access
+        const connKey = (modName: string, line: number, char: number) => `${modName}:${line}:${char}`;
+        const instanceLookup = new Map<string, any>();
+        for (const inst of this._instanceList) {
+            for (const pc of inst.portConnections) {
+                instanceLookup.set(connKey(inst.moduleName, pc.line, pc.character), inst);
             }
         }
-
-        for (const data of this._pendingModuleData) {
-            const {
-                signalList: declaredSignals,
-                signalRefs: refNames,
-                assignedNames,
-                proceduralNames,
-                instPortConnections,
-                instanceList: moduleInstanceList,
-                params: moduleParams
-            } = data;
-            const declaredByName = new Map<string, any>(declaredSignals.map((s: any) => [s.name, s]));
-
-            // Build sets of signals that are "used" or "assigned" via port connections
-            // to instantiated modules, using cross-file port information from modulePortMap.
-            // - Signals connected to input or inout ports are "used" (the submodule reads them).
-            // - Signals connected to output or inout ports are "assigned" (the submodule drives them).
-            const usedViaPortInput = new Set();
-            const assignedViaPortOutput = new Set();
-            for (const conn of instPortConnections) {
-                const instModPorts = modulePortMap.get(conn.instModuleName);
-                if (!instModPorts) continue;
-                const instPort = instModPorts.get(conn.portName);
-                if (!instPort) continue;
-                // For concatenated connections (.port({a, b})), conn.concatMembers holds
-                // the individual signal names; otherwise use conn.localSignalName directly.
-                const signalNames: string[] = conn.concatMembers || [conn.localSignalName];
-                if (instPort.direction === 'input' || instPort.direction === 'inout') {
-                    for (const name of signalNames) usedViaPortInput.add(name);
+        for (const conn of this._instPortConnections) {
+            const instance = this._moduleDatabase.getModule(conn.instModuleName);
+            if (!instance) continue;
+            const instModPorts = instance.ports;
+            if (!instModPorts) continue;
+            const instPort = instModPorts.find(p => p.name === conn.portName);
+            if (!instPort) continue;
+            // Evaluate port width with parameter overrides if available
+            let portWidth: number | null = null;
+            const inst = instanceLookup.get(connKey(conn.instModuleName, conn.line, conn.character));
+            if (inst && inst.parameterOverrides && instPort.bitWidth) {
+                // Use the locally-parsed parameters as defaults for the instantiated module,
+                // then fall back to the moduleDatabase for cross-file modules
+                const localInstMod = this.modules.find(m => m.name === conn.instModuleName);
+                let instModParams = localInstMod ? localInstMod.parameterList : [];
+                if (instModParams.length === 0) {
+                    const dbMod = this._moduleDatabase.getModule(conn.instModuleName);
+                    if (dbMod) instModParams = dbMod.parameterList;
                 }
-                if (instPort.direction === 'output' || instPort.direction === 'inout') {
-                    for (const name of signalNames) assignedViaPortOutput.add(name);
+                portWidth = this.evaluatePortWidth(instPort, instModParams, inst.parameterOverrides);
+            }
+            if (portWidth === null) {
+                portWidth = this._getSignalWidth(instPort.bitWidth) ?? 1;
+            }
+            let localWidth: number | null = null;
+            // Evaluate the actual expression bit width (handles part-selects like signal[7:0])
+            if (conn.exprCtx) {
+                const exprVal = this._evaluateExpression(conn.exprCtx, this._params, declaredByName);
+                if (exprVal && exprVal.width !== null) {
+                    localWidth = exprVal.width;
                 }
             }
-
-            // Build the set of assigned signals: all explicit l-values plus signals driven
-            // by output or inout ports of instantiated modules (used for Warnings 2 and 7).
-            const assignedSignals = new Set(assignedViaPortOutput);
-            for (const name of assignedNames) assignedSignals.add(name);
-            for (const name of proceduralNames) assignedSignals.add(name);
-
-            // Warning 2: signal declared but never used.
-            // A signal is "used" if it appears as an r-value in an expression (refNames)
-            // or is connected to an input/inout port of an instantiated module (usedViaPortInput).
-            // L-value assignments and connections to output ports do NOT count as "using" a signal.
-            // Exception: output/inout port signals that are assigned are considered used externally.
-            for (const signal of declaredSignals) {
-                if (!refNames.has(signal.name) && !usedViaPortInput.has(signal.name)) {
-                    // Output/inout ports that are assigned drive the module interface;
-                    // they are consumed externally and must not trigger "never used".
-                    if ((signal.direction === 'output' || signal.direction === 'inout') &&
-                            assignedSignals.has(signal.name)) {
-                        continue;
-                    }
-                    this.warnings.push({
-                        line: signal.line,
-                        character: signal.character,
-                        length: signal.name.length,
-                        message: `Signal '${signal.name}' is declared but never used`,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
-                }
+            // Fall back to the declared signal width when expression evaluation fails
+            if (localWidth === null) {
+                const localSig = declaredByName.get(conn.localSignalName);
+                if (!localSig) continue;
+                localWidth = this._getSignalWidth(localSig.bitWidth) ?? 1;
             }
-
-            // Warning 6: output or inout port of instantiated module connected to reg signal
-            // A reg cannot be driven by a submodule's output/inout port.
-            const reportedOutputPortReg = new Set();
-            for (const conn of instPortConnections) {
-                const instModPorts = modulePortMap.get(conn.instModuleName);
-                if (!instModPorts) continue;
-                const instPort = instModPorts.get(conn.portName);
-                if (!instPort || (instPort.direction !== 'output' && instPort.direction !== 'inout')) continue;
-
-                const signalNames: string[] = conn.concatMembers || [conn.localSignalName];
-                for (const sigName of signalNames) {
-                    if (!reportedOutputPortReg.has(sigName) &&
-                        declaredSignals.some((s: any) => s.name === sigName && (s.type === 'reg' || s.type === 'integer'))) {
-                        reportedOutputPortReg.add(sigName);
-                        const dirLabel = instPort.direction.charAt(0).toUpperCase() + instPort.direction.slice(1);
-                        this.warnings.push({
-                            line: conn.line,
-                            character: conn.character,
-                            length: sigName.length,
-                            message: `${dirLabel} port '${conn.portName}' of instantiated module cannot be connected to reg signal '${sigName}'`,
-                            severity: vscode.DiagnosticSeverity.Warning
-                        });
-                    }
-                }
-            }
-
-            // Warning 7: output or internal signal never assigned
-            const reportedNeverAssigned = new Set();
-            for (const signal of declaredSignals) {
-                if (signal.direction === 'input' || signal.direction === 'inout') continue;
-                if (reportedNeverAssigned.has(signal.name)) continue;
-                if (!assignedSignals.has(signal.name)) {
-                    reportedNeverAssigned.add(signal.name);
-                    this.warnings.push({
-                        line: signal.line,
-                        character: signal.character,
-                        length: signal.name.length,
-                        message: `Signal '${signal.name}' is never assigned`,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
-                }
-            }
-
-            // Warning 8: missing port in named port connection
-            // When using named port connections, if some ports of the instantiated module
-            // are not listed at all (not even as empty .port()), warn about them.
-            for (const inst of moduleInstanceList) {
-                const instModPorts = modulePortMap.get(inst.moduleName);
-                if (!instModPorts) continue;
-                if (!inst.namedPortNames || inst.namedPortNames.length === 0) continue;
-                const namedSet = new Set(inst.namedPortNames);
-                const missingPorts: string[] = [];
-                for (const [portName] of instModPorts) {
-                    if (!namedSet.has(portName)) {
-                        missingPorts.push(portName);
-                    }
-                }
-                if (missingPorts.length > 0) {
-                    const message = missingPorts.map(p => `'${p}' unconnected`).join('\n');
-                    this.warnings.push({
-                        line: inst.line,
-                        character: inst.character,
-                        length: (inst.instanceName || inst.moduleName).length,
-                        message,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
-                }
-            }
-
-            // Warning 9: module name of instantiation not found in module database
-            if (moduleDatabase) {
-                for (const inst of moduleInstanceList) {
-                    if (!modulePortMap.has(inst.moduleName)) {
-                        this.warnings.push({
-                            line: inst.line,
-                            character: inst.character,
-                            length: (inst.instanceName || inst.moduleName).length,
-                            message: `Module '${inst.moduleName}' is not defined`,
-                            severity: vscode.DiagnosticSeverity.Warning
-                        });
-                    }
-                }
-            }
-
-            // Warning 12: bit width mismatch between connected signal and instantiated module port
-            // Build a lookup of connection position -> instance for parameter override access
-            const connKey = (modName: string, line: number, char: number) => `${modName}:${line}:${char}`;
-            const instanceLookup = new Map<string, any>();
-            for (const inst of moduleInstanceList) {
-                for (const pc of inst.portConnections) {
-                    instanceLookup.set(connKey(inst.moduleName, pc.line, pc.character), inst);
-                }
-            }
-            for (const conn of instPortConnections) {
-                const instModPorts = modulePortMap.get(conn.instModuleName);
-                if (!instModPorts) continue;
-                const instPort = instModPorts.get(conn.portName);
-                if (!instPort) continue;
-                // Evaluate port width with parameter overrides if available
-                let portWidth: number | null = null;
-                const inst = instanceLookup.get(connKey(conn.instModuleName, conn.line, conn.character));
-                if (inst && inst.parameterOverrides && instPort.bitWidthRaw) {
-                    // Use the locally-parsed parameters as defaults for the instantiated module,
-                    // then fall back to the moduleDatabase for cross-file modules
-                    const localInstMod = this.modules.find(m => m.name === conn.instModuleName);
-                    let instModParams = localInstMod ? localInstMod.parameterList : [];
-                    if (instModParams.length === 0 && moduleDatabase) {
-                        const dbMod = moduleDatabase.getModule(conn.instModuleName);
-                        if (dbMod) instModParams = dbMod.parameterList;
-                    }
-                    portWidth = this.evaluatePortWidth(instPort, instModParams, inst.parameterOverrides);
-                }
-                if (portWidth === null) {
-                    portWidth = this._getSignalWidth(instPort.bitWidth) ?? 1;
-                }
-                let localWidth: number | null = null;
-                // Evaluate the actual expression bit width (handles part-selects like signal[7:0])
-                if (conn.exprCtx) {
-                    const exprVal = this._evaluateExpression(conn.exprCtx, moduleParams, declaredByName);
-                    if (exprVal && exprVal.width !== null) {
-                        localWidth = exprVal.width;
-                    }
-                }
-                // Fall back to the declared signal width when expression evaluation fails
-                if (localWidth === null) {
-                    const localSig = declaredByName.get(conn.localSignalName);
-                    if (!localSig) continue;
-                    localWidth = this._getSignalWidth(localSig.bitWidth) ?? 1;
-                }
-                if (localWidth !== portWidth) {
-                    this.warnings.push({
-                        line: conn.line,
-                        character: conn.character,
-                        length: conn.localSignalName.length,
-                        message: `Port '${conn.portName}' has width ${portWidth}, but connected signal '${conn.localSignalName}' has width ${localWidth}`,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
-                }
+            if (localWidth !== portWidth) {
+                this.warnings.push({
+                    line: conn.line,
+                    character: conn.character,
+                    length: conn.localSignalName.length,
+                    message: `Port '${conn.portName}' has width ${portWidth}, but connected signal '${conn.localSignalName}' has width ${localWidth}`,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
             }
         }
     }
@@ -1978,7 +1933,6 @@ class AntlrVerilogParser {
         const visitor = new VerilogSymbolVisitor(uri, moduleDatabase || new ModuleDatabase());
         visitor.visit(tree);
         // Generate cross-module warnings now that all modules in the file are available.
-        visitor._finalizeWarnings();
 
         this._lastVisitor = visitor;
         return visitor;

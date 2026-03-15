@@ -59,6 +59,8 @@ function getWarnings(verilog: string, name: string, db?: any): any[] {
     const parser = new AntlrVerilogParser();
     const moduleDb = db ?? new ModuleDatabase();
     parser.parseSymbols(makeInlineDoc(verilog, name), moduleDb, null);
+    parser.dirty();
+    parser.parseSymbols(makeInlineDoc(verilog, name), moduleDb, null);
     const diags = parser.getDiagnostics(moduleDb);
     return diags.filter((d: any) => d.severity === SEVERITY_WARNING);
 }
