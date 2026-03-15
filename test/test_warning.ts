@@ -26,8 +26,13 @@
 
 const SEVERITY_WARNING = 1;
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 const AntlrVerilogParser = require('../src/antlr-parser');
 const { ModuleDatabase } = require('../src/database');
+
+const contentsDir = path.join(__dirname, '..', 'contents');
 
 // ── Simple test harness ────────────────────────────────────────────────────
 
@@ -52,6 +57,24 @@ function makeInlineDoc(text: string, name: string) {
         getText: () => text,
         uri: { toString: () => `file:///test/${name}` }
     };
+}
+
+/** Create a mock TextDocument from a file in the contents directory. */
+function makeFileDoc(filename: string) {
+    const text = fs.readFileSync(path.join(contentsDir, filename), 'utf8');
+    return {
+        getText: () => text,
+        uri: { toString: () => `file://${path.join(contentsDir, filename)}` }
+    };
+}
+
+/** Parse a Verilog file from the contents directory and return the warning diagnostics. */
+function getFileWarnings(filename: string, db?: any): any[] {
+    const parser = new AntlrVerilogParser();
+    const moduleDb = db ?? new ModuleDatabase();
+    parser.parseSymbols(makeFileDoc(filename), moduleDb, null);
+    const diags = parser.getDiagnostics(moduleDb);
+    return diags.filter((d: any) => d.severity === SEVERITY_WARNING);
 }
 
 /** Parse inline Verilog and return the warning diagnostics. */
@@ -303,6 +326,107 @@ endmodule
         w.message.includes('width 4'));
     assert(w !== undefined,
         "warning for 4-bit 'narrow' connected to 8-bit port 'wide_in'");
+}
+
+// ── test_generate.v: genvar variable i should not warn, j should warn ─────
+
+console.log('\ntest_generate.v: genvar i should not warn, undeclared j should warn');
+{
+    const warnings = getFileWarnings('test_generate.v');
+    const warnI = warnings.find((w: any) =>
+        w.message.includes("'i'") && w.message.includes('not declared'));
+    assert(warnI === undefined,
+        "no warning for genvar 'i' used inside generate block");
+
+    const warnJ = warnings.find((w: any) =>
+        w.message.includes("'j'") && w.message.includes('not declared'));
+    assert(warnJ !== undefined,
+        "warning for undeclared 'j' used inside generate block");
+}
+
+// ── test_instance.v: addr port bit width with parameterized ram module ─────
+// ram module is defined before test_instance so that it is available in the
+// database when the instantiation's port widths are evaluated.
+
+console.log('\ntest_instance.v: addr port bit width in ram instantiation');
+{
+    const verilog = `
+module ram #(
+    parameter DEPTH = 32,
+    parameter WIDTH = 8,
+    parameter ADR_WIDTH = (DEPTH == 16) ? 4 : (DEPTH == 32) ? 5 : (DEPTH == 64) ? 6 : 0
+)
+(
+    input clk,
+    input[ADR_WIDTH-1:0] addr,
+    input [WIDTH-1:0] data_in,
+    input we,
+    input re,
+    output reg [WIDTH-1:0] data_out
+);
+reg[WIDTH-1:0] mem[0:DEPTH-1];
+always @(posedge clk) begin
+    if (we) begin
+        mem[addr] <= data_in;
+    end else if (re) begin
+        data_out <= mem[addr];
+    end
+end
+endmodule
+
+module test_instance (
+    input clk,
+    output reg[7:0] count_out
+);
+reg[4:0] addr;
+wire[7:0] data_out_1, data_out_2;
+
+always @(posedge clk) begin
+    count_out <= data_out_1 ^ data_out_2;
+    addr <= addr + 1;
+end
+
+ram #(
+    .DEPTH(16),
+    .WIDTH(8)
+) ram_i_1 (
+    .clk(clk),
+    .we(1'b0),
+    .re(1'b1),
+    .addr(addr),
+    .data_in(8'h00),
+    .data_out(data_out_1)
+);
+
+ram #(
+    .DEPTH(32),
+    .WIDTH(8)
+) ram_i_2 (
+    .clk(clk),
+    .we(1'b0),
+    .re(1'b1),
+    .addr(addr),
+    .data_in(8'h00),
+    .data_out(data_out_2)
+);
+endmodule
+`;
+    const warnings = getWarnings(verilog, 'test_instance_inline.v');
+
+    // ram_i_1: DEPTH=16 → ADR_WIDTH=4 → addr port is 4 bits, but addr signal is 5 bits
+    const warnRam1 = warnings.find((w: any) =>
+        w.message.includes("Port 'addr'") &&
+        w.message.includes('width 4') &&
+        w.message.includes("'addr'") &&
+        w.message.includes('width 5'));
+    assert(warnRam1 !== undefined,
+        "warning for 5-bit 'addr' signal connected to 4-bit 'addr' port in ram_i_1 (DEPTH=16)");
+
+    // ram_i_2: DEPTH=32 → ADR_WIDTH=5 → addr port is 5 bits and addr signal is 5 bits → no warning
+    const warnRam2 = warnings.find((w: any) =>
+        w.message.includes("Port 'addr' has width 5,"));
+    assert(warnRam2 === undefined,
+        "no bit-width warning for 5-bit 'addr' signal connected to 5-bit 'addr' port in ram_i_2 (DEPTH=32)");
 }
 
 // ── Summary ────────────────────────────────────────────────────────────────
