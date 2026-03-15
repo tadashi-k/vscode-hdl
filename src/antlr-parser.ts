@@ -118,7 +118,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     constructor(uri: string, modules: ModuleDatabase) {
         super();
         this.uri = uri;
-        this.modules = [];
         this.errors = [];
         this.warnings = [];
         this._moduleDatabase = modules;
@@ -279,7 +278,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._generateWarnings();
         // Accumulate this module's instances into the cross-module list
         this._allInstances.push(...this._instanceList);
-        this.modules.push(this._currentModule);
+        this._moduleDatabase.addModule(this._currentModule);
         this._currentModule = null;
         return null;
     }
@@ -1844,7 +1843,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             if (inst && inst.parameterOverrides && instPort.bitWidth) {
                 // Use the locally-parsed parameters as defaults for the instantiated module,
                 // then fall back to the moduleDatabase for cross-file modules
-                const localInstMod = this.modules.find(m => m.name === conn.instModuleName);
+                const localInstMod = this._moduleDatabase.getModule(conn.instModuleName);
                 let instModParams = localInstMod ? localInstMod.parameterList : [];
                 if (instModParams.length === 0) {
                     const dbMod = this._moduleDatabase.getModule(conn.instModuleName);
@@ -1913,7 +1912,7 @@ class AntlrVerilogParser {
      * @param uri        Document URI string
      * @param moduleDatabase  Optional module database for cross-file lookup
      */
-    private _parse(text: string, uri: string, moduleDatabase: ModuleDatabase | null = null): VerilogSymbolVisitor {
+    private _parse(text: string, uri: string, moduleDatabase: ModuleDatabase | null = null) : void {
         const chars = new antlr4.InputStream(text);
         const lexer = new VerilogLexer(chars as any);
         const tokens = new antlr4.CommonTokenStream(lexer as any);
@@ -1931,7 +1930,6 @@ class AntlrVerilogParser {
         // Generate cross-module warnings now that all modules in the file are available.
 
         this._lastVisitor = visitor;
-        return visitor;
     }
 
     /**
@@ -1966,11 +1964,7 @@ class AntlrVerilogParser {
 
         // Preprocess (handle `include, `define, etc.)
         text = preprocessVerilog(text, basePath, fileReader);
-
-        const visitor = this._parse(text, uri, null);
-        for (const mod of visitor.modules) {
-            moduleDatabase.addModule(mod);
-        }
+        this._parse(text, uri, moduleDatabase);
     }
 
     /**
@@ -2001,11 +1995,7 @@ class AntlrVerilogParser {
 
         // Preprocess (handle `include, `define, etc.)
         text = preprocessVerilog(text, basePath, fileReader);
-
-        const visitor = this._parse(text, uri, moduleDatabase);
-        for (const mod of visitor.modules) {
-            moduleDatabase.addModule(mod);
-        }
+        this._parse(text, uri, moduleDatabase);
     }
 
     getDiagnostics(moduleDatabase: ModuleDatabase) : any[] {
