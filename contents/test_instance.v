@@ -23,7 +23,7 @@ ram #(
     .clk(clk),
     .we(1'b0),
     .re(1'b0),
-    .addr(addr),
+    .addr(addr), // need warning 4-bit address for 16-depth RAM
     .data_in({init_h, init_l}),
     .data_out({count_h, count_l})
 );
@@ -34,7 +34,7 @@ ram #(
 ) ram_i_2 (
     .clk(clk),
     .re(1'b0),
-    .addr(addr),
+    .addr(addr), // no need warning 5-bit address for 32-depth RAM
     .data_in({init_h, init_l}),
     .data_out({count_h, count_l})
 );

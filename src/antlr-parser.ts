@@ -107,7 +107,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Per-current-module signal reference tracking (reset at each module entry)
     _signalRefs: Set<string>;                                          // r-value signal references (for Warning 2)
     _params: Map<string, any>;     // paramName -> EvalValue (for cross-param evaluation)
-    _genvarNames: Set<string>;     // genvar names
+    _genvars: Set<string>;     // genvar names
     _signalMap: Map<string, any>;  // signalName -> signal for current module
     _instanceList: any[];          // instance[] for current module
     // Accumulated across all modules (available after parse completes)
@@ -129,7 +129,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._currentModule = null;
         this._signalRefs = new Set();
         this._params = new Map();
-        this._genvarNames = new Set();
+        this._genvars = new Set();
         this._signalMap = new Map();
         this._instanceList = [];
         this._inProcedural = false;
@@ -142,14 +142,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             this._signalRefs.add(name);
         }
 
-        const signal = this._signalMap.get(name);
-        if (!signal) {
+        if (this._signalMap.has(name) == false && this._params.has(name) == false && this._genvars.has(name) == false) {
             // Warning 1: signal reference without declaration
             this.warnings.push({
                 line: line,
                 character: character,
                 length: name.length,
-                message: `Signal '${name}' is referenced but not declared`,
+                message: `Signal '${name}' is used but not declared`,
                 severity: vscode.DiagnosticSeverity.Warning
             });
         }
@@ -266,7 +265,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // Reset per-module tracking for signal warnings
         this._signalRefs = new Set();
         this._params = new Map();
-        this._genvarNames = new Set();
+        this._genvars= new Set<string>();
         this._signalMap = new Map();
         this._instanceList = [];
 
@@ -1669,7 +1668,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             if (!info) continue;
 
             // Track genvar as a named identifier so it is not flagged as undeclared
-            this._genvarNames.add(info.name);
+            this._genvars.add(info.name);
         }
         return null;
     }
