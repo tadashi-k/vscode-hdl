@@ -113,38 +113,20 @@ export class Module {
  */
 export class ModuleDatabase {
     moduleMap: Map<string, Module>;
-    moduleUriMap: Map<string, Module[]>; // for fast lookup of modules by file URI
 
     constructor() {
         this.moduleMap = new Map<string, Module>();
-        this.moduleUriMap = new Map<string, Module[]>();
     }
 
     /** Add a module entry. */
     addModule(module: Module) {
         this.moduleMap.set(module.name, module);
-        let modules = this.moduleUriMap.get(module.uri);
-        if (!modules) {
-            modules = [];
-            this.moduleUriMap.set(module.uri, modules);
-        }
-        modules.push(module);
     }
 
     removeModule(name: string) {
         const mod = this.moduleMap.get(name);
         if (mod) {
             this.moduleMap.delete(name);
-            const modules = this.moduleUriMap.get(mod.uri);
-            if (modules) {
-                const index = modules.findIndex(m => m.name === name);
-                if (index !== -1) {
-                    modules.splice(index, 1);
-                } 
-                if (modules.length === 0) {
-                    this.moduleUriMap.delete(mod.uri);
-                } 
-            }
         }
     }
 
@@ -153,18 +135,6 @@ export class ModuleDatabase {
         return this.moduleMap.get(name);
     }
 
-    /** Remove all modules whose uri matches the given file URI. */
-    /*
-    removeModulesFromFile(uri: string) {
-        for (const [name, mod] of this.moduleMap.entries()) {
-            if (mod.uri === uri) {
-                this.moduleMap.delete(name);
-            }
-        }
-        this.moduleUriMap.delete(uri);
-    }
-    */
-
     /** Return all modules as an array. */
     getAllModules(): Module[] {
         return Array.from(this.moduleMap.values());
@@ -172,7 +142,13 @@ export class ModuleDatabase {
 
     /** Get all modules belonging to modules defined in the given file URI. */
     getModulesByUri(uri: string): Module[] {
-        return this.moduleUriMap.get(uri) || [];
+        const results: Module[] = [];
+        for (const mod of this.moduleMap.values()) {
+            if (mod.uri === uri) {
+                results.push(mod);
+            }
+        }
+        return results;
     }
 
     getModuleByUriPosition(uri: string, line: number): Module | null {

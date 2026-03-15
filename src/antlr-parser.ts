@@ -101,23 +101,19 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     modules: Module[];
     errors: any[];
     warnings: any[];
+    allInstances: any[];          // all instances from all modules
     _moduleDatabase: ModuleDatabase;
     _currentModule: Module | null;
     // Per-current-module signal reference tracking (reset at each module entry)
     _signalRefs: Set<string>;                                          // r-value signal references (for Warning 2)
-    _instPortConnections: any[];   // [{instModuleName, portName, localSignalName, line, character}]
-    _paramNames: Set<string>;      // parameter/localparam names
     _params: Map<string, any>;     // paramName -> EvalValue (for cross-param evaluation)
     _genvarNames: Set<string>;     // genvar names
     _signalMap: Map<string, any>;  // signalName -> signal for current module
     _instanceList: any[];          // instance[] for current module
     // Accumulated across all modules (available after parse completes)
-    _pendingModuleData: any[];     // minimal per-module data for cross-module warnings
-    _allInstances: any[];          // all instances from all modules
     _inProcedural: boolean;
     _inContinuousAssign: boolean;
     _currentParamKind: any;
-    widthMismatches: any[];
 
     /**
      * @param uri uri of the parsed document (for error reporting and module database entries)
@@ -128,19 +124,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this.uri = uri;
         this.errors = [];
         this.warnings = [];
+        this.allInstances = [];
         this._moduleDatabase = modules;
         this._currentModule = null;
         this._signalRefs = new Set();
-        this._instPortConnections = [];
-        this._paramNames = new Set();
         this._params = new Map();
         this._genvarNames = new Set();
         this._signalMap = new Map();
         this._instanceList = [];
-        this._allInstances = [];
         this._inProcedural = false;
         this._inContinuousAssign = false;
-        this.widthMismatches = [];
     }
 
     _addSignalRef(name: any, line: any, character: any) {
@@ -272,18 +265,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
         // Reset per-module tracking for signal warnings
         this._signalRefs = new Set();
-        this._paramNames = new Set();
         this._params = new Map();
         this._genvarNames = new Set();
         this._signalMap = new Map();
         this._instanceList = [];
-        this._instPortConnections = [];
 
         this.visitChildren(ctx);
 
         this._generateWarnings();
         // Accumulate this module's instances into the cross-module list
-        this._allInstances.push(...this._instanceList);
+        this.allInstances.push(...this._instanceList);
         this._moduleDatabase.addModule(this._currentModule);
         this._currentModule = null;
         return null;
@@ -310,12 +301,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         });
     }
 
-    private _evaluatePortConnectionWidth(instance: any, portConnections: any[]) {
+    private _evaluatePortConnectionWidth(instance: any) {
         const module = this._moduleDatabase.getModule(instance.moduleName);
         if (!module) {
             return;
         }
 
+        const portConnections = instance.portConnections;
         for (const conn of portConnections) {
             const instPort = module.ports.find(p => p.name === conn.portName);
             if (!instPort) continue;
@@ -344,6 +336,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 localWidth = this._getSignalWidth(localSig.bitWidth) ?? 1;
             }
             if (localWidth !== portWidth) {
+                // Warning 12: bit width mismatch between connected signal and instantiated module port
+                // Build a lookup of connection position -> instance for parameter override access
                 this.warnings.push({
                     line: conn.line,
                     character: conn.character,
@@ -471,12 +465,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         const exprCtx = conn.expression ? conn.expression() : null;
                         const localSignalInfo = this._getPrimaryIdentifier(exprCtx);
                         if (localSignalInfo) {
-                            portConnections.push({
-                                portName: portInfo.name,
-                                localSignalName: localSignalInfo.name,
-                                line: localSignalInfo.line,
-                                character: localSignalInfo.character
-                            });
                             const signal = this._signalMap.get(localSignalInfo.name);
                             const port = module?.ports.find((p: any) => p.name === portInfo.name);
                             if (signal && port && signal.type === 'reg' && port.direction === 'output') {
@@ -489,7 +477,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 signal.assigned = true; // Mark signal as assigned for "declared but not used" warnings
                             }
 
-                            this._instPortConnections.push({
+                            portConnections.push({
                                 instModuleName,
                                 portName: portInfo.name,
                                 localSignalName: localSignalInfo.name,
@@ -507,12 +495,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                             if (concatIdents && concatIdents.length > 0) {
                                 const port = module?.ports.find((p: any) => p.name === portInfo.name);
                                 for (const localSignalInfo of concatIdents) {
-                                    portConnections.push({
-                                        portName: portInfo.name,
-                                        localSignalName: localSignalInfo.name,
-                                        line: localSignalInfo.line,
-                                        character: localSignalInfo.character
-                                    });
                                     const signal = this._signalMap.get(localSignalInfo.name);
                                     if (signal && port && signal.type === 'reg' && port.direction === 'output') {
                                         this._warningOutputConnection(module.name, localSignalInfo, port);
@@ -528,9 +510,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 // so the combined width (sum of all member widths) is compared
                                 // against the port width instead of each member individually.
                                 // concatMembers stores the individual signal names so that
-                                // _generateWarnings can correctly mark each member as "used" or
-                                // "assigned" depending on the port direction.
-                                this._instPortConnections.push({
+                                portConnections.push({
                                     instModuleName,
                                     portName: portInfo.name,
                                     localSignalName: exprCtx.getText(),
@@ -540,18 +520,15 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                     concatMembers: concatIdents.map((id: any) => id.name)
                                 });
                             } else {
-                                // Complex expression (not a simple identifier or concatenation): visit
+                                // Complex expression (not a simple identifier or concatenation): visitexi
                                 // it so its identifiers are tracked as r-value refs in _moduleSignalRefs.
-                                // Simple identifier connections are handled via _instPortConnections /
-                                // usedViaPortInput and must NOT be added to _moduleSignalRefs here,
-                                // because connections to output ports should not count as "used".
                                 this.visit(exprCtx);
                             }
                         }
                     }
                 }
 
-                this._instanceList.push({
+                this._evaluatePortConnectionWidth({
                     moduleName: instModuleName,
                     instanceName: instNameInfo ? instNameInfo.name : null,
                     line: instNameInfo ? instNameInfo.line : instModInfo.line,
@@ -562,6 +539,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     namedPortNames,
                     parentModuleName: this._currentModule.name,
                     parameterOverrides: overrides
+                });
+                this._instanceList.push({
+                    moduleName: instModuleName,
+                    instanceName: instNameInfo ? instNameInfo.name : null,
                 });
 
                 const ports = this._moduleDatabase.getModule(instModuleName)?.ports;
@@ -846,8 +827,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             if (identCtx) {
                 const info = this._getIdentifierInfo(identCtx);
                 if (info) {
-                    this._paramNames.add(info.name);
-
                     // Evaluate the constant_expression for the parameter database
                     const ceCtx = ctx.constant_expression ? ctx.constant_expression() : null;
                     const exprText = ceCtx ? ceCtx.getText() : null;
@@ -1463,7 +1442,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             character: info.character,
             direction,
             type,
-            bitWidth,
+            bitWidth : bitWidthRaw,
             isMemory: false,
             assigned: direction === 'output' ? false : true // inputs and inouts are treated assigned
         };
@@ -1708,7 +1687,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // or is connected to an input/inout port of an instantiated module (usedViaPortInput).
         // L-value assignments and connections to output ports do NOT count as "using" a signal.
         // Exception: output/inout port signals that are assigned are considered used externally.
-        for (const [key,signal] of this._signalMap) {
+        for (const signal of this._signalMap.values()) {
             if (!this._signalRefs.has(signal.name)) {
                 // Output/inout ports that are assigned drive the module interface;
                 // they are consumed externally and must not trigger "never used".
@@ -1726,71 +1705,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         }
 
         // Warning 7: output or internal signal never assigned
-        for (const [key,signal] of this._signalMap) {
+        for (const signal of this._signalMap.values()) {
             if (signal.assigned === false) {
                 this.warnings.push({
                     line: signal.line,
                     character: signal.character,
                     length: signal.name.length,
                     message: `Signal '${signal.name}' is never assigned`,
-                    severity: vscode.DiagnosticSeverity.Warning
-                });
-            }
-        }
-
-        // Warning 12: bit width mismatch between connected signal and instantiated module port
-        // Build a lookup of connection position -> instance for parameter override access
-        const connKey = (modName: string, line: number, char: number) => `${modName}:${line}:${char}`;
-        const instanceLookup = new Map<string, any>();
-        for (const inst of this._instanceList) {
-            for (const pc of inst.portConnections) {
-                instanceLookup.set(connKey(inst.moduleName, pc.line, pc.character), inst);
-            }
-        }
-        for (const conn of this._instPortConnections) {
-            const instance = this._moduleDatabase.getModule(conn.instModuleName);
-            if (!instance) continue;
-            const instModPorts = instance.ports;
-            if (!instModPorts) continue;
-            const instPort = instModPorts.find(p => p.name === conn.portName);
-            if (!instPort) continue;
-            // Evaluate port width with parameter overrides if available
-            let portWidth: number | null = null;
-            const inst = instanceLookup.get(connKey(conn.instModuleName, conn.line, conn.character));
-            if (inst && inst.parameterOverrides && instPort.bitWidth) {
-                // Use the locally-parsed parameters as defaults for the instantiated module,
-                // then fall back to the moduleDatabase for cross-file modules
-                const localInstMod = this._moduleDatabase.getModule(conn.instModuleName);
-                let instModParams = localInstMod ? localInstMod.parameterList : [];
-                if (instModParams.length === 0) {
-                    const dbMod = this._moduleDatabase.getModule(conn.instModuleName);
-                    if (dbMod) instModParams = dbMod.parameterList;
-                }
-                portWidth = this.evaluatePortWidth(instPort, instModParams, inst.parameterOverrides);
-            }
-            if (portWidth === null) {
-                portWidth = this._getSignalWidth(instPort.bitWidth) ?? 1;
-            }
-            let localWidth: number | null = null;
-            // Evaluate the actual expression bit width (handles part-selects like signal[7:0])
-            if (conn.exprCtx) {
-                const exprVal = this._evaluateExpression(conn.exprCtx, this._params, this._signalMap);
-                if (exprVal && exprVal.width !== null) {
-                    localWidth = exprVal.width;
-                }
-            }
-            // Fall back to the declared signal width when expression evaluation fails
-            if (localWidth === null) {
-                const localSig = this._signalMap.get(conn.localSignalName);
-                if (!localSig) continue;
-                localWidth = this._getSignalWidth(localSig.bitWidth) ?? 1;
-            }
-            if (localWidth !== portWidth) {
-                this.warnings.push({
-                    line: conn.line,
-                    character: conn.character,
-                    length: conn.localSignalName.length,
-                    message: `Port '${conn.portName}' has width ${portWidth}, but connected signal '${conn.localSignalName}' has width ${localWidth}`,
                     severity: vscode.DiagnosticSeverity.Warning
                 });
             }
