@@ -168,7 +168,7 @@ endmodule
     const warnings = getWarnings(verilog, 'warn6.v');
     const w = warnings.find((w: any) =>
         w.message.includes("'my_reg'") &&
-        w.message.includes("Output port") &&
+        w.message.includes("output port") &&
         w.message.includes("cannot be connected to reg"));
     assert(w !== undefined,
         "warning for output port 'driven_out' connected to reg 'my_reg'");

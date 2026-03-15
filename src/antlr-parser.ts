@@ -295,6 +295,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return this._getIdentifierInfo(identCtx);
     }
 
+    private _warningOutputConnection(moduleName: string, info: any, port: any) {
+        this.warnings.push({
+            line: info.line,
+            character: info.character,
+            length: info.name.length,
+            message: `${port.direction} port '${port.name}' of instantiated module cannot be connected to reg signal '${info.name}'`,
+            severity: vscode.DiagnosticSeverity.Warning
+        });
+    }
+
     /**
      * If exprCtx is a concatenation expression like {sig_a, sig_b}, return an array
      * of identifier infos for all simple-identifier members (recursively handles nested
@@ -384,6 +394,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 character: localSignalInfo.character,
                                 exprCtx
                             });
+                            const signal = this._signalList.find(s => s.name === localSignalInfo.name);
+                            const module = this._moduleDatabase.getModule(instModuleName);
+                            const port = module?.ports.find((p: any) => p.name === portInfo.name);
+                            if (signal && port && signal.type === 'reg' && port.direction === 'output') {
+                                this._warningOutputConnection(module.name, localSignalInfo, port);
+                            }
+
                             // Track for undeclared-identifier checking (Warning 1)
                             // without adding to _signalRefs (preserves Warning 2
                             // behavior: output-port connections must not count as "used").
@@ -534,11 +551,48 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return null;
     }
 
+    private _warningProceduralAssignments(lvalInfo: any, signal: any) {
+        // Warning 4: procedural (always/initial) l-value is a wire
+        this.warnings.push({
+            line: lvalInfo.line,
+            character: lvalInfo.character,
+            length: lvalInfo.name.length,
+            message: `Procedural assignment l-value '${signal.name}' is a wire`,
+            severity: vscode.DiagnosticSeverity.Warning
+        });
+    }
+
+    private _warningInputAssignments(lvalInfo: any, signal: any) {
+        // Warning 5: input signal used as l-value in assign or procedural block
+        this.warnings.push({
+            line: lvalInfo.line,
+            character: lvalInfo.character,
+            length: lvalInfo.name.length,
+            message: `Input signal '${signal}' cannot be used as l-value`,
+            severity: vscode.DiagnosticSeverity.Warning
+        });
+    }
+
     // Capture lvalue of continuous assign (assignment rule) or FOR loop (in procedural)
     visitAssignment(ctx: any) {
         if (!this._currentModule) return null;
         const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
         for (const lvalInfo of lvalIdentifiers) {
+            const signal = this._signalList.find((s) => s.name === lvalInfo.name);
+            if (signal && (signal.type === 'reg' || signal.type === 'integer')) {
+                // Warning 3: continuous assign statement l-value is a reg
+                this.warnings.push({
+                    line: lvalInfo.line,
+                    character: lvalInfo.character,
+                    length: lvalInfo.name.length,
+                    message: `Assign statement l-value '${signal.name}' is a ${signal.type}`,
+                    severity: vscode.DiagnosticSeverity.Warning
+                });
+            }
+            if (signal && signal.direction === 'input') {
+                this._warningInputAssignments(lvalInfo, signal.name);
+            }
+            lvalInfo.name
             if (this._inContinuousAssign) {
                 if (!this._assignLvalPositions.has(lvalInfo.name)) {
                     this._assignLvalPositions.set(lvalInfo.name, { line: lvalInfo.line, character: lvalInfo.character });
@@ -566,6 +620,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!this._currentModule) return null;
         const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
         for (const lvalInfo of lvalIdentifiers) {
+            const signal = this._signalList.find((s) => s.name === lvalInfo.name);
+            if (signal && signal.type === 'wire') {
+                this._warningProceduralAssignments(lvalInfo, signal);
+            }
+            if (signal && signal.direction === 'input') {
+                this._warningInputAssignments(lvalInfo, signal.name);
+            }
             if (!this._procLvalPositions.has(lvalInfo.name)) {
                 this._procLvalPositions.set(lvalInfo.name, { line: lvalInfo.line, character: lvalInfo.character });
             }
@@ -587,6 +648,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!this._currentModule) return null;
         const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
         for (const lvalInfo of lvalIdentifiers) {
+            const signal = this._signalList.find((s) => s.name === lvalInfo.name);
+            if (signal && signal.type === 'wire') {
+                this._warningProceduralAssignments(lvalInfo, signal);
+            }
+            if (signal && signal.direction === 'input') {
+                this._warningInputAssignments(lvalInfo, signal.name);
+            }
             if (!this._procLvalPositions.has(lvalInfo.name)) {
                 this._procLvalPositions.set(lvalInfo.name, { line: lvalInfo.line, character: lvalInfo.character });
             }
@@ -1671,78 +1739,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     message: `Signal '${signal.name}' is declared but never used`,
                     severity: vscode.DiagnosticSeverity.Warning
                 });
-            }
-        }
-
-        // Warning 3: continuous assign statement l-value is a reg
-        for (const [name, pos] of this._assignLvalPositions) {
-            const sig = declaredByName.get(name);
-            if (sig && (sig.type === 'reg' || sig.type === 'integer')) {
-                this.warnings.push({
-                    line: pos.line,
-                    character: pos.character,
-                    length: name.length,
-                    message: `Assign statement l-value '${name}' is a ${sig.type}`,
-                    severity: vscode.DiagnosticSeverity.Warning
-                });
-            }
-        }
-
-        // Warning 4: procedural (always/initial) l-value is a wire
-        for (const [name, pos] of this._procLvalPositions) {
-            const sig = declaredByName.get(name);
-            if (sig && wireTypes.has(sig.type)) {
-                this.warnings.push({
-                    line: pos.line,
-                    character: pos.character,
-                    length: name.length,
-                    message: `Procedural assignment l-value '${name}' is a wire`,
-                    severity: vscode.DiagnosticSeverity.Warning
-                });
-            }
-        }
-
-        // Warning 5: input signal used as l-value in assign or procedural block
-        const reportedInputLval = new Set();
-        for (const [name, pos] of [...this._assignLvalPositions.entries(), ...this._procLvalPositions.entries()]) {
-            if (reportedInputLval.has(name)) continue;
-            if (this._signalList.some((s: any) => s.name === name && s.direction === 'input')) {
-                reportedInputLval.add(name);
-                this.warnings.push({
-                    line: pos.line,
-                    character: pos.character,
-                    length: name.length,
-                    message: `Input signal '${name}' cannot be used as l-value`,
-                    severity: vscode.DiagnosticSeverity.Warning
-                });
-            }
-        }
-
-        // Warning 6: output or inout port of instantiated module connected to reg signal
-        // A reg cannot be driven by a submodule's output/inout port.
-        const reportedOutputPortReg = new Set();
-        for (const conn of this._instPortConnections) {
-            const instance = this._moduleDatabase.getModule(conn.instModuleName);
-            if (!instance) continue;
-            const instModPorts = instance.ports;
-            if (!instModPorts) continue;
-            const instPort = instModPorts.find(p => p.name === conn.portName);
-            if (!instPort || (instPort.direction !== 'output' && instPort.direction !== 'inout')) continue;
-
-            const signalNames: string[] = conn.concatMembers || [conn.localSignalName];
-            for (const sigName of signalNames) {
-                if (!reportedOutputPortReg.has(sigName) &&
-                    this._signalList.some((s: any) => s.name === sigName && (s.type === 'reg' || s.type === 'integer'))) {
-                    reportedOutputPortReg.add(sigName);
-                    const dirLabel = instPort.direction.charAt(0).toUpperCase() + instPort.direction.slice(1);
-                    this.warnings.push({
-                        line: conn.line,
-                        character: conn.character,
-                        length: sigName.length,
-                        message: `${dirLabel} port '${conn.portName}' of instantiated module cannot be connected to reg signal '${sigName}'`,
-                        severity: vscode.DiagnosticSeverity.Warning
-                    });
-                }
             }
         }
 
