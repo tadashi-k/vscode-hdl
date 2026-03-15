@@ -90,6 +90,18 @@ export class Module {
     addDefinition(def: Definition) {
         this.definitionMap.set(def.name, def);
     }
+
+    addPort(port: any) {
+        const portEntry: Port = {
+            name: port.name,
+            line: port.line,
+            character: port.character,
+            direction: port.direction,
+            bitRange: port.bitRange,
+            bitWidth: port.bitWidth
+        };
+        this.ports.push(portEntry);
+    }
 }
 
 /**
