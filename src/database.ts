@@ -15,7 +15,18 @@ export class BitRange {
     lsb: number | null;
 
     toString() : string {
-        return '[' + this.exprMsb + ':' + this.exprLsb + ']';
+        if (!this.msb && !this.lsb ) {
+            return '[' + this.exprMsb + ':' + this.exprLsb + ']';
+        } else {
+            return '[' + this.msb + ':' + this.lsb + ']';
+        }
+    }
+
+    constructor(msb: number, lsb: number) {
+        this.exprMsb = msb.toString();
+        this.exprLsb = lsb.toString();
+        this.msb = msb;
+        this.lsb = lsb;
     }
 }
 
@@ -25,7 +36,6 @@ export class Port {
     character: number;
     direction: 'input' | 'output' | 'inout';
     bitRange: BitRange | null; // treated as 1-bit if null
-    bitWidth: string | null; // ToDo: should be removed
 }
 
 export class Parameter {
@@ -72,7 +82,7 @@ export class Module {
     ports: Port[] = [];
 
     /** Parameters as an ordered list. */
-    parameterList: any[] = [];
+    parameterList: Parameter[] = [];
 
     /** Map from definition name to Definition for O(1) lookup. */
     definitionMap: Map<string, Definition> = new Map();
@@ -98,9 +108,13 @@ export class Module {
             character: port.character,
             direction: port.direction,
             bitRange: port.bitRange,
-            bitWidth: port.bitWidth
+            //bitWidth: port.bitWidth
         };
         this.ports.push(portEntry);
+    }
+
+    getPort(name: string): Port | undefined {
+        return this.ports.find(port => port.name === name);
     }
 }
 

@@ -133,8 +133,8 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
     if (!visitor) return;
 
     const instanced = new Set<string>();
-    for (const inst of visitor.allInstances) {
-        instanced.add(inst.moduleName);
+    for (const moduleName of visitor.allModuleRefs) {
+        instanced.add(moduleName);
     }
 
     const uri = document.uri.toString();
@@ -239,8 +239,8 @@ async function scanWorkspaceForModules() {
     // Collect instantiated module names from the last-parsed visitors
     const neededModuleNames = new Set<string>();
     if (verilogParser._lastVisitor) {
-        for (const inst of verilogParser._lastVisitor.allInstances) {
-            neededModuleNames.add(inst.moduleName);
+        for (const moduleName of verilogParser._lastVisitor.allModuleRefs) {
+            neededModuleNames.add(moduleName);
         }
     }
 
@@ -539,13 +539,12 @@ export function activate(context: vscode.ExtensionContext) {
                         // This looks like a named port connection: .portName(...)
                         // Look up all known modules for a port with this name
                         for (const mod of moduleDatabase.getAllModules()) {
-                            const port = mod.ports.find((p: any) => p.name === word);
+                            const port = mod.getPort(word);
                             if (port) {
-                                const portAny = port as any;
-                                const widthStr = portAny.bitWidth ? portAny.bitWidth : '';
                                 const dirStr = port.direction || '';
                                 let hoverContent = `**${port.name}**\n\n`;
-                                hoverContent += `${dirStr}${widthStr ? widthStr : ''}\n`;
+                                const range = port.bitRange ? port.bitRange.toString() : '';
+                                hoverContent += `${dirStr}${range}\n`;
                                 hoverContent += `module ${mod.name}`;
                                 return new vscode.Hover(hoverContent);
                             }

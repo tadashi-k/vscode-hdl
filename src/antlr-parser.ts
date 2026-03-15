@@ -8,7 +8,7 @@ import { preprocessVerilog } from './verilog-scanner';
 import { VerilogLexer } from '../antlr/generated/VerilogLexer';
 import { VerilogParser } from '../antlr/generated/VerilogParser';
 import { VerilogVisitor } from '../antlr/generated/VerilogVisitor';
-import { Module, ModuleDatabase, Definition } from './database';
+import { Module, ModuleDatabase, Definition, Port, BitRange} from './database';
 
 let vscode: typeof vsCodeModule;
 try {
@@ -80,19 +80,14 @@ class Signal {
     character: number;
     direction: string;
     type: string;
-    bitWidth: string;
-    isMemory: boolean;
+    bitRange: BitRange | null;
+    isMemory?: boolean;
     assigned: boolean;
-    //moduleName: string;
+    used?: boolean;
 }
 
 /**
  * ANTLR parse-tree visitor that extracts module and signal declarations.
- *
- * Module entry: { name, uri, line, character, ports[] }
- * Signal entry: { name, uri, line, character, direction, type, bitWidth, moduleName }
- *   direction: 'input' | 'output' | 'inout' | null
- *   type:      'wire' | 'reg' | 'integer' | 'tri' | 'supply0' | 'supply1'
  */
 const DEFAULT_NET_TYPE = 'wire';
 
@@ -101,15 +96,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     modules: Module[];
     errors: any[];
     warnings: any[];
-    allInstances: any[];          // all instances from all modules
+    allModuleRefs: Set<string>;    // all referenced modules
     _moduleDatabase: ModuleDatabase;
     _currentModule: Module | null;
     // Per-current-module signal reference tracking (reset at each module entry)
-    _signalRefs: Set<string>;                                          // r-value signal references (for Warning 2)
-    _params: Map<string, any>;     // paramName -> EvalValue (for cross-param evaluation)
-    _genvars: Set<string>;     // genvar names
-    _signalMap: Map<string, any>;  // signalName -> signal for current module
-    _instanceList: any[];          // instance[] for current module
+    _params: Map<string, EvalValue>; // paramName -> EvalValue (for cross-param evaluation)
+    _genvars: Set<string>;           // genvar names
+    _signalMap: Map<string, Signal>; // signalName -> signal for current module
     // Accumulated across all modules (available after parse completes)
     _inProcedural: boolean;
     _inContinuousAssign: boolean;
@@ -124,22 +117,22 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this.uri = uri;
         this.errors = [];
         this.warnings = [];
-        this.allInstances = [];
+        this.allModuleRefs = new Set();
         this._moduleDatabase = modules;
         this._currentModule = null;
-        this._signalRefs = new Set();
         this._params = new Map();
         this._genvars = new Set();
         this._signalMap = new Map();
-        this._instanceList = [];
         this._inProcedural = false;
         this._inContinuousAssign = false;
     }
 
-    _addSignalRef(name: any, line: any, character: any) {
+    _markSignalUsed(name: any, line: any, character: any) {
         if (!this._currentModule) return;
-        if (!this._signalRefs.has(name)) {
-            this._signalRefs.add(name);
+
+        const signal = this._signalMap.get(name);
+        if (signal) {
+            signal.used = true; // Mark signal as used for "declared but not used" warnings
         }
 
         if (this._signalMap.has(name) == false && this._params.has(name) == false && this._genvars.has(name) == false) {
@@ -212,25 +205,24 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         };
     }
 
-    _getRangeText(rangeCtx: any) {
-        return rangeCtx ? rangeCtx.getText() : null;
-    }
+    _getRange(rangeCtx: any) : BitRange | null {
+        if (!rangeCtx) {
+            return null;
+        }
 
-    // Return the bit-range text for a range context, evaluating constant expressions
-    // (which may reference parameters/localparams) where possible.
-    // Falls back to the raw text when evaluation fails.
-    _getEvaluatedRangeText(rangeCtx: any) {
-        if (!rangeCtx) return null;
-        const rawText = rangeCtx.getText();
-        if (!this._currentModule) return rawText;
         const ceContexts = rangeCtx.constant_expression ? rangeCtx.constant_expression() : null;
-        if (!Array.isArray(ceContexts) || ceContexts.length < 2) return rawText;
+        if (!Array.isArray(ceContexts) || ceContexts.length < 2) {
+            return null;
+        }
         const hi = this._evaluateConstantExpression(ceContexts[0], this._params);
         const lo = this._evaluateConstantExpression(ceContexts[1], this._params);
-        if (hi?.value !== null && hi?.value !== undefined && lo?.value !== null && lo?.value !== undefined) {
-            return `[${hi.value}:${lo.value}]`;
+
+        const bitRange = new BitRange(hi.value, lo.value);
+        if (!bitRange.msb || !bitRange.lsb) {
+            bitRange.exprMsb = ceContexts[0].getText();
+            bitRange.exprLsb = ceContexts[1].getText();
         }
-        return rawText;
+        return bitRange;
     }
 
     // Normalises a raw ANTLR rule-context result to a (possibly empty) array.
@@ -241,11 +233,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Build a Definition object for a port signal.
-    // Description format: "{direction} {type} {bitWidth} {name}" with empty parts omitted.
-    _makePortDefinition(signal: any): Definition {
+    // Description format: "{direction} {type} {bitRange} {name}" with empty parts omitted.
+    _makePortDefinition(signal: Signal): Definition {
         const parts = [signal.direction];
         if (signal.type && signal.type !== DEFAULT_NET_TYPE) parts.push(signal.type);
-        if (signal.bitWidth) parts.push(signal.bitWidth);
+        if (signal.bitRange) {
+            parts.push(signal.bitRange.toString());
+        }
         parts.push(signal.name);
         return new Definition(signal.name, signal.line, signal.character, signal.type, parts.join(' '));
     }
@@ -263,17 +257,14 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         this._currentModule = new Module(info.name, this.uri, info.line, info.character, endLine, true);
 
         // Reset per-module tracking for signal warnings
-        this._signalRefs = new Set();
         this._params = new Map();
         this._genvars= new Set<string>();
         this._signalMap = new Map();
-        this._instanceList = [];
 
         this.visitChildren(ctx);
 
         this._generateWarnings();
         // Accumulate this module's instances into the cross-module list
-        this.allInstances.push(...this._instanceList);
         this._moduleDatabase.addModule(this._currentModule);
         this._currentModule = null;
         return null;
@@ -308,16 +299,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
         const portConnections = instance.portConnections;
         for (const conn of portConnections) {
-            const instPort = module.ports.find(p => p.name === conn.portName);
+            const instPort = module.getPort(conn.portName);
             if (!instPort) continue;
 
             // Evaluate port width with parameter overrides if available
             let portWidth: number | null = null;
-            if (instance.parameterOverrides && instPort.bitWidth) {
+            if (instance.parameterOverrides && instPort.bitRange) {
                 portWidth = this.evaluatePortWidth(instPort, module.parameterList, instance.parameterOverrides);
             }
             if (portWidth === null) {
-                portWidth = this._getSignalWidth(instPort.bitWidth) ?? 1;
+                portWidth = this._getSignalWidth(instPort.bitRange);
             }
 
             // Evaluate the actual expression bit width (handles part-selects like signal[7:0])
@@ -332,7 +323,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             if (localWidth === null) {
                 const localSig = this._signalMap.get(conn.localSignalName);
                 if (!localSig) continue;
-                localWidth = this._getSignalWidth(localSig.bitWidth) ?? 1;
+                localWidth = this._getSignalWidth(localSig.bitRange);
             }
             if (localWidth !== portWidth) {
                 // Warning 12: bit width mismatch between connected signal and instantiated module port
@@ -384,7 +375,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 );
                 overrides = {};
                 if (namedParamAssigns.length > 0) {
-                    const moduleSignals = this._buildModuleSignalsMap();
                     for (const npa of namedParamAssigns) {
                         const paramIdCtx = npa.parameter_identifier ? npa.parameter_identifier() : null;
                         if (!paramIdCtx) continue;
@@ -392,7 +382,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         if (!paramInfo) continue;
                         const exprCtx = npa.expression ? npa.expression() : null;
                         if (!exprCtx) continue;
-                        const evalResult = this._evaluateExpression(exprCtx, this._params, moduleSignals);
+                        const evalResult = this._evaluateExpression(exprCtx, this._params, this._signalMap);
                         if (evalResult && evalResult.value !== null && evalResult.value !== undefined) {
                             overrides[paramInfo.name] = evalResult.value;
                         }
@@ -470,7 +460,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                 this._warningOutputConnection(module.name, localSignalInfo, port);
                             }
                             if (port && port.direction !== 'output') {
-                                this._addSignalRef(localSignalInfo.name, localSignalInfo.line, localSignalInfo.character);
+                                this._markSignalUsed(localSignalInfo.name, localSignalInfo.line, localSignalInfo.character);
                             }
                             if (signal && port && port.direction === 'output') {
                                 signal.assigned = true; // Mark signal as assigned for "declared but not used" warnings
@@ -499,7 +489,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                                         this._warningOutputConnection(module.name, localSignalInfo, port);
                                     }
                                     if (port && port.direction !== 'output') {
-                                        this._addSignalRef(localSignalInfo.name, localSignalInfo.line, localSignalInfo.character);
+                                        this._markSignalUsed(localSignalInfo.name, localSignalInfo.line, localSignalInfo.character);
                                     }
                                     if (signal && port && port.direction === 'output') {
                                         signal.assigned = true; // Mark signal as assigned for "declared but not used" warnings
@@ -539,10 +529,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     parentModuleName: this._currentModule.name,
                     parameterOverrides: overrides
                 });
-                this._instanceList.push({
-                    moduleName: instModuleName,
-                    instanceName: instNameInfo ? instNameInfo.name : null,
-                });
+                this.allModuleRefs.add(instModuleName);
 
                 const ports = this._moduleDatabase.getModule(instModuleName)?.ports;
                 if (ports) {
@@ -656,10 +643,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // Evaluate r-value expression
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
-            const moduleSignals = this._buildModuleSignalsMap();
-            this._evaluateExpression(exprCtx, this._params, moduleSignals);
+            this._evaluateExpression(exprCtx, this._params, this._signalMap);
             // Check bit width mismatch
-            this._checkWidthMismatch(ctx.lvalue(), exprCtx, this._params, moduleSignals);
+            this._checkWidthMismatch(ctx.lvalue(), exprCtx, this._params, this._signalMap);
         }
         this.visitChildren(ctx);
         return null;
@@ -684,10 +670,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // Evaluate r-value expression
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
-            const moduleSignals = this._buildModuleSignalsMap();
-            this._evaluateExpression(exprCtx, this._params, moduleSignals);
+            this._evaluateExpression(exprCtx, this._params, this._signalMap);
             // Check bit width mismatch
-            this._checkWidthMismatch(ctx.lvalue(), exprCtx, this._params, moduleSignals);
+            this._checkWidthMismatch(ctx.lvalue(), exprCtx, this._params, this._signalMap);
         }
         this.visitChildren(ctx);
         return null;
@@ -712,9 +697,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // Evaluate r-value expression and check bit width mismatch
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
-            const moduleSignals = this._buildModuleSignalsMap();
-            this._evaluateExpression(exprCtx, this._params, moduleSignals);
-            this._checkWidthMismatch(ctx.lvalue(), exprCtx, this._params, moduleSignals);
+            this._evaluateExpression(exprCtx, this._params, this._signalMap);
+            this._checkWidthMismatch(ctx.lvalue(), exprCtx, this._params, this._signalMap);
         }
         this.visitChildren(ctx);
         return null;
@@ -725,8 +709,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!this._currentModule) return null;
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
-            const moduleSignals = this._buildModuleSignalsMap();
-            this._evaluateExpression(exprCtx, this._params, moduleSignals);
+            this._evaluateExpression(exprCtx, this._params, this._signalMap);
         }
         this.visitChildren(ctx);
         return null;
@@ -737,14 +720,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!this._currentModule) return null;
         const exprs = ctx.expression ? ctx.expression() : null;
         if (exprs) {
-            const moduleSignals = this._buildModuleSignalsMap();
             const exprsArr = Array.isArray(exprs) ? exprs : [exprs];
             // For WHILE and FOR loops the single expression is the boolean condition.
             // REPEAT uses its expression as a count (not a boolean), so skip width check.
             // FOREVER has no expression at all, so exprs will already be null/empty.
             const isCondLoop = !!(ctx.WHILE ? ctx.WHILE() : null) || !!(ctx.FOR ? ctx.FOR() : null);
             for (const exprCtx of exprsArr) {
-                const exprVal = this._evaluateExpression(exprCtx, this._params, moduleSignals);
+                const exprVal = this._evaluateExpression(exprCtx, this._params, this._signalMap);
                 if (isCondLoop && exprVal && exprVal.width !== null && exprVal.width > 1) {
                     const start = exprCtx.start;
                     // Warning 11: condition expression in if/while/for has width > 1 bit
@@ -767,8 +749,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!this._currentModule) return null;
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
-            const moduleSignals = this._buildModuleSignalsMap();
-            const exprVal = this._evaluateExpression(exprCtx, this._params, moduleSignals);
+            const exprVal = this._evaluateExpression(exprCtx, this._params, this._signalMap);
             if (exprVal && exprVal.width !== null && exprVal.width > 1) {
                 const start = exprCtx.start;
                 // Warning 11: condition expression in if/while/for has width > 1 bit
@@ -795,7 +776,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             if (!isFunctionCall) {
                 const info = this._getIdentifierInfo(ctx.identifier());
                 if (info) {
-                    this._addSignalRef(info.name, info.line, info.character);
+                    this._markSignalUsed(info.name, info.line, info.character);
                 }
             }
         }
@@ -836,13 +817,11 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     // default here is 'parameter' and visitLocal_parameter_declaration overrides it.
                     const param = {
                         name: info.name,
-                        uri: this.uri,
                         line: info.line,
                         character: info.character,
-                        kind: this._currentParamKind || 'parameter',
+                        bitRange: new BitRange(31, 0),
                         exprText,
                         value,
-                        moduleName: this._currentModule.name
                     };
                     this._currentModule.parameterList.push(param);
                     // Store EvalValue for subsequent parameters in the same module
@@ -850,7 +829,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         this._params.set(info.name, evalResult);
                     }
                     // Create a Definition for hover and goto-definition
-                    const kind = param.kind;
+                    const kind = this._currentParamKind || 'parameter';
                     const descValue = value !== null ? String(value) : exprText;
                     const paramDesc = descValue ? `${kind} ${info.name} = ${descValue}` : `${kind} ${info.name}`;
                     this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, kind, paramDesc));
@@ -930,17 +909,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return this._evaluateExpression(exprCtxToUse, paramMap);
     }
 
-    // Helper: build a map of signal name -> signal object for the current module
-    _buildModuleSignalsMap(): Map<string, any> {
-        return this._signalMap;
-    }
-
-    // Helper: extract the numeric bit-width from a bitWidth string (e.g. "[7:0]" -> 8)
-    _getSignalWidth(bitWidth: string | null): number | null {
-        if (!bitWidth) return null;
-        const match = bitWidth.match(/^\[(\d+):(\d+)\]$/);
-        if (!match) return null;
-        return Math.abs(parseInt(match[1], 10) - parseInt(match[2], 10)) + 1;
+    // Helper: extract the numeric bit-width from a bitRange
+    _getSignalWidth(bitRange: BitRange| null): number {
+        if (!bitRange || bitRange.msb === null || bitRange.lsb === null) {
+            return null;
+        }
+        return bitRange.msb - bitRange.lsb + 1;
     }
 
     // Evaluate a simple expression string using a parameter map.
@@ -983,14 +957,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Evaluate the bit-width of a port given instance-level parameter overrides.
-    // @param port      Port object with bitWidthRaw (e.g. "[WIDTH-1:0]") and/or bitWidth
+    // @param port      Port object with bitRange
     // @param params    Default parameter list of the instantiated module
     // @param overrides Instance-level parameter overrides (e.g. { WIDTH: 16 })
-    evaluatePortWidth(port: any, params: any[], overrides: any): number | null {
-        const rawWidth = port.bitWidthRaw || port.bitWidth;
-        if (!rawWidth) return 1;
-        const match = (rawWidth as string).match(/^\[(.+):(.+)\]$/);
-        if (!match) return 1;
+    evaluatePortWidth(port: Port, params: any[], overrides: any): number | null {
+        if (!port.bitRange) {
+            return 1;
+        }
 
         // Build param map: defaults from params, then overrides
         const paramMap = new Map<string, any>();
@@ -1020,8 +993,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             }
         }
 
-        const msb = this._evalSimpleExpr(match[1], paramMap);
-        const lsb = this._evalSimpleExpr(match[2], paramMap);
+        const msb = this._evalSimpleExpr(port.bitRange.exprMsb, paramMap);
+        const lsb = this._evalSimpleExpr(port.bitRange.exprLsb, paramMap);
         if (msb !== null && lsb !== null) {
             return msb - lsb + 1;
         }
@@ -1030,7 +1003,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
     // Compute the bit width of an lvalue context.
     // Returns the width as a number, or null if it cannot be determined.
-    _getLvalueWidth(lvalCtx: any, moduleParams: any, moduleSignals: Map<string, any>): number | null {
+    _getLvalueWidth(lvalCtx: any, moduleParams: any, moduleSignals: Map<string, Signal>): number | null {
         if (!lvalCtx) return null;
 
         // Concatenation lvalue: width is the sum of each element's expression width
@@ -1084,15 +1057,13 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             // Simple identifier with no range: use declared signal width (default 1 for scalars)
             const sig = moduleSignals.get(name);
             if (!sig) return null;
-            const w = this._getSignalWidth(sig.bitWidth);
-            return w !== null ? w : 1;
+            return this._getSignalWidth(sig.bitRange);
         }
         if (exprArr.length === 1) {
             // Memory array access: identifier[addr] → element width (not a bit select)
             const sig = moduleSignals.get(name);
             if (sig && sig.isMemory) {
-                const w = this._getSignalWidth(sig.bitWidth);
-                return w !== null ? w : 1;
+                return this._getSignalWidth(sig.bitRange);
             }
             // Single bit select: identifier[expr] → width is 1
             return 1;
@@ -1155,7 +1126,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Recursively evaluate an expression context; returns an EvalValue or null
-    _evaluateExpression(ctx: any, paramMap: any, moduleSignals?: Map<string, any>): EvalValue | null {
+    _evaluateExpression(ctx: any, paramMap: any, moduleSignals?: Map<string, Signal>): EvalValue | null {
         if (!ctx) return null;
 
         // STRING literal – not numeric
@@ -1211,7 +1182,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     // Evaluate a primary context; returns an EvalValue or null
-    _evaluatePrimary(ctx: any, paramMap: any, moduleSignals?: Map<string, any>): EvalValue | null {
+    _evaluatePrimary(ctx: any, paramMap: any, moduleSignals?: Map<string, Signal>): EvalValue | null {
         if (!ctx) return null;
 
         // Number literal — check first to avoid false match on expression()
@@ -1256,8 +1227,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     if (exprArr.length === 1) {
                         // Memory array access: identifier[addr] → element width (not a bit select)
                         if (sig.isMemory) {
-                            const w = this._getSignalWidth(sig.bitWidth);
-                            return { value: null, width: w !== null ? w : 1 };
+                            const w = this._getSignalWidth(sig.bitRange);
+                            return { value: null, width: w};
                         }
                         // Single bit select: identifier[expr] → width is 1
                         return { value: null, width: 1 };
@@ -1279,8 +1250,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     }
 
                     // Plain identifier: use declared signal width (default 1 for scalars)
-                    const w = this._getSignalWidth(sig.bitWidth);
-                    return { value: null, width: w !== null ? w : 1 };
+                    const w = this._getSignalWidth(sig.bitRange);
+                    return { value: null, width: w};
                 }
             }
             return null;
@@ -1429,8 +1400,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const direction = ctx.port_direction().getText();
         const dataTypeCtx = ctx.port_data_type();
         const type = dataTypeCtx ? dataTypeCtx.getText() : DEFAULT_NET_TYPE;
-        const bitWidthRaw = this._getRangeText(ctx.range());
-        const bitWidth = this._getEvaluatedRangeText(ctx.range());
+        const bitRange = this._getRange(ctx.range());
 
         const info = this._getIdentifierInfo(ctx.port_identifier().identifier());
         if (!info) return null;
@@ -1441,9 +1411,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             character: info.character,
             direction,
             type,
-            bitWidth : bitWidthRaw,
-            isMemory: false,
-            assigned: direction === 'output' ? false : true // inputs and inouts are treated assigned
+            bitRange,
+            assigned: direction === 'output' ? false : true, // inputs and inouts are treated assigned
         };
 
         this._currentModule.addPort(signal);
@@ -1474,8 +1443,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     _processPortDeclaration(ctx: any, direction: any) {
         const netTypeCtx = ctx.net_type();
         const type = netTypeCtx ? netTypeCtx.getText() : DEFAULT_NET_TYPE;
-        const bitWidthRaw = this._getRangeText(ctx.range());
-        const bitWidth = this._getEvaluatedRangeText(ctx.range());
+        const bitRange = this._getRange(ctx.range());
 
         const portIdsCtx = ctx.list_of_port_identifiers();
         const rawIds = portIdsCtx.port_identifier();
@@ -1491,9 +1459,8 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 character: info.character,
                 direction,
                 type,
-                bitWidth,
-                isMemory: false,
-                assigned: direction === 'output' ? false : true // inputs and inouts are treated assigned
+                bitRange,
+                assigned: direction === 'output' ? false : true, // inputs and inouts are treated assigned
             };
 
             this._currentModule.addPort(signal);
@@ -1507,7 +1474,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!this._currentModule) return null;
 
         const type = ctx.net_type().getText();
-        const bitWidth = this._getEvaluatedRangeText(ctx.range());
+        const bitRange = this._getRange(ctx.range());
 
         const netIdsCtx = ctx.list_of_net_identifiers();
         const rawIds = netIdsCtx.net_identifier();
@@ -1530,12 +1497,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 character: info.character,
                 direction: null,
                 type,
-                bitWidth,
+                bitRange,
                 isMemory,
-                assigned: idsWithInit.has(netIdCtx) // treat net with initial value as assigned
+                assigned: idsWithInit.has(netIdCtx), // treat net with initial value as assigned
             };
             this._signalMap.set(signal.name, signal);
-            const netDesc = [type, bitWidth, info.name].filter(Boolean).join(' ');
+            const netDesc = [type, bitRange ? bitRange.toString() : '', info.name].filter(Boolean).join(' ');
             this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, type, netDesc));
         }
         this.visitChildren(ctx);
@@ -1546,7 +1513,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     visitReg_declaration(ctx: any) {
         if (!this._currentModule) return null;
 
-        const bitWidth = this._getEvaluatedRangeText(ctx.range());
+        const bitRange = this._getRange(ctx.range());
 
         const regIdsCtx = ctx.list_of_register_identifiers();
         const rawIds = regIdsCtx.register_identifier();
@@ -1569,12 +1536,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 character: info.character,
                 direction: null,
                 type: 'reg',
-                bitWidth,
+                bitRange,
                 isMemory,
-                assigned: idsWithInit.has(regIdCtx) // treat reg with initial value as assigned
+                assigned: idsWithInit.has(regIdCtx), // treat reg with initial value as assigned
             };
             this._signalMap.set(signal.name, signal);
-            const regDesc = ['reg', bitWidth, info.name].filter(Boolean).join(' ');
+            const regDesc = ['reg', bitRange ? bitRange.toString() : '', info.name].filter(Boolean).join(' ');
             this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, 'reg', regDesc));
         }
         this.visitChildren(ctx);
@@ -1603,9 +1570,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 character: info.character,
                 direction: null,
                 type: 'integer',
-                bitWidth: '32',
+                bitRange: new BitRange(31, 0),
                 isMemory: false,
-                assigned: idsWithInit.has(intIdCtx) // treat integer with initial value as assigned
+                assigned: idsWithInit.has(intIdCtx), // treat integer with initial value as assigned
             };
             this._signalMap.set(signal.name, signal);
             this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, 'integer', `integer ${info.name}`));
@@ -1687,7 +1654,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         // L-value assignments and connections to output ports do NOT count as "using" a signal.
         // Exception: output/inout port signals that are assigned are considered used externally.
         for (const signal of this._signalMap.values()) {
-            if (!this._signalRefs.has(signal.name)) {
+            if (!signal.used) {
                 // Output/inout ports that are assigned drive the module interface;
                 // they are consumed externally and must not trigger "never used".
                 if ((signal.direction === 'output' || signal.direction === 'inout')) {
