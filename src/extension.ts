@@ -167,11 +167,26 @@ class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
         const modules = moduleDatabase.getModulesByUri(document.uri.toString());
         return modules.map((module: any) => {
             const line = document.lineAt(module.line);
-            const range = new vscode.Range(
+            const moduleRange = new vscode.Range(
+                new vscode.Position(module.line, line.firstNonWhitespaceCharacterIndex),
+                new vscode.Position(module.endLine >= 0 ? module.endLine : module.line, 0)
+            );
+            const moduleSelectionRange = new vscode.Range(
                 new vscode.Position(module.line, line.firstNonWhitespaceCharacterIndex),
                 new vscode.Position(module.line, line.text.length)
             );
-            return new vscode.DocumentSymbol(module.name, 'module', vscode.SymbolKind.Module, range, range);
+            const moduleSym = new vscode.DocumentSymbol(module.name, 'module', vscode.SymbolKind.Module, moduleRange, moduleSelectionRange);
+
+            moduleSym.children = module.instanceList.map((inst: any) => {
+                const instLine = document.lineAt(inst.line);
+                const instRange = new vscode.Range(
+                    new vscode.Position(inst.line, inst.character),
+                    new vscode.Position(inst.line, instLine.text.length)
+                );
+                return new vscode.DocumentSymbol(inst.instanceName, inst.moduleName, vscode.SymbolKind.Module, instRange, instRange);
+            });
+
+            return moduleSym;
         });
     }
 }

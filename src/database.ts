@@ -47,6 +47,24 @@ export class Parameter {
     value: number | null;
 }
 
+export class Instance {
+    instanceName: string;
+    moduleName: string;
+    line: number;
+    character: number;
+    moduleNameLine: number;
+    moduleNameCharacter: number;
+
+    constructor(instanceName: string, moduleName: string, line: number, character: number, moduleNameLine: number, moduleNameCharacter: number) {
+        this.instanceName = instanceName;
+        this.moduleName = moduleName;
+        this.line = line;
+        this.character = character;
+        this.moduleNameLine = moduleNameLine;
+        this.moduleNameCharacter = moduleNameCharacter;
+    }
+}
+
 export class Definition {
     name: string;
     line: number;
@@ -86,6 +104,9 @@ export class Module {
 
     /** Map from definition name to Definition for O(1) lookup. */
     definitionMap: Map<string, Definition> = new Map();
+
+    /** Instances in declaration order (populated by the ANTLR parser, empty before scan). */
+    instanceList: Instance[] = [];
 
     constructor(name: string, uri: string, line: number, character: number, endLine: number, scanned = false) {
         this.name = name;

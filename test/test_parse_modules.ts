@@ -149,7 +149,7 @@ console.log('\nTest: parseModules returns Module with only ports and parameterLi
     assert(Array.isArray(m.ports), 'Module.ports is an array');
     assert(Array.isArray(m.parameterList), 'Module.parameterList is an array');
     assert((m as any).signalList === undefined, 'Module has no signalList property');
-    assert((m as any).instanceList === undefined, 'Module has no instanceList property');
+    assert(Array.isArray(m.instanceList) && m.instanceList.length === 0, 'Module.instanceList is an empty array (not populated by parseModules)');
     assert((m as any).signalMap === undefined, 'Module has no signalMap property');
 }
 
