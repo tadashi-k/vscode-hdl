@@ -429,6 +429,87 @@ endmodule
         "no bit-width warning for 5-bit 'addr' signal connected to 5-bit 'addr' port in ram_i_2 (DEPTH=32)");
 }
 
+// ── test_instance.v ram_i_3: scalar port widths and bit-select expressions ──
+// Regression tests for the port-width bug where scalar (1-bit) ports/signals
+// were reported with width null instead of width 1.
+
+console.log('\ntest_instance.v ram_i_3: scalar port / bit-select width evaluation');
+{
+    const verilog = `
+module ram #(
+    parameter DEPTH = 32,
+    parameter WIDTH = 8,
+    parameter ADR_WIDTH = (DEPTH == 16) ? 4 : (DEPTH == 32) ? 5 : (DEPTH == 64) ? 6 : 0
+)
+(
+    input clk,
+    input[ADR_WIDTH-1:0] addr,
+    input [WIDTH-1:0] data_in,
+    input we,
+    input re,
+    output reg [WIDTH-1:0] data_out
+);
+reg[WIDTH-1:0] mem[0:DEPTH-1];
+always @(posedge clk) begin
+    if (we) begin
+        mem[addr] <= data_in;
+    end else if (re) begin
+        data_out <= mem[addr];
+    end
+end
+endmodule
+
+module test_instance (
+    input clk,
+    input reset,
+    output reg[7:0] count_out
+);
+reg[4:0] addr;
+reg[3:0] init_h, init_l;
+wire[3:0] count_h, count_l;
+always @(posedge clk) begin
+    count_out <= {count_h, count_l};
+    addr <= addr + 1;
+end
+
+ram #(
+    .DEPTH(32),
+    .WIDTH(8)
+) ram_i_3 (
+    .clk(clk),
+    .re(addr[0]),
+    .we(addr[1]),
+    .addr(reset),
+    .data_in({init_h, init_l}),
+    .data_out({count_h, count_l})
+);
+endmodule
+`;
+    const warnings = getWarnings(verilog, 'test_instance_ram_i3.v');
+
+    // re and we ports are 1-bit scalars; addr[0] and addr[1] are 1-bit bit-selects.
+    // There must be no width-mismatch warning for re or we.
+    const warnRe = warnings.find((w: any) =>
+        w.message.includes("Port 're'"));
+    assert(warnRe === undefined,
+        "no width warning for 1-bit 're' port connected to 1-bit addr[0] bit-select");
+
+    const warnWe = warnings.find((w: any) =>
+        w.message.includes("Port 'we'"));
+    assert(warnWe === undefined,
+        "no width warning for 1-bit 'we' port connected to 1-bit addr[1] bit-select");
+
+    // addr port is ADR_WIDTH (5) bits wide; reset is a 1-bit scalar input.
+    // The warning must report reset's width as 1, not null.
+    const warnAddr = warnings.find((w: any) =>
+        w.message.includes("Port 'addr'") &&
+        w.message.includes('width 5') &&
+        w.message.includes("'reset'") &&
+        w.message.includes('width 1'));
+    assert(warnAddr !== undefined,
+        "warning for 1-bit 'reset' signal connected to 5-bit 'addr' port (width shown as 1, not null)");
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
