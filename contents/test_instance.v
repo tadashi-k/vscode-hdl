@@ -39,6 +39,19 @@ ram #(
     .data_out({count_h, count_l})
 );
 
+
+ram #(
+    .DEPTH(32),
+    .WIDTH(8)
+) ram_i_3 (
+    .clk(clk),
+    .re(addr[0]), // should not show warning for addr[0] as it's 1 bit
+    .we(addr[1]), // should not show warning for addr[0] as it's 1 bit
+    .addr(reset), // should show 'reset' has width 1
+    .data_in({init_h, init_l}),
+    .data_out({count_h, count_l})
+);
+
 endmodule
 
 module ram #(
