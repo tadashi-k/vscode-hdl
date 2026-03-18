@@ -909,10 +909,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         return this._evaluateExpression(exprCtxToUse, paramMap);
     }
 
-    // Helper: extract the numeric bit-width from a bitRange
+    // Helper: extract the numeric bit-width from a bitRange.
+    // Returns 1 for scalar signals/ports with no explicit range (null bitRange),
+    // which is correct Verilog semantics: an unranged signal is a 1-bit scalar.
     _getSignalWidth(bitRange: BitRange| null): number {
         if (!bitRange || bitRange.msb === null || bitRange.lsb === null) {
-            return null;
+            return 1;
         }
         return bitRange.msb - bitRange.lsb + 1;
     }
