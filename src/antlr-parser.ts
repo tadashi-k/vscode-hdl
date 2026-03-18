@@ -8,7 +8,7 @@ import { preprocessVerilog } from './verilog-scanner';
 import { VerilogLexer } from '../antlr/generated/VerilogLexer';
 import { VerilogParser } from '../antlr/generated/VerilogParser';
 import { VerilogVisitor } from '../antlr/generated/VerilogVisitor';
-import { Module, ModuleDatabase, Definition, Port, BitRange} from './database';
+import { Module, ModuleDatabase, Definition, Port, BitRange, Instance} from './database';
 
 let vscode: typeof vsCodeModule;
 try {
@@ -530,6 +530,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     parameterOverrides: overrides
                 });
                 this.allModuleRefs.add(instModuleName);
+
+                const instEntry = new Instance(
+                    instNameInfo ? instNameInfo.name : instModuleName,
+                    instModuleName,
+                    instNameInfo ? instNameInfo.line : instModInfo.line,
+                    instNameInfo ? instNameInfo.character : instModInfo.character,
+                    instModInfo.line,
+                    instModInfo.character
+                );
+                this._currentModule.instanceList.push(instEntry);
 
                 const ports = this._moduleDatabase.getModule(instModuleName)?.ports;
                 if (ports) {
