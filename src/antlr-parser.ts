@@ -825,6 +825,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
                     // The kind ('parameter' or 'localparam') is set by the calling context;
                     // default here is 'parameter' and visitLocal_parameter_declaration overrides it.
+                    const kind = this._currentParamKind || 'parameter';
                     const param = {
                         name: info.name,
                         line: info.line,
@@ -832,6 +833,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         bitRange: new BitRange(31, 0),
                         exprText,
                         value,
+                        kind,
                     };
                     this._currentModule.parameterList.push(param);
                     // Store EvalValue for subsequent parameters in the same module
@@ -839,7 +841,6 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         this._params.set(info.name, evalResult);
                     }
                     // Create a Definition for hover and goto-definition
-                    const kind = this._currentParamKind || 'parameter';
                     const descValue = value !== null ? String(value) : exprText;
                     const paramDesc = descValue ? `${kind} ${info.name} = ${descValue}` : `${kind} ${info.name}`;
                     this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, kind, paramDesc));

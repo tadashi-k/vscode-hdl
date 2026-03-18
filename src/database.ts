@@ -49,6 +49,7 @@ export class Parameter {
     bitRange: BitRange | null; // treated as [31:0] if null
     exprText: string;
     value: number | null;
+    kind: 'parameter' | 'localparam';
 }
 
 export class Instance {
