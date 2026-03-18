@@ -22,6 +22,10 @@ export class BitRange {
         }
     }
 
+    toExprString() : string {
+        return '[' + this.exprMsb + ':' + this.exprLsb + ']';
+    }
+
     constructor(msb: number, lsb: number) {
         this.exprMsb = msb.toString();
         this.exprLsb = lsb.toString();

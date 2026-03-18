@@ -558,7 +558,7 @@ export function activate(context: vscode.ExtensionContext) {
                             if (port) {
                                 const dirStr = port.direction || '';
                                 let hoverContent = `**${port.name}**\n\n`;
-                                const range = port.bitRange ? port.bitRange.toString() : '';
+                                const range = port.bitRange ? port.bitRange.toExprString() : '';
                                 hoverContent += `${dirStr}${range}\n`;
                                 hoverContent += `module ${mod.name}`;
                                 return new vscode.Hover(hoverContent);
