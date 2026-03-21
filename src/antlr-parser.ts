@@ -93,20 +93,19 @@ const DEFAULT_NET_TYPE = 'wire';
 
 class VerilogSymbolVisitor extends VerilogVisitor {
     uri: string;
-    modules: Module[];
-    errors: any[];
-    warnings: any[];
-    allModuleRefs: Set<string>;    // all referenced modules
+    errors = [];
+    warnings = [];
+    allModuleRefs = new Set<string>();   // all referenced modules
     _moduleDatabase: ModuleDatabase;
-    _currentModule: Module | null;
+    _currentModule: Module | null = null;
     // Per-current-module signal reference tracking (reset at each module entry)
-    _params: Map<string, EvalValue>; // paramName -> EvalValue (for cross-param evaluation)
-    _genvars: Set<string>;           // genvar names
-    _signalMap: Map<string, Signal>; // signalName -> signal for current module
+    _params = new Map<string, EvalValue>(); // paramName -> EvalValue (for cross-param evaluation)
+    _genvars = new Set<string>();           // genvar names
+    _signalMap = new Map<string, Signal>(); // signalName -> signal for current module
     // Accumulated across all modules (available after parse completes)
-    _inProcedural: boolean;
-    _inContinuousAssign: boolean;
-    _currentParamKind: any;
+    _inProcedural: boolean = false;
+    _inContinuousAssign: boolean = false;
+    _currentParamKind : 'parameter' | 'localparam' = 'parameter';
 
     /**
      * @param uri uri of the parsed document (for error reporting and module database entries)
@@ -115,16 +114,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     constructor(uri: string, modules: ModuleDatabase) {
         super();
         this.uri = uri;
-        this.errors = [];
-        this.warnings = [];
-        this.allModuleRefs = new Set();
         this._moduleDatabase = modules;
-        this._currentModule = null;
-        this._params = new Map();
-        this._genvars = new Set();
-        this._signalMap = new Map();
-        this._inProcedural = false;
-        this._inContinuousAssign = false;
     }
 
     _markSignalUsed(name: any, line: any, character: any) {
@@ -633,7 +623,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
         for (const lvalInfo of lvalIdentifiers) {
             const signal = this._signalMap.get(lvalInfo.name);
-            if (signal && (signal.type === 'reg' || signal.type === 'integer')) {
+            if (signal && this._inContinuousAssign &&(signal.type === 'reg' || signal.type === 'integer')) {
                 // Warning 3: continuous assign statement l-value is a reg
                 this.warnings.push({
                     line: lvalInfo.line,
