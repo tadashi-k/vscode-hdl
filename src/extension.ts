@@ -6,6 +6,7 @@ import AntlrVerilogParser = require('./antlr-parser');
 import { parseHdlIgnore, regexScanModules } from './verilog-scanner';
 import { computeSemanticTokens, TOKEN_TYPES, TOKEN_MODIFIERS } from './semantic-tokens';
 import { Module, ModuleDatabase } from './database';
+import { buildInstantiationSnippet } from './instantiation-snippet';
 
 /**
  * File reader for `include directive expansion in the VS Code extension context.
@@ -352,6 +353,56 @@ class VerilogSemanticTokensProvider implements vscode.DocumentSemanticTokensProv
 }
 
 /**
+ * Completion Item Provider for Verilog module instantiation.
+ *
+ * When the user types a module name that exists in the workspace database,
+ * offers a completion item that expands to a full named-port instantiation
+ * with parameter overrides set to their default values.
+ */
+class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
+    provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        _token: vscode.CancellationToken,
+        _context: vscode.CompletionContext
+    ): vscode.CompletionItem[] {
+        const items: vscode.CompletionItem[] = [];
+
+        for (const mod of moduleDatabase.getAllModules()) {
+            // If the module isn't fully parsed yet, try to parse it now so that
+            // port and parameter information is available for the snippet.
+            if (!mod.scanned && mod.uri) {
+                try {
+                    const content = fs.readFileSync(vscode.Uri.parse(mod.uri).fsPath, 'utf8');
+                    const depDoc: any = {
+                        getText: () => content,
+                        uri: { toString: () => mod.uri },
+                        languageId: 'verilog'
+                    };
+                    updateDocumentModules(depDoc);
+                } catch (error) {
+                    console.error(`Error parsing module ${mod.name} for completion:`, error);
+                }
+            }
+
+            // Skip modules defined in the same file (avoid self-instantiation suggestions)
+            const docUri = document.uri.toString();
+            if (mod.uri === docUri) {
+                continue;
+            }
+
+            const item = new vscode.CompletionItem(mod.name, vscode.CompletionItemKind.Module);
+            item.detail = 'module instantiation';
+            item.documentation = new vscode.MarkdownString(`Instantiate module \`${mod.name}\``);
+            item.insertText = new vscode.SnippetString(buildInstantiationSnippet(mod));
+            items.push(item);
+        }
+
+        return items;
+    }
+}
+
+/**
  * Update diagnostics for a document by parsing for syntax errors
  * @param {vscode.TextDocument} document 
  * @param {vscode.DiagnosticCollection} diagnosticCollection 
@@ -495,6 +546,14 @@ export function activate(context: vscode.ExtensionContext) {
             { language: 'verilog' },
             semanticTokensProvider,
             semanticTokensLegend
+        )
+    );
+
+    // Register completion provider for module instantiation
+    context.subscriptions.push(
+        vscode.languages.registerCompletionItemProvider(
+            { language: 'verilog' },
+            new VerilogCompletionItemProvider()
         )
     );
 

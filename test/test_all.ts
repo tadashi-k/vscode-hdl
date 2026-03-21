@@ -12,6 +12,7 @@ const testFiles = [
     'test_definitions.ts',
     'test_directive.ts',
     'test_warning.ts',
+    'test_completion.ts',
 ];
 
 const total = testFiles.length;
