@@ -7,6 +7,7 @@ import { parseHdlIgnore, regexScanModules } from './verilog-scanner';
 import { computeSemanticTokens, TOKEN_TYPES, TOKEN_MODIFIERS } from './semantic-tokens';
 import { Module, ModuleDatabase } from './database';
 import { buildInstantiationSnippet } from './instantiation-snippet';
+import { isInsideProceduralBlock } from './context-detector';
 
 /**
  * File reader for `include directive expansion in the VS Code extension context.
@@ -353,11 +354,13 @@ class VerilogSemanticTokensProvider implements vscode.DocumentSemanticTokensProv
 }
 
 /**
- * Completion Item Provider for Verilog module instantiation.
+ * Completion Item Provider for Verilog.
  *
- * When the user types a module name that exists in the workspace database,
- * offers a completion item that expands to a full named-port instantiation
- * with parameter overrides set to their default values.
+ * Context-aware behaviour:
+ *  - Inside an `always` or `initial` block: suggests the wire, reg, integer,
+ *    parameter, and localparam signals defined in the enclosing module.
+ *  - Outside procedural blocks (module body): suggests module instantiation
+ *    snippets for every module in the workspace database.
  */
 class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
     provideCompletionItems(
@@ -366,6 +369,48 @@ class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
         _token: vscode.CancellationToken,
         _context: vscode.CompletionContext
     ): vscode.CompletionItem[] {
+        const offset = document.offsetAt(position);
+
+        if (isInsideProceduralBlock(document.getText(), offset)) {
+            return this._signalCompletions(document, position);
+        }
+
+        return this._instantiationCompletions(document);
+    }
+
+    /** Completions for signals inside always/initial blocks. */
+    private _signalCompletions(
+        document: vscode.TextDocument,
+        position: vscode.Position
+    ): vscode.CompletionItem[] {
+        const items: vscode.CompletionItem[] = [];
+        const docUri = document.uri.toString();
+        const mod = moduleDatabase.getModuleByUriPosition(docUri, position.line);
+        if (!mod) {
+            return items;
+        }
+
+        const kindMap: Record<string, vscode.CompletionItemKind> = {
+            wire:       vscode.CompletionItemKind.Variable,
+            reg:        vscode.CompletionItemKind.Variable,
+            integer:    vscode.CompletionItemKind.Variable,
+            parameter:  vscode.CompletionItemKind.Constant,
+            localparam: vscode.CompletionItemKind.Constant,
+        };
+
+        for (const def of mod.definitionMap.values()) {
+            if (def.type in kindMap) {
+                const item = new vscode.CompletionItem(def.name, kindMap[def.type]);
+                item.detail = def.description;
+                items.push(item);
+            }
+        }
+
+        return items;
+    }
+
+    /** Completions for module instantiation outside procedural blocks. */
+    private _instantiationCompletions(document: vscode.TextDocument): vscode.CompletionItem[] {
         const items: vscode.CompletionItem[] = [];
 
         for (const mod of moduleDatabase.getAllModules()) {

@@ -13,6 +13,7 @@ const testFiles = [
     'test_directive.ts',
     'test_warning.ts',
     'test_completion.ts',
+    'test_context_detector.ts',
 ];
 
 const total = testFiles.length;
