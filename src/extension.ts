@@ -8,6 +8,7 @@ import { computeSemanticTokens, TOKEN_TYPES, TOKEN_MODIFIERS } from './semantic-
 import { Module, ModuleDatabase } from './database';
 import { buildInstantiationSnippet } from './instantiation-snippet';
 import { isInsideProceduralBlock } from './context-detector';
+import { formatVerilog } from './verilog-formatter';
 
 /**
  * File reader for `include directive expansion in the VS Code extension context.
@@ -480,6 +481,73 @@ function updateDiagnostics(document: vscode.TextDocument, diagnosticCollection: 
     console.log(`Updated diagnostics for ${document.uri}: ${diagnostics.length} issues found`);
 }
 
+/**
+ * Document Formatting Provider for Verilog.
+ *
+ * Formats the entire document by re-indenting block structures.
+ */
+class VerilogDocumentFormattingEditProvider implements vscode.DocumentFormattingEditProvider {
+    provideDocumentFormattingEdits(
+        document: vscode.TextDocument,
+        options: vscode.FormattingOptions
+    ): vscode.TextEdit[] {
+        const text = document.getText();
+        const indentSize = options.insertSpaces ? options.tabSize : 4;
+        const formatted = formatVerilog(text, indentSize);
+
+        if (formatted === text) {
+            return [];
+        }
+
+        const fullRange = new vscode.Range(
+            document.lineAt(0).range.start,
+            document.lineAt(document.lineCount - 1).range.end
+        );
+        return [vscode.TextEdit.replace(fullRange, formatted)];
+    }
+}
+
+/**
+ * Document Range Formatting Provider for Verilog.
+ *
+ * Formats only the lines covered by the selected range.  The full document is
+ * formatted internally so that indentation context from preceding lines is
+ * taken into account; only the edits that fall within the requested range are
+ * then returned.
+ */
+class VerilogDocumentRangeFormattingEditProvider implements vscode.DocumentRangeFormattingEditProvider {
+    provideDocumentRangeFormattingEdits(
+        document: vscode.TextDocument,
+        range: vscode.Range,
+        options: vscode.FormattingOptions
+    ): vscode.TextEdit[] {
+        const text = document.getText();
+        const indentSize = options.insertSpaces ? options.tabSize : 4;
+        const formatted = formatVerilog(text, indentSize);
+
+        if (formatted === text) {
+            return [];
+        }
+
+        const formattedLines = formatted.split('\n');
+        const startLine = range.start.line;
+        const endLine = Math.min(range.end.line, document.lineCount - 1, formattedLines.length - 1);
+
+        const rangeStart = new vscode.Position(startLine, 0);
+        const rangeEnd = document.lineAt(endLine).range.end;
+        const replaceRange = new vscode.Range(rangeStart, rangeEnd);
+
+        const replacement = formattedLines.slice(startLine, endLine + 1).join('\n');
+        const original = document.getText(replaceRange);
+
+        if (original === replacement) {
+            return [];
+        }
+
+        return [vscode.TextEdit.replace(replaceRange, replacement)];
+    }
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('Verilog language support extension is now active!');
 
@@ -599,6 +667,22 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.languages.registerCompletionItemProvider(
             { language: 'verilog' },
             new VerilogCompletionItemProvider()
+        )
+    );
+
+    // Register document formatting provider for Verilog
+    context.subscriptions.push(
+        vscode.languages.registerDocumentFormattingEditProvider(
+            { language: 'verilog' },
+            new VerilogDocumentFormattingEditProvider()
+        )
+    );
+
+    // Register document range formatting provider for Verilog (Format Selection)
+    context.subscriptions.push(
+        vscode.languages.registerDocumentRangeFormattingEditProvider(
+            { language: 'verilog' },
+            new VerilogDocumentRangeFormattingEditProvider()
         )
     );
 

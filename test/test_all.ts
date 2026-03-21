@@ -14,6 +14,7 @@ const testFiles = [
     'test_warning.ts',
     'test_completion.ts',
     'test_context_detector.ts',
+    'test_formatter.ts',
 ];
 
 const total = testFiles.length;
