@@ -360,6 +360,158 @@ console.log('\nTest: always, if and for without begin/end');
     assertEqual(formatVerilog(input), expected, 'Test: if and for without begin/end');
 }
 
+// ── Test 13: initial block without begin/end ──────────────────────────────
+
+console.log('\nTest: initial block without begin/end');
+{
+    const input = [
+        'module top;',
+        'initial',
+        'a = 0;',
+        'endmodule',
+    ].join('\n');
+
+    const expected = [
+        'module top;',
+        'initial',
+        '    a = 0;',
+        'endmodule',
+    ].join('\n');
+
+    assertEqual(formatVerilog(input), expected, 'initial block without begin/end');
+}
+
+// ── Test 14: while without begin/end ─────────────────────────────────────
+
+console.log('\nTest: while without begin/end');
+{
+    const input = [
+        'module top;',
+        'always @(*) begin',
+        'while (cond)',
+        'a = a + 1;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    const expected = [
+        'module top;',
+        'always @(*) begin',
+        '    while (cond)',
+        '        a = a + 1;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    assertEqual(formatVerilog(input), expected, 'while without begin/end');
+}
+
+// ── Test 15: repeat without begin/end ────────────────────────────────────
+
+console.log('\nTest: repeat without begin/end');
+{
+    const input = [
+        'module top;',
+        'always @(*) begin',
+        'repeat (10)',
+        'a = a + 1;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    const expected = [
+        'module top;',
+        'always @(*) begin',
+        '    repeat (10)',
+        '        a = a + 1;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    assertEqual(formatVerilog(input), expected, 'repeat without begin/end');
+}
+
+// ── Test 16: forever without begin/end ───────────────────────────────────
+
+console.log('\nTest: forever without begin/end');
+{
+    const input = [
+        'module top;',
+        'always begin',
+        'forever',
+        'clk = ~clk;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    const expected = [
+        'module top;',
+        'always begin',
+        '    forever',
+        '        clk = ~clk;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    assertEqual(formatVerilog(input), expected, 'forever without begin/end');
+}
+
+// ── Test 17: if/else without begin/end ───────────────────────────────────
+
+console.log('\nTest: if/else without begin/end');
+{
+    const input = [
+        'module top;',
+        'always @(*) begin',
+        'if (a)',
+        'x = 1;',
+        'else',
+        'x = 0;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    const expected = [
+        'module top;',
+        'always @(*) begin',
+        '    if (a)',
+        '        x = 1;',
+        '    else',
+        '        x = 0;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    assertEqual(formatVerilog(input), expected, 'if/else without begin/end');
+}
+
+// ── Test 18: nested if without begin/end ─────────────────────────────────
+
+console.log('\nTest: nested if without begin/end');
+{
+    const input = [
+        'module top;',
+        'always @(*) begin',
+        'if (a)',
+        'if (b)',
+        'x = 1;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    const expected = [
+        'module top;',
+        'always @(*) begin',
+        '    if (a)',
+        '        if (b)',
+        '            x = 1;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    assertEqual(formatVerilog(input), expected, 'nested if without begin/end');
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
