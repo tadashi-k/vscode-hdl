@@ -267,6 +267,64 @@ console.log('\nTest: generate block indentation');
     assertEqual(formatVerilog(input), expected, 'generate block');
 }
 
+// ── Test 10: module definition with '(' and ')' ───────────────────────────
+
+console.log('\nTest: module definition with parameter list and port list');
+{
+    const input = [
+        'module counter #(',
+        'parameter N = 8',
+        ') (',
+        'input clk,',
+        'output reg [N-1:0] count',
+        ');',
+        'endmodule',
+    ].join('\n');
+
+    const expected = [
+        'module counter #(',
+        '    parameter N = 8',
+        ') (',
+        '    input clk,',
+        '    output reg [N-1:0] count',
+        ');',
+        'endmodule',
+    ].join('\n');
+
+    assertEqual(formatVerilog(input), expected, 'module definition with ( and )');
+}
+
+// ── Test 11: module instantiation with parameter assignment ───────────────
+
+console.log('\nTest: module instantiation with parameter assignment');
+{
+    const input = [
+        'module top;',
+        'submod #(',
+        '.PARAM1(8),',
+        '.PARAM2(4)',
+        ') inst (',
+        '.clk(clk),',
+        '.data(data)',
+        ');',
+        'endmodule',
+    ].join('\n');
+
+    const expected = [
+        'module top;',
+        'submod #(',
+        '    .PARAM1(8),',
+        '    .PARAM2(4)',
+        ') inst (',
+        '    .clk(clk),',
+        '    .data(data)',
+        ');',
+        'endmodule',
+    ].join('\n');
+
+    assertEqual(formatVerilog(input), expected, 'module instantiation with parameter assignment');
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
