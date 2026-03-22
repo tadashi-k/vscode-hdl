@@ -88,7 +88,6 @@ export function formatVerilog(text: string, indentSize: number = 4): string {
         const closes =
             countKeyword(lineNoComment, 'end') +
             countKeyword(lineNoComment, 'endcase') +
-            countKeyword(lineNoComment, 'endmodule') +
             countKeyword(lineNoComment, 'endfunction') +
             countKeyword(lineNoComment, 'endtask') +
             countKeyword(lineNoComment, 'endgenerate') +
@@ -102,7 +101,6 @@ export function formatVerilog(text: string, indentSize: number = 4): string {
             countKeyword(lineNoComment, 'case') +
             countKeyword(lineNoComment, 'casex') +
             countKeyword(lineNoComment, 'casez') +
-            countKeyword(lineNoComment, 'module') +
             countKeyword(lineNoComment, 'function') +
             countKeyword(lineNoComment, 'task') +
             countKeyword(lineNoComment, 'generate') +
@@ -110,11 +108,17 @@ export function formatVerilog(text: string, indentSize: number = 4): string {
 
         // Decrease depth for closers: the closing keyword itself is placed at
         // the reduced depth (matching the opener's depth).
+        if (lineNoComment.charAt(0) === ')') {
+            depth--; // Handle lines starting with ')' before counting parenthesis.
+        }
         depth = Math.max(0, depth - closes);
 
         result.push(indentUnit.repeat(depth) + line);
 
         // Increase depth for openers: content after this line is indented.
+        if (lineNoComment.charAt(lineNoComment.length - 1) === '(') {
+            depth++; // Handle lines ending with '(' after counting parenthesis.
+        }
         depth += opens;
     }
 

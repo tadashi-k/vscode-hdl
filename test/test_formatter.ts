@@ -55,10 +55,10 @@ console.log('\nTest: basic module indentation');
         'module counter (',
         '    input clk,',
         '    output reg [7:0] count',
-        '    );',
-        '    always @(posedge clk) begin',
-        '        count <= count + 1;',
-        '    end',
+        ');',
+        'always @(posedge clk) begin',
+        '    count <= count + 1;',
+        'end',
         'endmodule',
     ].join('\n');
 
@@ -83,13 +83,13 @@ console.log('\nTest: nested begin/end blocks');
 
     const expected = [
         'module top;',
-        '    always @(*) begin',
-        '        if (a) begin',
-        '            b = 1;',
-        '        end else begin',
-        '            b = 0;',
-        '        end',
+        'always @(*) begin',
+        '    if (a) begin',
+        '        b = 1;',
+        '    end else begin',
+        '        b = 0;',
         '    end',
+        'end',
         'endmodule',
     ].join('\n');
 
@@ -113,12 +113,12 @@ console.log('\nTest: case statement indentation');
 
     const expected = [
         'module fsm;',
-        '    always @(*) begin',
-        '        case (state)',
-        "            2'b00: out = 0;",
-        "            2'b01: out = 1;",
-        '        endcase',
-        '    end',
+        'always @(*) begin',
+        '    case (state)',
+        "        2'b00: out = 0;",
+        "        2'b01: out = 1;",
+        '    endcase',
+        'end',
         'endmodule',
     ].join('\n');
 
@@ -131,12 +131,12 @@ console.log('\nTest: already-formatted code is unchanged');
 {
     const input = [
         'module top;',
-        '    wire a;',
-        '    always @(*) begin',
-        '        if (a) begin',
-        '            b = 1;',
-        '        end',
+        'wire a;',
+        'always @(*) begin',
+        '    if (a) begin',
+        '        b = 1;',
         '    end',
+        'end',
         'endmodule',
     ].join('\n');
 
@@ -158,7 +158,7 @@ console.log('\nTest: empty lines are preserved');
     const expected = [
         'module top;',
         '',
-        '    wire a;',
+        'wire a;',
         '',
         'endmodule',
     ].join('\n');
@@ -172,13 +172,19 @@ console.log('\nTest: custom indent size (2 spaces)');
 {
     const input = [
         'module top;',
-        'wire a;',
+        'reg a;',
+        'begin',
+        'a = 0;',
+        'end',
         'endmodule',
     ].join('\n');
 
     const expected = [
         'module top;',
-        '  wire a;',
+        'reg a;',
+        'begin',
+        '  a = 0;',
+        'end',
         'endmodule',
     ].join('\n');
 
@@ -197,7 +203,7 @@ console.log('\nTest: keyword inside line comment not counted');
 
     const expected = [
         'module top;',
-        '    wire a; // begin end',
+        'wire a; // begin end',
         'endmodule',
     ].join('\n');
 
@@ -223,15 +229,15 @@ console.log('\nTest: end else begin net indent change is zero');
     const formatted = formatVerilog(input);
     const lines = formatted.split('\n');
 
-    // "end else begin" line should be at depth 2 (inside module + always begin)
+    // "end else begin" line should be at depth 1 (inside module + always begin)
     const endElseBeginLine = lines.find(l => l.includes('end else begin'));
     assert(endElseBeginLine !== undefined, '"end else begin" line present');
-    assert(endElseBeginLine!.startsWith(' '.repeat(8)), '"end else begin" indented at depth 2');
+    assert(endElseBeginLine!.startsWith(' '.repeat(4)), '"end else begin" indented at depth 1');
 
-    // The line after "end else begin" should be at depth 3
+    // The line after "end else begin" should be at depth 2
     const idx = lines.findIndex(l => l.includes('end else begin'));
     assert(idx >= 0 && idx + 1 < lines.length, 'line after "end else begin" exists');
-    assert(lines[idx + 1].startsWith(' '.repeat(12)), 'line after "end else begin" at depth 3');
+    assert(lines[idx + 1].startsWith(' '.repeat(8)), 'line after "end else begin" at depth 2');
 }
 
 // ── Test 9: generate block ────────────────────────────────────────────────
@@ -250,11 +256,11 @@ console.log('\nTest: generate block indentation');
 
     const expected = [
         'module top;',
-        '    generate',
-        '        if (P) begin',
-        '            wire x;',
-        '        end',
-        '    endgenerate',
+        'generate',
+        '    if (P) begin',
+        '        wire x;',
+        '    end',
+        'endgenerate',
         'endmodule',
     ].join('\n');
 
