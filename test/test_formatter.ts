@@ -325,6 +325,41 @@ console.log('\nTest: module instantiation with parameter assignment');
     assertEqual(formatVerilog(input), expected, 'module instantiation with parameter assignment');
 }
 
+// ── Test 12: if and for without begin/end ───────────────
+
+console.log('\nTest: always, if and for without begin/end');
+{
+    const input = [
+        'module top;',
+        'always @(*)',
+        'a = 0;',
+        '',
+        'always @(*) begin',
+        'if (a)',
+        'b = 1;',
+        'for (i = 0; i < N; i++)',
+        'x[i] = 0;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    const expected = [
+        'module top;',
+        'always @(*)',
+        '    a = 0;',
+        '',
+        'always @(*) begin',
+        '    if (a)',
+        '        b = 1;',
+        '    for (i = 0; i < N; i++)',
+        '        x[i] = 0;',
+        'end',
+        'endmodule',
+    ].join('\n');
+
+    assertEqual(formatVerilog(input), expected, 'Test: if and for without begin/end');
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
