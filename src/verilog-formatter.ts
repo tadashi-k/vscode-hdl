@@ -49,6 +49,28 @@ function countKeyword(text: string, keyword: string): number {
 }
 
 /**
+ * Returns true if the line (with comments stripped) is a control-flow
+ * statement that expects a single statement as its body (no begin/end).
+ *
+ * Examples that return true:
+ *   `always @(*)`, `initial`, `if (cond)`, `else`, `else if (cond)`,
+ *   `for (...)`, `while (cond)`, `repeat (N)`, `forever`
+ *
+ * Examples that return false:
+ *   `always @(*) begin`  (has begin)
+ *   `if (a) b = 1;`      (ends with semicolon)
+ */
+const SINGLE_LINE_OPENER_RE = /\b(always|initial|if|else|for|while|repeat|forever)\b/;
+function isSingleLineOpener(lineNoComment: string): boolean {
+    const trimmed = lineNoComment.trimEnd();
+    return (
+        SINGLE_LINE_OPENER_RE.test(trimmed) &&
+        !trimmed.endsWith(';') &&
+        !/\bbegin\b/.test(trimmed)
+    );
+}
+
+/**
  * Format a Verilog source string by re-indenting block structures.
  *
  * The algorithm is line-based:
@@ -69,6 +91,9 @@ export function formatVerilog(text: string, indentSize: number = 4): string {
     const lines = text.split('\n');
     const result: string[] = [];
     let depth = 0;
+    // Tracks how many single-line block openers (without begin/end) are pending.
+    // After their single body line is output, depth is restored by this count.
+    let pendingDecrements = 0;
 
     for (const rawLine of lines) {
         const line = rawLine.trim();
@@ -81,6 +106,13 @@ export function formatVerilog(text: string, indentSize: number = 4): string {
         // Strip line-end comment for keyword analysis so that keywords inside
         // comments do not affect indentation.
         const lineNoComment = stripLineComment(line);
+
+        // A comment-only line (e.g. `// ...`) has no code after stripping.
+        // Output it at the current depth without consuming any pending indent.
+        if (lineNoComment.trim() === '') {
+            result.push(indentUnit.repeat(depth) + line);
+            continue;
+        }
 
         // Count block-closing keywords on this line.
         // Word-boundary matching ensures "endmodule" is only counted once
@@ -120,6 +152,19 @@ export function formatVerilog(text: string, indentSize: number = 4): string {
             depth++; // Handle lines ending with '(' after counting parenthesis.
         }
         depth += opens;
+
+        // Handle single-line block openers (no begin/end).
+        // Examples: `always @(*)`, `if (cond)`, `for (...)`, `else`, etc.
+        // The single body statement gets one extra indent level; after it is
+        // output, depth is restored.
+        if (isSingleLineOpener(lineNoComment)) {
+            depth++;
+            pendingDecrements++;
+        } else if (pendingDecrements > 0) {
+            // This line is the body of the preceding single-line opener(s).
+            depth -= pendingDecrements;
+            pendingDecrements = 0;
+        }
     }
 
     return result.join('\n');
