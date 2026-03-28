@@ -1721,14 +1721,14 @@ class AntlrVerilogParser {
      */
     private _parse(text: string, uri: string, moduleDatabase: ModuleDatabase | null = null) : void {
         const chars = new antlr4.InputStream(text);
-        const lexer = new VerilogLexer(chars as any);
-        const tokens = new antlr4.CommonTokenStream(lexer as any);
+        const lexer = new VerilogLexer(chars);
+        const tokens = new antlr4.CommonTokenStream(lexer);
         const parser = new VerilogParser(tokens);
 
         // Remove default error listeners and attach our custom one
         this.errorListener.clearErrors();
-        (parser as any).removeErrorListeners();
-        (parser as any).addErrorListener(this.errorListener);
+        parser.removeErrorListeners();
+        parser.addErrorListener(this.errorListener);
 
         const tree = parser.source_text();
 

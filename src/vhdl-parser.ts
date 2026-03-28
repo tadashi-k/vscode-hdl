@@ -67,6 +67,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
     _signalRefs: Set<string> = new Set();
     _visitingTarget: boolean = false;
     _assignedNames: Map<string, { line: number; character: number }> = new Map();
+    _inComponentDeclaration: boolean = false;
     _instanceList: Instance[] = [];
     _instPortConnections: Map<string, Set<string>> = new Map();
 
@@ -109,15 +110,24 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
 
     // ── Port declarations ─────────────────────────────────────────────────────
 
-    visitInterface_port_declaration(ctx: any): any {
-        if (!this._currentModule) return null;
+    // Suppress component declaration contents — ports/generics inside a
+    // component_declaration live in the parent architecture, not in the entity.
+    visitComponent_declaration(ctx: any): any {
+        this._inComponentDeclaration = true;
+        this.visitChildren(ctx);
+        this._inComponentDeclaration = false;
+        return null;
+    }
+
+    visitInterface_signal_declaration(ctx: any): any {
+        if (!this._currentModule || this._inComponentDeclaration) return null;
 
         const idList = ctx.identifier_list ? ctx.identifier_list() : null;
         const names: string[] = idList
             ? idList.identifier().map((id: any) => id.getText())
             : [ctx.identifier ? ctx.identifier(0).getText() : 'unknown'];
 
-        const modeCtx = ctx.signal_mode ? ctx.signal_mode() : null;
+        const modeCtx = ctx.mode_rule ? ctx.mode_rule() : null;
         const direction = vhdlModeToDirection(modeCtx ? modeCtx.getText() : 'in');
         const line = ctx.start.line - 1;
         const character = ctx.start.column;
@@ -136,7 +146,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
     // ── Generic declarations ──────────────────────────────────────────────────
 
     visitInterface_constant_declaration(ctx: any): any {
-        if (!this._currentModule) return null;
+        if (!this._currentModule || this._inComponentDeclaration) return null;
 
         const idList = ctx.identifier_list ? ctx.identifier_list() : null;
         const names: string[] = idList
@@ -361,7 +371,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
 
         // Label is the instance name (required in VHDL component instantiations)
         const labelCtx = ctx.label_colon ? ctx.label_colon() : null;
-        const instanceName = labelCtx ? labelCtx.label().getText() : 'unknown';
+        const instanceName = labelCtx ? labelCtx.identifier().getText() : 'unknown';
 
         // Instantiated unit: component name or entity reference
         const unitCtx = ctx.instantiated_unit ? ctx.instantiated_unit() : null;
@@ -558,4 +568,4 @@ class AntlrVhdlParser {
     }
 }
 
-module.exports = AntlrVhdlParser;
+export = AntlrVhdlParser;
