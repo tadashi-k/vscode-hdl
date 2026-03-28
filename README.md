@@ -1,8 +1,10 @@
-# Verilog Language Support for VS Code
+# HDL Language Support for VS Code
 
-A Visual Studio Code extension that provides syntax highlighting, symbol extraction, goto definition, and syntax error detection for Verilog (*.v) files.
+A Visual Studio Code extension that provides syntax highlighting, symbol extraction, goto definition, and syntax error detection for Verilog (`*.v`) and VHDL (`*.vhd`, `*.vhdl`) files.
 
 ## Features
+
+### Verilog
 
 - **Syntax Highlighting**: Comprehensive syntax highlighting for Verilog reserved words
 - **Syntax Error Detection**: Real-time parsing and error detection with diagnostics displayed in the editor
@@ -22,11 +24,22 @@ A Visual Studio Code extension that provides syntax highlighting, symbol extract
 - **File Detection**: Automatically detects and activates for *.v files
 - **Language Configuration**: Proper comment handling, bracket matching, and auto-closing pairs
 
+### VHDL
+
+- **Syntax Highlighting**: Comprehensive syntax highlighting for VHDL reserved words
+- **Syntax Error Detection**: Real-time ANTLR4-based parsing and error detection
+- **Symbol Extraction**: Automatically extracts entities, architectures, ports, signals, generics, constants, and component instantiations
+- **Outline View**: Hierarchical symbol tree showing entities with their ports and internal signals
+- **Hover Information**: Shows port mode and type (e.g., `input std_logic_vector(7 downto 0)`)
+- **Goto Definition**: Navigate to port, signal, constant, and generic declarations within the same file or across the workspace
+- **Code Completion**: Auto-generates component instantiation snippets with full generic maps and port maps
+- **File Detection**: Automatically detects and activates for `*.vhd` and `*.vhdl` files
+
 ## Verilog Parser and Syntax Error Detection
 
 The extension includes a comprehensive Verilog parser that performs real-time syntax checking. Errors are displayed directly in the editor with squiggly underlines and detailed error messages.
 
-## Warning Conditions
+## Verilog Warning Conditions
 
 The extension performs semantic analysis beyond syntax checking and generates warnings for the following typical conditions:
 
@@ -153,6 +166,88 @@ module top (
 endmodule
 ```
 
+## VHDL Parser and Syntax Error Detection
+
+The extension includes an ANTLR4-based VHDL parser (VHDL 2008 grammar) that performs real-time syntax checking. Errors are displayed directly in the editor with squiggly underlines and detailed error messages. VHDL keywords and identifiers are matched case-insensitively.
+
+## VHDL Warning Conditions
+
+The extension performs semantic analysis and generates warnings for the following conditions:
+
+### Signal Declared but Never Used (VHDL-W1)
+
+A signal declared in an architecture is never read in any expression.
+
+```vhdl
+architecture rtl of example is
+    signal unused_sig : std_logic;  -- Warning: 'unused_sig' is declared but never used
+begin
+end architecture;
+```
+
+### Input Port Used as L-Value (VHDL-W2)
+
+An `in` mode port appears on the left side of an assignment.
+
+```vhdl
+architecture rtl of example is
+begin
+    process(clk)
+    begin
+        clk <= '0';  -- Warning: Input port 'clk' cannot be used as l-value
+    end process;
+end architecture;
+```
+
+### Signal Never Assigned (VHDL-W3)
+
+A signal declared in an architecture is never driven.
+
+```vhdl
+architecture rtl of example is
+    signal never_driven : std_logic;  -- Warning: 'never_driven' is never assigned
+begin
+end architecture;
+```
+
+### Unconnected Port (VHDL-W4)
+
+When using named port map connections, a port of the instantiated entity is not listed.
+
+```vhdl
+architecture rtl of top is
+begin
+    -- Warning: Port 'b' unconnected in instantiation of 'submod'
+    u1 : entity work.submod
+        port map (a => sig_a);  -- 'b' is missing entirely
+end architecture;
+```
+
+### Not Defined Entity (VHDL-W5)
+
+A component instantiation references an entity not found anywhere in the workspace.
+
+```vhdl
+architecture rtl of top is
+begin
+    -- Warning: Entity 'ghost_entity' is not defined in the module database
+    u1 : entity work.ghost_entity
+        port map (clk => clk);
+end architecture;
+```
+
+## VHDL Symbol Database
+
+The extension maintains a workspace-wide entity database for VHDL:
+
+- **Entities**: All entity declarations with their port and generic lists
+- **Ports**: Direction (`in`, `out`, `inout`, `buffer`) and type information
+- **Generics**: Parameterizable constants with default values
+- **Signals / Variables / Constants**: Internal declarations within architectures and processes
+- **Component Instantiations**: Tracked for cross-module connectivity analysis
+
+The database is automatically updated when VHDL files are opened, modified, or deleted.
+
 ## Verilog Symbol Database
 
 The extension maintains two separate internal databases for Verilog symbols:
@@ -237,7 +332,7 @@ This extension provides syntax highlighting for all Verilog reserved words inclu
 
 ## Usage
 
-Simply open any file with the `.v` extension, and the extension will automatically:
+Simply open any file with the `.v` extension (Verilog) or `.vhd` / `.vhdl` extension (VHDL), and the extension will automatically:
 - Provide syntax highlighting
 - Extract and store symbols in the internal database
 - Enable symbol navigation through VS Code's outline view
@@ -265,7 +360,7 @@ To test this extension locally:
 
 1. Open this folder in VS Code
 2. Press F5 to open a new VS Code window with the extension loaded
-3. Open a `.v` file to see the syntax highlighting and symbol extraction in action
+3. Open a `.v` or `.vhd` file to see the syntax highlighting and symbol extraction in action
 4. Use the command "Verilog: Show Symbols Database" to view extracted symbols
 
 ## License
