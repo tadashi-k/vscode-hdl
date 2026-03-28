@@ -1,7 +1,7 @@
 // Ambient type declarations for the antlr4 npm package (which ships no built-in .d.ts).
 // These minimal declarations cover the subset of the public API used by the generated
 // lexer/parser .d.ts files (antlr/generated/*.d.ts) and by the hand-written visitor
-// classes in antlr-parser.ts and vhdl-parser.ts.
+// classes in verilog-parser.ts and vhdl-parser.ts.
 
 declare module 'antlr4' {
     export class InputStream {

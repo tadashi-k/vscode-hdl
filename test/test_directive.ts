@@ -17,7 +17,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 const { preprocessVerilog } = require('../src/verilog-scanner');
-const AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/verilog-parser');
 const { ModuleDatabase } = require('../src/database');
 
 // ── Simple test harness ────────────────────────────────────────────────────

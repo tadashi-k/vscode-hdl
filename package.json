@@ -1,6 +1,6 @@
 {
   "name": "hdl-support",
-  "displayName": "Verilog Language Support",
+  "displayName": "Verilog/VHDL Language Support",
   "description": "",
   "version": "0.0.3",
   "publisher": "tadashi",

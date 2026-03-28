@@ -2,7 +2,7 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import AntlrVerilogParser = require('./antlr-parser');
+import AntlrVerilogParser = require('./verilog-parser');
 import { parseHdlIgnore, regexScanModules } from './verilog-scanner';
 import AntlrVhdlParser = require('./vhdl-parser');
 import { regexScanEntities } from './vhdl-scanner';

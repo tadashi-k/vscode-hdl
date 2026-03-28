@@ -29,7 +29,7 @@ const SEVERITY_WARNING = 1;
 import * as fs from 'fs';
 import * as path from 'path';
 
-const AntlrVerilogParser = require('../src/antlr-parser');
+const AntlrVerilogParser = require('../src/verilog-parser');
 const { ModuleDatabase } = require('../src/database');
 
 const contentsDir = path.join(__dirname, '..', 'contents');

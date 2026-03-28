@@ -1,5 +1,5 @@
 // ANTLR-based VHDL Parser
-// Mirrors antlr-parser.ts for the Verilog tier.
+// Mirrors verilog-parser.ts for the Verilog tier.
 
 import type * as vsCodeModule from 'vscode';
 import antlr4 from 'antlr4';
