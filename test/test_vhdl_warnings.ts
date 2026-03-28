@@ -15,7 +15,7 @@ import * as fs from 'fs';
 const AntlrVhdlParser = require('../src/vhdl-parser');
 const { ModuleDatabase } = require('../src/database');
 
-const contentsDir = path.join(__dirname, '..', 'contents');
+const contentsDir = path.join(__dirname, '..', 'contents', 'vhdl');
 
 let passed = 0;
 let failed = 0;

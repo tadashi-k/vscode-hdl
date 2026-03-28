@@ -37,7 +37,7 @@ function assertEqual(actual: any, expected: any, message: string): void {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const contentsDir = path.join(__dirname, '..', 'contents');
+const contentsDir = path.join(__dirname, '..', 'contents', 'vhdl');
 
 function makeDoc(filename: string) {
     const text = fs.readFileSync(path.join(contentsDir, filename), 'utf8');

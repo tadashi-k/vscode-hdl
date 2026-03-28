@@ -32,7 +32,7 @@ import * as path from 'path';
 const AntlrVerilogParser = require('../src/verilog-parser');
 const { ModuleDatabase } = require('../src/database');
 
-const contentsDir = path.join(__dirname, '..', 'contents');
+const contentsDir = path.join(__dirname, '..', 'contents', 'verilog');
 
 // ── Simple test harness ────────────────────────────────────────────────────
 

@@ -50,7 +50,7 @@ function assertEqual(actual: any, expected: any, message: string): void {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-const contentsDir = path.join(__dirname, '..', 'contents');
+const contentsDir = path.join(__dirname, '..', 'contents', 'verilog');
 const parser = new AntlrVerilogParser();
 
 function makeDoc(filename: string) {

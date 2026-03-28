@@ -22,7 +22,7 @@ function assert(condition: boolean, message: string): void {
     else           { console.error(`  ✗ ${message}`); failed++; }
 }
 
-const contentsDir = path.join(__dirname, '..', 'contents');
+const contentsDir = path.join(__dirname, '..', 'contents', 'vhdl');
 
 function makeDoc(filename: string) {
     const text = fs.readFileSync(path.join(contentsDir, filename), 'utf8');
