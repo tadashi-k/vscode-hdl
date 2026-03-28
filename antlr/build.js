@@ -16,21 +16,28 @@ if (!fs.existsSync(outputDir)) {
 }
 
 const grammars = [
-    { file: 'Verilog.g4', visitorBase: 'VerilogVisitor' },
-    { file: 'Vhdl2008.g4', visitorBase: 'Vhdl2008Visitor' },
+    {
+        files: ['VerilogLexer.g4', 'VerilogParser.g4'],
+        visitorBase: 'VerilogVisitor',
+        // ANTLR names the visitor after the grammar file: VerilogParser.g4 → VerilogParserVisitor.js
+        // We need to copy it to VerilogVisitor.js so imports in src/ still work.
+        visitorSourceName: 'VerilogParserVisitor',
+    },
+    { files: ['Vhdl2008.g4'], visitorBase: 'Vhdl2008Visitor' },
 ];
 
-function buildGrammar(grammarFile, callback) {
-    console.log(`\nBuilding: ${grammarFile}`);
-    const command = `npx antlr4-tool -l typescript -o "${outputDir}" "${path.join(antlrDir, grammarFile)}"`;
+function buildGrammar(grammarFiles, callback) {
+    console.log(`\nBuilding: ${grammarFiles.join(', ')}`);
+    const fileArgs = grammarFiles.map(f => `"${path.join(antlrDir, f)}"`).join(' ');
+    const command = `npx antlr4-tool -l typescript -o "${outputDir}" ${fileArgs}`;
     exec(command, { cwd: antlrDir }, (error, stdout, stderr) => {
         if (error) {
-            console.error(`Error building ${grammarFile}:`, error.message);
+            console.error(`Error building ${grammarFiles.join(', ')}:`, error.message);
             process.exit(1);
         }
         if (stdout) console.log(stdout);
         if (stderr) console.error(stderr);
-        console.log(`✓ ${grammarFile} built`);
+        console.log(`✓ ${grammarFiles.join(', ')} built`);
         callback();
     });
 }
@@ -45,12 +52,23 @@ function fixImports(callback) {
     });
 }
 
-function generateVisitorDeclaration(visitorBase) {
+function generateVisitorDeclaration(visitorBase, visitorSourceName) {
+    const sourceName = visitorSourceName || visitorBase;
     const visitorDts = path.join(outputDir, `${visitorBase}.d.ts`);
-    const visitorJs = path.join(outputDir, `${visitorBase}.js`);
-    if (!fs.existsSync(visitorJs)) { return; }
+    const sourceJs = path.join(outputDir, `${sourceName}.js`);
+    const targetJs = path.join(outputDir, `${visitorBase}.js`);
 
-    const content = fs.readFileSync(visitorJs, 'utf8');
+    if (!fs.existsSync(sourceJs)) { return; }
+
+    // If the visitor was generated under a different name (e.g. VerilogParserVisitor.js),
+    // copy it to the expected name (VerilogVisitor.js) so existing imports keep working.
+    if (sourceName !== visitorBase) {
+        let content = fs.readFileSync(sourceJs, 'utf8');
+        content = content.replace(new RegExp(sourceName, 'g'), visitorBase);
+        fs.writeFileSync(targetJs, content, 'utf8');
+    }
+
+    const content = fs.readFileSync(targetJs, 'utf8');
     const methods = [];
     const re = new RegExp(`${visitorBase}\\.prototype\\.(visit\\w+)\\s*=`, 'g');
     let m;
@@ -71,7 +89,7 @@ function generateVisitorDeclaration(visitorBase) {
 function buildAll(index) {
     if (index >= grammars.length) {
         fixImports(() => {
-            grammars.forEach(g => generateVisitorDeclaration(g.visitorBase));
+            grammars.forEach(g => generateVisitorDeclaration(g.visitorBase, g.visitorSourceName));
             console.log('\n✓ All grammars built successfully!');
             const files = fs.readdirSync(outputDir);
             console.log('\nGenerated files:');
@@ -79,7 +97,7 @@ function buildAll(index) {
         });
         return;
     }
-    buildGrammar(grammars[index].file, () => buildAll(index + 1));
+    buildGrammar(grammars[index].files, () => buildAll(index + 1));
 }
 
 buildAll(0);

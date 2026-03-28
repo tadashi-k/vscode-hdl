@@ -153,7 +153,17 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             const info = this._getIdentifierInfo(identCtx);
             return info ? [info] : [];
         }
-        // Concatenation lvalue: {a, b, c}
+        // Concatenation lvalue: {a, b, c} — in new grammar uses nested variable_lvalue/net_lvalue
+        const nestedVar = lvalCtx.variable_lvalue ? lvalCtx.variable_lvalue() : null;
+        const nestedNet = lvalCtx.net_lvalue ? lvalCtx.net_lvalue() : null;
+        const nestedArr = Array.isArray(nestedVar) ? nestedVar : (nestedVar ? [nestedVar] :
+                          Array.isArray(nestedNet) ? nestedNet : (nestedNet ? [nestedNet] : []));
+        if (nestedArr.length > 0) {
+            const results: any[] = [];
+            for (const n of nestedArr) { results.push(...this._getLvalueIdentifiers(n)); }
+            return results;
+        }
+        // Legacy: old grammar concatenation lvalue
         const concatCtx = lvalCtx.concatenation ? lvalCtx.concatenation() : null;
         if (concatCtx) {
             return this._getConcatenationIdentifiers(concatCtx);
@@ -200,17 +210,20 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             return null;
         }
 
-        const ceContexts = rangeCtx.constant_expression ? rangeCtx.constant_expression() : null;
-        if (!Array.isArray(ceContexts) || ceContexts.length < 2) {
+        const msbCtx = rangeCtx.msb_constant_expression ? rangeCtx.msb_constant_expression() : null;
+        const lsbCtx = rangeCtx.lsb_constant_expression ? rangeCtx.lsb_constant_expression() : null;
+        const msbCe = msbCtx ? (msbCtx.constant_expression ? msbCtx.constant_expression() : null) : null;
+        const lsbCe = lsbCtx ? (lsbCtx.constant_expression ? lsbCtx.constant_expression() : null) : null;
+        if (!msbCe || !lsbCe) {
             return null;
         }
-        const hi = this._evaluateConstantExpression(ceContexts[0], this._params);
-        const lo = this._evaluateConstantExpression(ceContexts[1], this._params);
+        const hi = this._evaluateConstantExpression(msbCe, this._params);
+        const lo = this._evaluateConstantExpression(lsbCe, this._params);
 
-        const bitRange = new BitRange(hi.value, lo.value);
+        const bitRange = new BitRange(hi ? hi.value : null, lo ? lo.value : null);
         if (!bitRange.msb || !bitRange.lsb) {
-            bitRange.exprMsb = ceContexts[0].getText();
-            bitRange.exprLsb = ceContexts[1].getText();
+            bitRange.exprMsb = msbCe.getText();
+            bitRange.exprLsb = lsbCe.getText();
         }
         return bitRange;
     }
@@ -358,10 +371,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 this.visit(paramValAssign);
 
                 // Extract named parameter overrides: #(.WIDTH(16), .DEPTH(32))
+                // In new grammar: parameter_value_assignment → list_of_parameter_assignments → named_parameter_assignment
+                const lopaCtx = paramValAssign.list_of_parameter_assignments
+                    ? paramValAssign.list_of_parameter_assignments()
+                    : null;
                 const namedParamAssigns = this._toArray(
-                    paramValAssign.named_parameter_assignment
-                        ? paramValAssign.named_parameter_assignment()
-                        : null
+                    lopaCtx && lopaCtx.named_parameter_assignment
+                        ? lopaCtx.named_parameter_assignment()
+                        : (paramValAssign.named_parameter_assignment
+                            ? paramValAssign.named_parameter_assignment()
+                            : null)
                 );
                 overrides = {};
                 if (namedParamAssigns.length > 0) {
@@ -370,7 +389,12 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         if (!paramIdCtx) continue;
                         const paramInfo = this._getIdentifierInfo(paramIdCtx.identifier());
                         if (!paramInfo) continue;
-                        const exprCtx = npa.expression ? npa.expression() : null;
+                        // New grammar: named_parameter_assignment uses mintypmax_expression
+                        const mintypCtx = npa.mintypmax_expression ? npa.mintypmax_expression() : null;
+                        const rawExprCtx = mintypCtx
+                            ? (mintypCtx.expression ? mintypCtx.expression() : null)
+                            : (npa.expression ? npa.expression() : null);
+                        const exprCtx = Array.isArray(rawExprCtx) ? (rawExprCtx.length > 0 ? rawExprCtx[0] : null) : rawExprCtx;
                         if (!exprCtx) continue;
                         const evalResult = this._evaluateExpression(exprCtx, this._params, this._signalMap);
                         if (evalResult && evalResult.value !== null && evalResult.value !== undefined) {
@@ -394,9 +418,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
 
             for (const inst of moduleInstances) {
                 // Get instance name from name_of_instance
-                const nameOfInstCtx = inst.name_of_instance ? inst.name_of_instance() : null;
+                const nameOfInstCtx = inst.name_of_module_instance ? inst.name_of_module_instance() : null;
                 const instNameInfo = nameOfInstCtx
-                    ? this._getIdentifierInfo(nameOfInstCtx.identifier())
+                    ? this._getIdentifierInfo(nameOfInstCtx.module_instance_identifier().identifier())
                     : null;
 
                 // Track instance name for hdlModule semantic token
@@ -617,10 +641,10 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         });
     }
 
-    // Capture lvalue of continuous assign (assignment rule) or FOR loop (in procedural)
-    visitAssignment(ctx: any) {
+    // Capture lvalue of continuous assign (net_assignment rule) or FOR loop (in procedural)
+    visitNet_assignment(ctx: any) {
         if (!this._currentModule) return null;
-        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
+        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.net_lvalue ? ctx.net_lvalue() : null);
         for (const lvalInfo of lvalIdentifiers) {
             const signal = this._signalMap.get(lvalInfo.name);
             if (signal && this._inContinuousAssign &&(signal.type === 'reg' || signal.type === 'integer')) {
@@ -645,7 +669,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (exprCtx) {
             this._evaluateExpression(exprCtx, this._params, this._signalMap);
             // Check bit width mismatch
-            this._checkWidthMismatch(ctx.lvalue(), exprCtx, this._params, this._signalMap);
+            this._checkWidthMismatch(ctx.net_lvalue ? ctx.net_lvalue() : null, exprCtx, this._params, this._signalMap);
         }
         this.visitChildren(ctx);
         return null;
@@ -654,7 +678,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Capture lvalue of blocking assignment (always/initial body)
     visitBlocking_assignment(ctx: any) {
         if (!this._currentModule) return null;
-        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
+        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.variable_lvalue ? ctx.variable_lvalue() : null);
         for (const lvalInfo of lvalIdentifiers) {
             const signal = this._signalMap.get(lvalInfo.name);
             if (signal && signal.type === 'wire') {
@@ -672,16 +696,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (exprCtx) {
             this._evaluateExpression(exprCtx, this._params, this._signalMap);
             // Check bit width mismatch
-            this._checkWidthMismatch(ctx.lvalue(), exprCtx, this._params, this._signalMap);
+            this._checkWidthMismatch(ctx.variable_lvalue ? ctx.variable_lvalue() : null, exprCtx, this._params, this._signalMap);
         }
         this.visitChildren(ctx);
         return null;
     }
 
     // Capture lvalue of non-blocking assignment (always/initial body)
-    visitNon_blocking_assignment(ctx: any) {
+    visitNonblocking_assignment(ctx: any) {
         if (!this._currentModule) return null;
-        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.lvalue());
+        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.variable_lvalue ? ctx.variable_lvalue() : null);
         for (const lvalInfo of lvalIdentifiers) {
             const signal = this._signalMap.get(lvalInfo.name);
             if (signal && signal.type === 'wire') {
@@ -698,7 +722,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const exprCtx = ctx.expression ? ctx.expression() : null;
         if (exprCtx) {
             this._evaluateExpression(exprCtx, this._params, this._signalMap);
-            this._checkWidthMismatch(ctx.lvalue(), exprCtx, this._params, this._signalMap);
+            this._checkWidthMismatch(ctx.variable_lvalue ? ctx.variable_lvalue() : null, exprCtx, this._params, this._signalMap);
         }
         this.visitChildren(ctx);
         return null;
@@ -739,6 +763,27 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                     });
                 }
             }
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    // Handle variable_assignment in FOR loop init/iter: variable_lvalue '=' expression
+    visitVariable_assignment(ctx: any) {
+        if (!this._currentModule) return null;
+        const lvalIdentifiers = this._getLvalueIdentifiers(ctx.variable_lvalue ? ctx.variable_lvalue() : null);
+        for (const lvalInfo of lvalIdentifiers) {
+            const signal = this._signalMap.get(lvalInfo.name);
+            if (signal && signal.direction === 'input') {
+                this._warningInputAssignments(lvalInfo, signal.name);
+            }
+            if (signal) {
+                signal.assigned = true;
+            }
+        }
+        const exprCtx = ctx.expression ? ctx.expression() : null;
+        if (exprCtx) {
+            this._evaluateExpression(exprCtx, this._params, this._signalMap);
         }
         this.visitChildren(ctx);
         return null;
@@ -787,12 +832,22 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     // Visit l-value children (e.g. array index expressions) for r-value tracking,
     // but do NOT add the l-value identifier itself to _moduleSignalRefs.
     // Being the target of an assignment does not constitute "using" the signal.
-    visitLvalue(ctx: any) {
-        // For concatenation lvalues, skip visiting children to avoid adding
-        // concatenation member identifiers to signal refs (they are lvalue targets,
-        // not r-value references). The assignment visitors handle extracting identifiers.
-        const concatCtx = ctx.concatenation ? ctx.concatenation() : null;
-        if (concatCtx) {
+    visitVariable_lvalue(ctx: any) {
+        // For concatenation lvalues {a, b, c}, skip visiting children to avoid
+        // marking lvalue targets as r-value references.
+        const nestedLvalues = ctx.variable_lvalue ? ctx.variable_lvalue() : null;
+        const hasNested = Array.isArray(nestedLvalues) ? nestedLvalues.length > 0 : !!nestedLvalues;
+        if (hasNested) {
+            return null;
+        }
+        this.visitChildren(ctx);
+        return null;
+    }
+
+    visitNet_lvalue(ctx: any) {
+        const nestedLvalues = ctx.net_lvalue ? ctx.net_lvalue() : null;
+        const hasNested = Array.isArray(nestedLvalues) ? nestedLvalues.length > 0 : !!nestedLvalues;
+        if (hasNested) {
             return null;
         }
         this.visitChildren(ctx);
@@ -808,7 +863,9 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 const info = this._getIdentifierInfo(identCtx);
                 if (info) {
                     // Evaluate the constant_expression for the parameter database
-                    const ceCtx = ctx.constant_expression ? ctx.constant_expression() : null;
+                    const mintypCtx = ctx.constant_mintypmax_expression ? ctx.constant_mintypmax_expression() : null;
+                    const ceCtxRaw = mintypCtx ? (mintypCtx.constant_expression ? mintypCtx.constant_expression() : null) : null;
+                    const ceCtx = Array.isArray(ceCtxRaw) ? (ceCtxRaw.length > 0 ? ceCtxRaw[0] : null) : ceCtxRaw;
                     const exprText = ceCtx ? ceCtx.getText() : null;
                     const evalResult = ceCtx ? this._evaluateConstantExpression(ceCtx, this._params) : null;
                     const value = evalResult !== null ? evalResult.value : null;
@@ -891,23 +948,23 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             exprCtxToUse = exprCtx.length > 0 ? exprCtx[0] : null;
         }
         
-        if (!exprCtxToUse) return null;
+        // In the new grammar, constant_expression is its own hierarchy with no expression()
+        // sub-rule. Fall back to the context's own text for evaluation.
+        const exprText = exprCtxToUse ? exprCtxToUse.getText() : (ctx.getText ? ctx.getText() : null);
         
-        // Get the text of the expression
-        const exprText = exprCtxToUse.getText();
+        if (!exprText) return null;
         
-        // If the expression contains ternary operators, use text-based parser
-        // which handles right-associativity correctly
-        if (exprText && exprText.includes('?') && exprText.includes(':')) {
-            // Try text-based parsing first for ternary expressions
-            const simpleVal = this._evalSimpleExpr(exprText, paramMap);
-            if (simpleVal !== null) {
-                return { value: simpleVal, width: null };
-            }
+        // Try text-based parsing first (handles ternary and arithmetic correctly)
+        const simpleVal = this._evalSimpleExpr(exprText, paramMap);
+        if (simpleVal !== null) {
+            return { value: simpleVal, width: null };
         }
         
-        // Fall back to ANTLR tree-based evaluation
-        return this._evaluateExpression(exprCtxToUse, paramMap);
+        // Fall back to ANTLR tree-based evaluation (needs an expression context)
+        if (exprCtxToUse) {
+            return this._evaluateExpression(exprCtxToUse, paramMap);
+        }
+        return null;
     }
 
     // Helper: extract the numeric bit-width from a bitRange.
@@ -1010,6 +1067,22 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!lvalCtx) return null;
 
         // Concatenation lvalue: width is the sum of each element's expression width
+        // In new grammar uses nested variable_lvalue/net_lvalue
+        const nestedVar = lvalCtx.variable_lvalue ? lvalCtx.variable_lvalue() : null;
+        const nestedNet = lvalCtx.net_lvalue ? lvalCtx.net_lvalue() : null;
+        const nestedArr = Array.isArray(nestedVar) ? nestedVar : (nestedVar ? [nestedVar] :
+                          Array.isArray(nestedNet) ? nestedNet : (nestedNet ? [nestedNet] : []));
+        if (nestedArr.length > 0) {
+            let totalWidth = 0;
+            for (const nested of nestedArr) {
+                const w = this._getLvalueWidth(nested, moduleParams, moduleSignals);
+                if (w === null) return null;
+                totalWidth += w;
+            }
+            return totalWidth > 0 ? totalWidth : null;
+        }
+
+        // Legacy: old grammar concatenation lvalue
         const concatCtx = lvalCtx.concatenation ? lvalCtx.concatenation() : null;
         if (concatCtx) {
             const expressions = concatCtx.expression ? concatCtx.expression() : null;
@@ -1031,7 +1104,41 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!token) return null;
         const name = token.getText();
 
-        // range_expression alternative: identifier '[' range_expression ']'
+        // select_ alternative: identifier '[' range_expression ']' (new grammar via select_)
+        const selectCtx = lvalCtx.select_ ? lvalCtx.select_() : null;
+        if (selectCtx) {
+            const rangeExprCtx = selectCtx.range_expression ? selectCtx.range_expression() : null;
+            if (rangeExprCtx) {
+                const rangeExprs = rangeExprCtx.expression ? rangeExprCtx.expression() : null;
+                const rangeArr = Array.isArray(rangeExprs) ? rangeExprs : (rangeExprs ? [rangeExprs] : []);
+                if (rangeArr.length === 2) {
+                    const rangeText = rangeExprCtx.getText();
+                    if (rangeText.includes('+:') || rangeText.includes('-:')) {
+                        const widthVal = this._evaluateExpression(rangeArr[1], moduleParams, moduleSignals);
+                        return widthVal && widthVal.value !== null ? widthVal.value : null;
+                    }
+                    const hi = this._evaluateExpression(rangeArr[0], moduleParams, moduleSignals);
+                    const lo = this._evaluateExpression(rangeArr[1], moduleParams, moduleSignals);
+                    if (hi && hi.value !== null && lo && lo.value !== null) {
+                        return Math.abs(hi.value - lo.value) + 1;
+                    }
+                    return null;
+                }
+                // Single expression in range_expression = bit select → width 1
+                const bitSelectCtx = selectCtx.bit_select ? selectCtx.bit_select() : null;
+                if (bitSelectCtx) {
+                    // memory[addr][bit] - element then bit-select
+                    const sig = moduleSignals.get(name);
+                    return (sig && sig.isMemory) ? 1 : 1;
+                }
+                const sig = moduleSignals.get(name);
+                if (sig && sig.isMemory) return this._getSignalWidth(sig.bitRange);
+                return 1;
+            }
+            return null;
+        }
+
+        // Legacy range_expression alternative: identifier '[' range_expression ']'
         const rangeExprCtx = lvalCtx.range_expression ? lvalCtx.range_expression() : null;
         if (rangeExprCtx) {
             const rangeExprs = rangeExprCtx.expression ? rangeExprCtx.expression() : null;
@@ -1133,7 +1240,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         if (!ctx) return null;
 
         // STRING literal – not numeric
-        if (ctx.STRING && ctx.STRING()) return null;
+        if (ctx.string_ && ctx.string_()) return null;
 
         const primaryCtx = ctx.primary ? ctx.primary() : null;
 
@@ -1154,13 +1261,14 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             ? (Array.isArray(exprs) ? exprs : [exprs])
             : [];
 
-        const binaryOpCtx = ctx.binary_operator ? ctx.binary_operator() : null;
-
-        if (binaryOpCtx && exprsArr.length >= 2) {
-            const left  = this._evaluateExpression(exprsArr[0], paramMap, moduleSignals);
-            const right = this._evaluateExpression(exprsArr[1], paramMap, moduleSignals);
-            if (left === null || right === null) return null;
-            return this._applyBinary(binaryOpCtx.getText(), left, right);
+        if (exprsArr.length >= 2) {
+            const binaryOp = this._getBinaryOperatorFromChildren(ctx);
+            if (binaryOp) {
+                const left  = this._evaluateExpression(exprsArr[0], paramMap, moduleSignals);
+                const right = this._evaluateExpression(exprsArr[1], paramMap, moduleSignals);
+                if (left === null || right === null) return null;
+                return this._applyBinary(binaryOp, left, right);
+            }
         }
 
         // Ternary: condition ? then : else
@@ -1204,7 +1312,42 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 if (moduleSignals && moduleSignals.has(name)) {
                     const sig = moduleSignals.get(name);
 
-                    // Check for range_expression: identifier '[' range_expression ']'
+                    // New grammar: select_ contains bit_select and/or range_expression
+                    const selectCtx = ctx.select_ ? ctx.select_() : null;
+                    if (selectCtx) {
+                        const rangeExprCtx = selectCtx.range_expression ? selectCtx.range_expression() : null;
+                        const bitSelectCtx = selectCtx.bit_select ? selectCtx.bit_select() : null;
+                        if (rangeExprCtx) {
+                            const rangeExprs = rangeExprCtx.expression ? rangeExprCtx.expression() : null;
+                            const rangeArr = Array.isArray(rangeExprs) ? rangeExprs : (rangeExprs ? [rangeExprs] : []);
+                            if (rangeArr.length === 2) {
+                                const rangeText = rangeExprCtx.getText();
+                                if (rangeText.includes('+:') || rangeText.includes('-:')) {
+                                    const widthVal = this._evaluateExpression(rangeArr[1], paramMap, moduleSignals);
+                                    return { value: null, width: widthVal && widthVal.value !== null ? widthVal.value : null };
+                                }
+                                const hi = this._evaluateExpression(rangeArr[0], paramMap, moduleSignals);
+                                const lo = this._evaluateExpression(rangeArr[1], paramMap, moduleSignals);
+                                if (hi && hi.value !== null && lo && lo.value !== null) {
+                                    return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                                }
+                                return null;
+                            }
+                            // Single expression in range_expression = bit select → width 1
+                            // unless bit_select is also present (memory[addr][bit]) or memory access
+                            if (!bitSelectCtx && sig.isMemory) {
+                                // memory[addr] - element width
+                                return { value: null, width: this._getSignalWidth(sig.bitRange) };
+                            }
+                            return { value: null, width: 1 };
+                        }
+                        if (bitSelectCtx) {
+                            // Only bit_select without final range_expression (unusual but safe)
+                            return { value: null, width: 1 };
+                        }
+                    }
+
+                    // Legacy: Check for range_expression directly on primary (old grammar)
                     const rangeExprCtx = ctx.range_expression ? ctx.range_expression() : null;
                     if (rangeExprCtx) {
                         const rangeExprs = rangeExprCtx.expression ? rangeExprCtx.expression() : null;
@@ -1224,16 +1367,14 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                         return null;
                     }
 
-                    // Check for bit/part select: identifier '[' expression ']' ...
+                    // Legacy: Check for bit/part select via expression children (old grammar)
                     const exprChildren = ctx.expression ? ctx.expression() : null;
                     const exprArr = Array.isArray(exprChildren) ? exprChildren : (exprChildren ? [exprChildren] : []);
                     if (exprArr.length === 1) {
-                        // Memory array access: identifier[addr] → element width (not a bit select)
                         if (sig.isMemory) {
                             const w = this._getSignalWidth(sig.bitRange);
                             return { value: null, width: w};
                         }
-                        // Single bit select: identifier[expr] → width is 1
                         return { value: null, width: 1 };
                     }
                     if (exprArr.length >= 2) {
@@ -1274,7 +1415,18 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             return { value: null, width: totalWidth > 0 ? totalWidth : null };
         }
 
-        // Parenthesised expression: '(' expression ')'
+        // New grammar: parenthesized expression uses '(' mintypmax_expression ')'
+        // mintypmax_expression : expression (':' expression ':' expression)?
+        const mintypCtx = ctx.mintypmax_expression ? ctx.mintypmax_expression() : null;
+        if (mintypCtx) {
+            const mintypExprs = mintypCtx.expression ? mintypCtx.expression() : null;
+            const mintypArr = Array.isArray(mintypExprs) ? mintypExprs : (mintypExprs ? [mintypExprs] : []);
+            if (mintypArr.length > 0) {
+                return this._evaluateExpression(mintypArr[0], paramMap, moduleSignals);
+            }
+        }
+
+        // Old grammar: parenthesized expression uses '(' expression ')'
         // ctx.expression() returns an array via getTypedRuleContexts;
         // only enter this branch when there is at least one expression child
         // and no identifier (which would indicate a function call).
@@ -1285,6 +1437,22 @@ class VerilogSymbolVisitor extends VerilogVisitor {
             return this._evaluateExpression(singleExpr, paramMap, moduleSignals);
         }
 
+        return null;
+    }
+
+    // Helper: find the binary operator token in an expression context's children.
+    // The new grammar embeds operators as inline tokens rather than a binary_operator sub-rule.
+    _getBinaryOperatorFromChildren(ctx: any): string | null {
+        if (!ctx || !ctx.children) return null;
+        const BIN_OPS = new Set(['+', '-', '*', '/', '%', '**',
+            '<<', '>>', '<<<', '>>>', '&', '|', '^', '^~', '~^',
+            '&&', '||', '==', '!=', '===', '!==', '<', '<=', '>', '>=']);
+        for (const child of ctx.children) {
+            if (child.symbol !== undefined) {
+                const text = child.getText ? child.getText() : '';
+                if (BIN_OPS.has(text)) return text;
+            }
+        }
         return null;
     }
 
@@ -1403,7 +1571,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
         const direction = ctx.port_direction().getText();
         const dataTypeCtx = ctx.port_data_type();
         const type = dataTypeCtx ? dataTypeCtx.getText() : DEFAULT_NET_TYPE;
-        const bitRange = this._getRange(ctx.range());
+        const bitRange = this._getRange(ctx.range_ ? ctx.range_() : null);
 
         const info = this._getIdentifierInfo(ctx.port_identifier().identifier());
         if (!info) return null;
@@ -1444,13 +1612,26 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     }
 
     _processPortDeclaration(ctx: any, direction: any) {
-        const netTypeCtx = ctx.net_type();
-        const type = netTypeCtx ? netTypeCtx.getText() : DEFAULT_NET_TYPE;
-        const bitRange = this._getRange(ctx.range());
+        const netTypeCtx = ctx.net_type ? ctx.net_type() : null;
+        const isReg = !netTypeCtx && !!(ctx.REG ? ctx.REG() : null);
+        const type = isReg ? 'reg' : (netTypeCtx ? netTypeCtx.getText() : DEFAULT_NET_TYPE);
+        const bitRange = this._getRange(ctx.range_());
 
-        const portIdsCtx = ctx.list_of_port_identifiers();
-        const rawIds = portIdsCtx.port_identifier();
-        const ids = Array.isArray(rawIds) ? rawIds : (rawIds ? [rawIds] : []);
+        // Port identifiers can be in list_of_port_identifiers (wire/net ports)
+        // or list_of_variable_port_identifiers (reg/integer output ports)
+        const portIdsCtx = ctx.list_of_port_identifiers ? ctx.list_of_port_identifiers() : null;
+        const varPortIdsCtx = ctx.list_of_variable_port_identifiers ? ctx.list_of_variable_port_identifiers() : null;
+
+        let ids: any[] = [];
+        if (portIdsCtx) {
+            const rawIds = portIdsCtx.port_identifier ? portIdsCtx.port_identifier() : null;
+            ids = Array.isArray(rawIds) ? rawIds : (rawIds ? [rawIds] : []);
+        } else if (varPortIdsCtx) {
+            // var_port_id : port_identifier ('=' constant_expression)?
+            const rawVarIds = varPortIdsCtx.var_port_id ? varPortIdsCtx.var_port_id() : null;
+            const varArr = Array.isArray(rawVarIds) ? rawVarIds : (rawVarIds ? [rawVarIds] : []);
+            ids = varArr.map((v: any) => v.port_identifier ? v.port_identifier() : null).filter(Boolean);
+        }
 
         for (const portIdCtx of ids) {
             const info = this._getIdentifierInfo(portIdCtx.identifier());
@@ -1476,23 +1657,32 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     visitNet_declaration(ctx: any) {
         if (!this._currentModule) return null;
 
-        const type = ctx.net_type().getText();
-        const bitRange = this._getRange(ctx.range());
+        const netTypeCtx = ctx.net_type ? ctx.net_type() : null;
+        const type = netTypeCtx ? netTypeCtx.getText() : DEFAULT_NET_TYPE;
+        const bitRange = this._getRange(ctx.range_ ? ctx.range_() : null);
 
-        const netIdsCtx = ctx.list_of_net_identifiers();
-        const rawIds = netIdsCtx.net_identifier();
-        const ids = Array.isArray(rawIds) ? rawIds : (rawIds ? [rawIds] : []);
-
-        // Detect which net identifiers have initial values (e.g., wire a = 1;)
-        const idsWithInit = this._identifiersWithInitialValue(netIdsCtx, ids);
+        const netIdsCtx = ctx.list_of_net_identifiers ? ctx.list_of_net_identifiers() : null;
+        const netDeclAssignCtx = ctx.list_of_net_decl_assignments ? ctx.list_of_net_decl_assignments() : null;
+        const ids: any[] = [];
+        if (netIdsCtx) {
+            const rawNetIds = netIdsCtx.net_id ? netIdsCtx.net_id() : null;
+            const arr = Array.isArray(rawNetIds) ? rawNetIds : (rawNetIds ? [rawNetIds] : []);
+            ids.push(...arr);
+        } else if (netDeclAssignCtx) {
+            const rawAssigns = netDeclAssignCtx.net_decl_assignment ? netDeclAssignCtx.net_decl_assignment() : null;
+            const arr = Array.isArray(rawAssigns) ? rawAssigns : (rawAssigns ? [rawAssigns] : []);
+            ids.push(...arr);
+        }
 
         for (const netIdCtx of ids) {
-            const info = this._getIdentifierInfo(netIdCtx.identifier());
+            // net_id has net_identifier; net_decl_assignment has net_identifier too
+            const netIdentCtx = netIdCtx.net_identifier ? netIdCtx.net_identifier() : null;
+            const info = netIdentCtx ? this._getIdentifierInfo(netIdentCtx.identifier()) : null;
             if (!info) continue;
 
-            // Detect array wire: wire [W:0] arr [0:N-1] — the identifier has a range
-            // (array dimension) in the list_of_net_identifiers context.
-            const isMemory = this._registerIdentifierHasArrayRange(netIdsCtx, netIdCtx);
+            // Detect array wire: net_id has dimension* children
+            const dims = netIdCtx.dimension ? netIdCtx.dimension() : null;
+            const isMemory = dims ? (Array.isArray(dims) ? dims.length > 0 : !!dims) : false;
 
             const signal: Signal = {
                 name: info.name,
@@ -1502,7 +1692,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 type,
                 bitRange,
                 isMemory,
-                assigned: idsWithInit.has(netIdCtx), // treat net with initial value as assigned
+                assigned: netDeclAssignCtx !== null, // nets in decl_assignments have initial values
             };
             this._signalMap.set(signal.name, signal);
             const netDesc = [type, bitRange ? bitRange.toString() : '', info.name].filter(Boolean).join(' ');
@@ -1516,22 +1706,23 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     visitReg_declaration(ctx: any) {
         if (!this._currentModule) return null;
 
-        const bitRange = this._getRange(ctx.range());
+        const bitRange = this._getRange(ctx.range_ ? ctx.range_() : null);
 
-        const regIdsCtx = ctx.list_of_register_identifiers();
-        const rawIds = regIdsCtx.register_identifier();
+        const regIdsCtx = ctx.list_of_variable_identifiers ? ctx.list_of_variable_identifiers() : null;
+        const rawIds = regIdsCtx ? (regIdsCtx.variable_type ? regIdsCtx.variable_type() : null) : null;
         const ids = Array.isArray(rawIds) ? rawIds : (rawIds ? [rawIds] : []);
 
-        // Detect which register identifiers have initial values (e.g., reg a = 1;)
-        const idsWithInit = this._identifiersWithInitialValue(regIdsCtx, ids);
+        // list_of_variable_identifiers has no initial-value syntax in IEEE 1364-2001
+        const idsWithInit = new Set<any>();
 
         for (const regIdCtx of ids) {
-            const info = this._getIdentifierInfo(regIdCtx.identifier());
+            const varIdentCtx = regIdCtx.variable_identifier ? regIdCtx.variable_identifier() : null;
+            const info = varIdentCtx ? this._getIdentifierInfo(varIdentCtx.identifier()) : null;
             if (!info) continue;
 
-            // Detect memory array: reg [W:0] mem [0:N-1] — the identifier has a range
-            // (array dimension) in the list_of_register_identifiers context.
-            const isMemory = this._registerIdentifierHasArrayRange(regIdsCtx, regIdCtx);
+            // Detect memory array: reg [W:0] mem [0:N-1] — variable_type has dimension* children
+            const dims = regIdCtx.dimension ? regIdCtx.dimension() : null;
+            const isMemory = dims ? (Array.isArray(dims) ? dims.length > 0 : !!dims) : false;
 
             const signal: Signal = {
                 name: info.name,
@@ -1541,7 +1732,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 type: 'reg',
                 bitRange,
                 isMemory,
-                assigned: idsWithInit.has(regIdCtx), // treat reg with initial value as assigned
+                assigned: false,
             };
             this._signalMap.set(signal.name, signal);
             const regDesc = ['reg', bitRange ? bitRange.toString() : '', info.name].filter(Boolean).join(' ');
@@ -1556,15 +1747,16 @@ class VerilogSymbolVisitor extends VerilogVisitor {
     visitInteger_declaration(ctx: any) {
         if (!this._currentModule) return null;
 
-        const intIdsCtx = ctx.list_of_register_identifiers();
-        const rawIds = intIdsCtx.register_identifier();
+        const intIdsCtx = ctx.list_of_variable_identifiers ? ctx.list_of_variable_identifiers() : null;
+        const rawIds = intIdsCtx ? (intIdsCtx.variable_type ? intIdsCtx.variable_type() : null) : null;
         const ids = Array.isArray(rawIds) ? rawIds : (rawIds ? [rawIds] : []);
 
-        // Detect which integer identifiers have initial values (e.g., integer i = 0;)
-        const idsWithInit = this._identifiersWithInitialValue(intIdsCtx, ids);
+        // list_of_variable_identifiers has no initial-value syntax in IEEE 1364-2001
+        const idsWithInit = new Set<any>();
 
         for (const intIdCtx of ids) {
-            const info = this._getIdentifierInfo(intIdCtx.identifier());
+            const varIdentCtx = intIdCtx.variable_identifier ? intIdCtx.variable_identifier() : null;
+            const info = varIdentCtx ? this._getIdentifierInfo(varIdentCtx.identifier()) : null;
             if (!info) continue;
 
             const signal: Signal = {
@@ -1575,7 +1767,7 @@ class VerilogSymbolVisitor extends VerilogVisitor {
                 type: 'integer',
                 bitRange: new BitRange(31, 0),
                 isMemory: false,
-                assigned: idsWithInit.has(intIdCtx), // treat integer with initial value as assigned
+                assigned: false,
             };
             this._signalMap.set(signal.name, signal);
             this._currentModule.addDefinition(new Definition(info.name, info.line, info.character, 'integer', `integer ${info.name}`));
