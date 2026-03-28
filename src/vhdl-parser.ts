@@ -21,6 +21,24 @@ try {
     }
 }
 
+// ── Case-insensitive input stream ─────────────────────────────────────────────
+// ANTLR4 JS runtime (v4.8) does not support the grammar-level `caseInsensitive`
+// option.  We work around this by overriding LA() to return the upper-case code
+// point so the lexer (which was generated from uppercase literals) matches
+// regardless of how the user wrote the source.
+
+class CaseInsensitiveInputStream extends antlr4.InputStream {
+    constructor(data: string) {
+        super(data);
+    }
+
+    LA(offset: number): number {
+        const c = (antlr4.InputStream.prototype as any).LA.call(this, offset);
+        if (c <= 0) { return c; }
+        return String.fromCodePoint(c).toUpperCase().codePointAt(0) as number;
+    }
+}
+
 // ── Error listener ────────────────────────────────────────────────────────────
 
 class VhdlErrorListener extends antlr4.error.ErrorListener {
@@ -68,6 +86,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
     _visitingTarget: boolean = false;
     _assignedNames: Map<string, { line: number; character: number }> = new Map();
     _inComponentDeclaration: boolean = false;
+    _inPortClause: boolean = false;
     _instanceList: Instance[] = [];
     _instPortConnections: Map<string, Set<string>> = new Map();
 
@@ -119,6 +138,16 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         return null;
     }
 
+    // Track when we are inside a port clause so that interface_constant_declaration
+    // nodes (which the grammar uses for `in`-mode ports) are treated as ports rather
+    // than as generics.
+    visitPort_clause(ctx: any): any {
+        this._inPortClause = true;
+        this.visitChildren(ctx);
+        this._inPortClause = false;
+        return null;
+    }
+
     visitInterface_signal_declaration(ctx: any): any {
         if (!this._currentModule || this._inComponentDeclaration) return null;
 
@@ -156,7 +185,22 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         const line = ctx.start.line - 1;
         const character = ctx.start.column;
         const typeText = ctx.subtype_indication ? ctx.subtype_indication().getText() : '';
-        const exprText = ctx.expression ? ctx.expression().getText() : '';
+
+        // Inside a port_clause the grammar reuses interface_constant_declaration
+        // for `in`-mode ports (the CONSTANT keyword and IN keyword are both optional).
+        // Treat those as input ports instead of generics.
+        if (this._inPortClause) {
+            for (const name of names) {
+                this._currentModule.addPort({ name, direction: 'input', line, character, bitRange: null });
+                const desc = `input   ${typeText}`;
+                this._currentModule.addDefinition(
+                    new Definition(name, line, character, 'port', desc)
+                );
+            }
+            return null;
+        }
+
+        const exprText = ctx.expression?.()?.getText() ?? '';
         const defaultValue = exprText !== '' ? (parseInt(exprText, 10) || null) : null;
 
         for (const name of names) {
@@ -286,7 +330,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         const line = ctx.start.line - 1;
         const character = ctx.start.column;
         const typeText = ctx.subtype_indication ? ctx.subtype_indication().getText() : '';
-        const exprText = ctx.expression ? ctx.expression().getText() : '';
+        const exprText = ctx.expression?.()?.getText() ?? '';
 
         for (const name of names) {
             const param = new Parameter();
@@ -317,36 +361,42 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         return null;
     }
 
-    // ── Concurrent signal assignment (target tracking) ────────────────────────
+    // ── Signal assignment target tracking ─────────────────────────────────────
+    // In the VHDL2008 grammar the direct `target` child lives in:
+    //   • simple_signal_assignment        (sequential, inside process)
+    //   • conditional_waveform_assignment (concurrent conditional / simple concurrent)
+    //   • concurrent_simple_signal_assignment (another concurrent form)
+    // We hook all three so that _assignedNames is correctly populated for W2/W3.
 
-    visitConcurrent_signal_assignment_statement(ctx: any): any {
-        if (!this._currentModule || this._parseModulesOnly) return null;
-        if (ctx.target) {
-            const targetCtx = ctx.target();
-            const targetName = targetCtx.getText().toLowerCase().replace(/\(.*/, '');
-            const loc = { line: ctx.start.line - 1, character: ctx.start.column };
-            this._assignedNames.set(targetName, loc);
-            this._visitingTarget = true;
-            this.visitChildren(targetCtx);
-            this._visitingTarget = false;
-        }
+    _recordTarget(ctx: any): void {
+        if (!this._currentModule || this._parseModulesOnly) return;
+        const targetCtx = ctx.target ? ctx.target() : null;
+        if (!targetCtx) return;
+        const targetName = targetCtx.getText().toLowerCase().replace(/[(\s].*/, '');
+        const loc = { line: ctx.start.line - 1, character: ctx.start.column };
+        this._assignedNames.set(targetName, loc);
+        this._visitingTarget = true;
+        this.visitChildren(targetCtx);
+        this._visitingTarget = false;
+    }
+
+    // Sequential signal assignment inside a process
+    visitSimple_signal_assignment(ctx: any): any {
+        this._recordTarget(ctx);
         this.visitChildren(ctx);
         return null;
     }
 
-    // ── Sequential signal assignment (inside process) ─────────────────────────
+    // Concurrent signal assignment: target <= [delay] waveform_or_cond;
+    visitConditional_waveform_assignment(ctx: any): any {
+        this._recordTarget(ctx);
+        this.visitChildren(ctx);
+        return null;
+    }
 
-    visitSignal_assignment_statement(ctx: any): any {
-        if (!this._currentModule || this._parseModulesOnly) return null;
-        if (ctx.target) {
-            const targetCtx = ctx.target();
-            const targetName = targetCtx.getText().toLowerCase().replace(/\(.*/, '');
-            const loc = { line: ctx.start.line - 1, character: ctx.start.column };
-            this._assignedNames.set(targetName, loc);
-            this._visitingTarget = true;
-            this.visitChildren(targetCtx);
-            this._visitingTarget = false;
-        }
+    // Another concurrent form (WITH … SELECT … target <=)
+    visitConcurrent_simple_signal_assignment(ctx: any): any {
+        this._recordTarget(ctx);
         this.visitChildren(ctx);
         return null;
     }
@@ -520,7 +570,7 @@ class AntlrVhdlParser {
         const text = preprocessVhdl(doc.getText());
         const uri = doc.uri.toString();
 
-        const inputStream = new antlr4.InputStream(text);
+        const inputStream = new CaseInsensitiveInputStream(text);
         const lexer = new Vhdl2008Lexer(inputStream);
         const tokenStream = new antlr4.CommonTokenStream(lexer);
         const parser = new Vhdl2008Parser(tokenStream);
