@@ -4,9 +4,11 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import AntlrVerilogParser = require('./antlr-parser');
 import { parseHdlIgnore, regexScanModules } from './verilog-scanner';
+import AntlrVhdlParser = require('./vhdl-parser');
+import { regexScanEntities } from './vhdl-scanner';
 import { computeSemanticTokens, TOKEN_TYPES, TOKEN_MODIFIERS } from './semantic-tokens';
 import { Module, ModuleDatabase } from './database';
-import { buildInstantiationSnippet } from './instantiation-snippet';
+import { buildInstantiationSnippet, buildVhdlInstantiationSnippet } from './instantiation-snippet';
 import { isInsideProceduralBlock } from './context-detector';
 import { formatVerilog } from './verilog-formatter';
 
@@ -25,6 +27,7 @@ function fsFileReader(resolvedPath: string): string | null {
 // Create a single unified module database and parser instance
 const moduleDatabase = new ModuleDatabase();
 const verilogParser = new AntlrVerilogParser();
+const vhdlParser = new AntlrVhdlParser();
 
 /**
  * Persists the lightweight module entries obtained from the regex scan so
@@ -86,14 +89,18 @@ async function loadHdlIgnoreFilter(): Promise<(fsPath: string) => boolean> {
  * @param {vscode.TextDocument} document 
  */
 function updateDocumentSymbols(document: vscode.TextDocument) {
-    if (document.languageId !== 'verilog') {
-        return;
-    }
+    const lang = document.languageId;
+    if (lang !== 'verilog' && lang !== 'vhdl') return;
 
     const uri = document.uri.toString();
 
     const currentModules = moduleDatabase.getModulesByUri(uri);
-    verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
+
+    if (lang === 'vhdl') {
+        vhdlParser.parseSymbols(document, moduleDatabase, fsFileReader);
+    } else {
+        verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
+    }
 
     // Remove modules that were previously parsed from this file but are no longer present after re-parsing
     for (const mod of currentModules) {
@@ -104,14 +111,18 @@ function updateDocumentSymbols(document: vscode.TextDocument) {
 }
 
 function updateDocumentModules(document: vscode.TextDocument) {
-    if (document.languageId !== 'verilog') {
-        return;
-    }
+    const lang = document.languageId;
+    if (lang !== 'verilog' && lang !== 'vhdl') return;
 
     const uri = document.uri.toString();
 
     const currentModules = moduleDatabase.getModulesByUri(uri);
-    verilogParser.parseModules(document, moduleDatabase, fsFileReader);
+
+    if (lang === 'vhdl') {
+        vhdlParser.parseModules(document, moduleDatabase, fsFileReader);
+    } else {
+        verilogParser.parseModules(document, moduleDatabase, fsFileReader);
+    }
 
     // Remove modules that were previously parsed from this file but are no longer present after re-parsing
     for (const mod of currentModules) {
@@ -129,10 +140,10 @@ function updateDocumentModules(document: vscode.TextDocument) {
  * downstream diagnostics (signal warning generation).
  */
 function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
-    if (document.languageId !== 'verilog') return;
+    if (document.languageId !== 'verilog' && document.languageId !== 'vhdl') return;
     // Instance data is tracked internally by the parser visitor.
     // Get the instances recorded in the last parse of this document.
-    const visitor = verilogParser._lastVisitor;
+    const visitor = document.languageId === 'vhdl' ? vhdlParser._lastVisitor : verilogParser._lastVisitor;
     if (!visitor) return;
 
     const instanced = new Set<string>();
@@ -150,7 +161,7 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
                 const depDoc: any = {
                     getText: () => content,
                     uri: { toString: () => mod.uri },
-                    languageId: 'verilog'
+                    languageId: (mod.uri.endsWith('.vhd') || mod.uri.endsWith('.vhdl')) ? 'vhdl' : 'verilog'
                 };
                 updateDocumentSymbols(depDoc);
             } catch (error) {
@@ -165,7 +176,11 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
  */
 class VerilogDocumentSymbolProvider implements vscode.DocumentSymbolProvider {
     provideDocumentSymbols(document: vscode.TextDocument, token: vscode.CancellationToken): vscode.DocumentSymbol[] {
-        verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
+        if (document.languageId === 'vhdl') {
+            vhdlParser.parseSymbols(document, moduleDatabase, fsFileReader);
+        } else {
+            verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
+        }
 
         const modules = moduleDatabase.getModulesByUri(document.uri.toString());
         return modules.map((module: any) => {
@@ -244,23 +259,51 @@ async function scanWorkspaceForModules() {
     }
     console.log(`Regex scan complete: ${regexModuleMap.size} files with modules indexed`);
 
-    // --- Step 3: ANTLR-parse currently open Verilog files ---
+    // --- Step 2b: regex-scan all VHDL files ---
+    const vhdlFiles = await vscode.workspace.findFiles('**/*.{vhd,vhdl}', '**/node_modules/**');
+    const filteredVhdlFiles = vhdlFiles.filter((f: vscode.Uri) => !isIgnored(f.fsPath));
+    console.log(`Found ${filteredVhdlFiles.length} VHDL files (after .hdlignore filtering)`);
+
+    for (const fileUri of filteredVhdlFiles) {
+        try {
+            const bytes = await vscode.workspace.fs.readFile(fileUri);
+            const content = Buffer.from(bytes).toString('utf8');
+            const uri = fileUri.toString();
+            const found = regexScanEntities(content, uri);
+            if (found.length > 0) {
+                regexModuleMap.set(uri, found);
+                for (const entry of found) {
+                    if (!moduleDatabase.getModule(entry.name)) {
+                        moduleDatabase.addModule(
+                            new Module(entry.name, entry.uri, entry.line, entry.character, -1, false)
+                        );
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`Error in regex scan of ${fileUri.toString()}:`, error);
+        }
+    }
+
+    // --- Step 3: ANTLR-parse currently open HDL documents + collect instance refs ---
     const openUris = new Set<string>();
+    const neededModuleNames = new Set<string>();
     for (const document of vscode.workspace.textDocuments) {
-        if (document.languageId === 'verilog') {
+        if (document.languageId === 'verilog' || document.languageId === 'vhdl') {
             updateDocumentSymbols(document);
             openUris.add(document.uri.toString());
+            const vis: any = document.languageId === 'vhdl'
+                ? vhdlParser._lastVisitor
+                : verilogParser._lastVisitor;
+            if (vis) {
+                for (const name of vis.allModuleRefs ?? []) {
+                    neededModuleNames.add(name);
+                }
+            }
         }
     }
 
     // --- Step 4: resolve instances from open files and ANTLR-parse their deps ---
-    // Collect instantiated module names from the last-parsed visitors
-    const neededModuleNames = new Set<string>();
-    if (verilogParser._lastVisitor) {
-        for (const moduleName of verilogParser._lastVisitor.allModuleRefs) {
-            neededModuleNames.add(moduleName);
-        }
-    }
 
     for (const moduleName of neededModuleNames) {
         const mod = moduleDatabase.getModule(moduleName);
@@ -423,7 +466,7 @@ class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
                     const depDoc: any = {
                         getText: () => content,
                         uri: { toString: () => mod.uri },
-                        languageId: 'verilog'
+                        languageId: (mod.uri.endsWith('.vhd') || mod.uri.endsWith('.vhdl')) ? 'vhdl' : 'verilog'
                     };
                     updateDocumentModules(depDoc);
                 } catch (error) {
@@ -440,7 +483,10 @@ class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
             const item = new vscode.CompletionItem(mod.name, vscode.CompletionItemKind.Module);
             item.detail = 'module instantiation';
             item.documentation = new vscode.MarkdownString(`Instantiate module \`${mod.name}\``);
-            item.insertText = new vscode.SnippetString(buildInstantiationSnippet(mod));
+            const snippet = document.languageId === 'vhdl'
+                ? buildVhdlInstantiationSnippet(mod)
+                : buildInstantiationSnippet(mod);
+            item.insertText = new vscode.SnippetString(snippet);
             items.push(item);
         }
 
@@ -454,29 +500,27 @@ class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
  * @param {vscode.DiagnosticCollection} diagnosticCollection 
  */
 function updateDiagnostics(document: vscode.TextDocument, diagnosticCollection: vscode.DiagnosticCollection) {
-    if (document.languageId !== 'verilog') {
-        return;
+    const lang = document.languageId;
+    if (lang !== 'verilog' && lang !== 'vhdl') return;
+
+    if (lang === 'vhdl') {
+        vhdlParser.parseSymbols(document, moduleDatabase, fsFileReader);
+    } else {
+        verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
     }
 
-    verilogParser.parseSymbols(document, moduleDatabase, fsFileReader);
-    const errors = verilogParser.getDiagnostics(moduleDatabase);
+    const parser = lang === 'vhdl' ? vhdlParser : verilogParser;
+    const errors = parser.getDiagnostics(moduleDatabase);
     const diagnostics: vscode.Diagnostic[] = [];
     for (const error of errors) {
         const range = new vscode.Range(
             new vscode.Position(error.line, error.character),
-            new vscode.Position(error.line, error.character + error.length)
+            new vscode.Position(error.line, error.character + (error.length ?? 1))
         );
-        
-        const diagnostic = new vscode.Diagnostic(
-            range,
-            error.message,
-            error.severity
-        );
-        
-        diagnostic.source = 'verilog-parser';
+        const diagnostic = new vscode.Diagnostic(range, error.message, error.severity);
+        diagnostic.source = lang === 'vhdl' ? 'vhdl-parser' : 'verilog-parser';
         diagnostics.push(diagnostic);
     }
-
     diagnosticCollection.set(document.uri, diagnostics);
     console.log(`Updated diagnostics for ${document.uri}: ${diagnostics.length} issues found`);
 }
@@ -566,7 +610,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Listen for document open events
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(document => {
-            if (document.languageId !== 'verilog') return;
+            if (document.languageId !== 'verilog' && document.languageId !== 'vhdl') return;
             updateDocumentSymbols(document);
             ensureInstanceDependenciesParsed(document);
             updateDiagnostics(document, diagnosticCollection);
@@ -578,7 +622,7 @@ export function activate(context: vscode.ExtensionContext) {
     let changed: boolean = false;
     context.subscriptions.push(
         vscode.workspace.onDidChangeTextDocument(event => {
-            if (event.document.languageId !== 'verilog') return;
+            if (event.document.languageId !== 'verilog' && event.document.languageId !== 'vhdl') return;
             changed = true;
         })
     );
@@ -588,7 +632,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.window.onDidChangeTextEditorSelection(event => {
             const doc = event.textEditor.document;
-            if (doc.languageId !== 'verilog') return;
+            if (doc.languageId !== 'verilog' && doc.languageId !== 'vhdl') return;
 
             const pos = event.selections && event.selections[0] ? event.selections[0].active : null;
             if (!pos) return;
@@ -602,7 +646,12 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
             changed = false;
-            verilogParser.dirty();
+            const lang = doc.languageId;
+            if (lang === 'vhdl') {
+                vhdlParser.dirty();
+            } else {
+                verilogParser.dirty();
+            }
             updateDocumentSymbols(doc);
             ensureInstanceDependenciesParsed(doc);
             updateDiagnostics(doc, diagnosticCollection);
@@ -613,7 +662,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Listen for document close events
     context.subscriptions.push(
         vscode.workspace.onDidCloseTextDocument(document => {
-            if (document.languageId === 'verilog') {
+            if (document.languageId === 'verilog' || document.languageId === 'vhdl') {
                 const uri = document.uri.toString();
 /*
                 moduleDatabase.removeModulesFromFile(uri);
@@ -768,6 +817,79 @@ export function activate(context: vscode.ExtensionContext) {
                 return null;
             }
         })
+    );
+
+    // ── VHDL provider registrations ──────────────────────────────────────────────
+
+    context.subscriptions.push(
+        vscode.languages.registerDocumentSymbolProvider(
+            { language: 'vhdl' },
+            new VerilogDocumentSymbolProvider()
+        )
+    );
+
+    context.subscriptions.push(
+        vscode.languages.registerDefinitionProvider(
+            { language: 'vhdl' },
+            new VerilogDefinitionProvider()
+        )
+    );
+
+    context.subscriptions.push(
+        vscode.languages.registerDocumentSemanticTokensProvider(
+            { language: 'vhdl' },
+            semanticTokensProvider,
+            semanticTokensLegend
+        )
+    );
+
+    context.subscriptions.push(
+        vscode.languages.registerCompletionItemProvider(
+            { language: 'vhdl' },
+            new VerilogCompletionItemProvider()
+        )
+    );
+
+    context.subscriptions.push(
+        vscode.languages.registerHoverProvider('vhdl', {
+            provideHover(document: vscode.TextDocument, position: vscode.Position, _token: vscode.CancellationToken) {
+                const wordRange = document.getWordRangeAtPosition(position);
+                if (!wordRange) return null;
+                const word = document.getText(wordRange);
+
+                const lineText = document.lineAt(position.line).text;
+                const charBefore = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
+                if (charBefore === '.') {
+                    for (const mod of moduleDatabase.getAllModules()) {
+                        const port = mod.getPort(word);
+                        if (port) {
+                            const hoverContent = `**${port.name}**\n\nentity ${mod.name}`;
+                            return new vscode.Hover(hoverContent);
+                        }
+                    }
+                }
+                const docUri = document.uri.toString();
+                const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
+                if (currentModule) {
+                    const def = currentModule.definitionMap.get(word);
+                    if (def) {
+                        return new vscode.Hover(new vscode.MarkdownString(`\`\`\`vhdl\n${def.description}\n\`\`\``));
+                    }
+                }
+                return null;
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.languages.registerDocumentFormattingEditProvider(
+            { language: 'vhdl' },
+            {
+                provideDocumentFormattingEdits(_document: vscode.TextDocument, _options: vscode.FormattingOptions): vscode.TextEdit[] {
+                    return [];
+                }
+            }
+        )
     );
 
     context.subscriptions.push(disposable);

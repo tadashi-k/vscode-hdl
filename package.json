@@ -16,7 +16,8 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onLanguage:verilog"
+    "onLanguage:verilog",
+    "onLanguage:vhdl"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -38,6 +39,12 @@
           ".v"
         ],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "vhdl",
+        "aliases": ["VHDL", "vhdl"],
+        "extensions": [".vhd", ".vhdl"],
+        "configuration": "./vhdl-language-configuration.json"
       }
     ],
     "grammars": [
@@ -45,6 +52,11 @@
         "language": "verilog",
         "scopeName": "source.verilog",
         "path": "./syntaxes/verilog.tmLanguage.json"
+      },
+      {
+        "language": "vhdl",
+        "scopeName": "source.vhdl",
+        "path": "./syntaxes/vhdl.tmLanguage.json"
       }
     ],
     "themes": [
@@ -113,10 +125,22 @@
             "entity.name.type.module.verilog"
           ]
         }
+      },
+      {
+        "language": "vhdl",
+        "scopes": {
+          "hdlReg":       ["variable.other.variable.vhdl"],
+          "hdlWire":      ["variable.other.signal.vhdl"],
+          "hdlParameter": ["variable.other.constant.vhdl"],
+          "hdlModule":    ["entity.name.type.entity.vhdl"]
+        }
       }
     ],
     "configurationDefaults": {
       "[verilog]": {
+        "editor.semanticHighlighting.enabled": true
+      },
+      "[vhdl]": {
         "editor.semanticHighlighting.enabled": true
       }
     }

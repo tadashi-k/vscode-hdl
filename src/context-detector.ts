@@ -48,5 +48,19 @@ export function isInsideProceduralBlock(text: string, offset: number): boolean {
     const after = moduleText.substring(lastIdx);
     const beginCount = (after.match(/\bbegin\b/g) || []).length;
     const endCount = (after.match(/\bend\b/g) || []).length;
-    return beginCount > endCount;
+    if (beginCount > endCount) {
+        return true;
+    }
+
+    // VHDL process block detection
+    const vhdlText = text.slice(0, offset).toLowerCase();
+    const lastProcess = vhdlText.lastIndexOf('process');
+    if (lastProcess !== -1) {
+        const betweenProcessAndCursor = vhdlText.slice(lastProcess);
+        if (!/end\s+process/.test(betweenProcessAndCursor)) {
+            return true;
+        }
+    }
+
+    return false;
 }

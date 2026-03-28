@@ -15,6 +15,11 @@ const testFiles = [
     'test_completion.ts',
     'test_context_detector.ts',
     'test_formatter.ts',
+    'test_vhdl_parse_modules.ts',
+    'test_vhdl_parse_symbols.ts',
+    'test_vhdl_definitions.ts',
+    'test_vhdl_warnings.ts',
+    'test_vhdl_completion.ts',
 ];
 
 const total = testFiles.length;

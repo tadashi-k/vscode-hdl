@@ -1,0 +1,65 @@
+{
+    "name": "VHDL",
+    "scopeName": "source.vhdl",
+    "fileTypes": ["vhd", "vhdl"],
+    "patterns": [
+        { "include": "#comment_line" },
+        { "include": "#comment_block" },
+        { "include": "#string_literal" },
+        { "include": "#keywords" },
+        { "include": "#types" },
+        { "include": "#entity_declaration" },
+        { "include": "#number_literal" },
+        { "include": "#operator" }
+    ],
+    "repository": {
+        "comment_line": {
+            "match": "--.*$",
+            "name": "comment.line.double-dash.vhdl"
+        },
+        "comment_block": {
+            "begin": "/\\*",
+            "end": "\\*/",
+            "name": "comment.block.vhdl"
+        },
+        "string_literal": {
+            "begin": "\"",
+            "end": "\"",
+            "name": "string.quoted.double.vhdl"
+        },
+        "keywords": {
+            "match": "(?i)\\b(entity|architecture|is|of|begin|end|port|generic|signal|variable|constant|process|component|package|library|use|work|all|map|in|out|inout|buffer|if|then|else|elsif|case|when|loop|for|while|return|type|subtype|record|array|downto|to|others|rising_edge|falling_edge|not|and|or|xor|nor|nand|xnor)\\b",
+            "name": "keyword.control.vhdl"
+        },
+        "types": {
+            "match": "(?i)\\b(std_logic|std_logic_vector|std_ulogic|std_ulogic_vector|integer|natural|positive|boolean|bit|bit_vector|signed|unsigned|real|time|string|character)\\b",
+            "name": "support.type.vhdl"
+        },
+        "entity_declaration": {
+            "match": "(?i)\\bentity\\s+(\\w+)\\s+is\\b",
+            "captures": {
+                "1": { "name": "entity.name.type.entity.vhdl" }
+            }
+        },
+        "number_literal": {
+            "patterns": [
+                {
+                    "match": "(?i)X\"[0-9a-f_]+\"",
+                    "name": "constant.numeric.hex.vhdl"
+                },
+                {
+                    "match": "\"[01_]+\"",
+                    "name": "constant.numeric.binary.vhdl"
+                },
+                {
+                    "match": "\\b[0-9][0-9_]*\\b",
+                    "name": "constant.numeric.decimal.vhdl"
+                }
+            ]
+        },
+        "operator": {
+            "match": "<=|:=|=>|/=|>=|<|>|\\+|-|\\*|/|&",
+            "name": "keyword.operator.vhdl"
+        }
+    }
+}
