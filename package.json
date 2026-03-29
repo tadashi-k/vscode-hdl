@@ -59,13 +59,6 @@
         "path": "./syntaxes/vhdl.tmLanguage.json"
       }
     ],
-    "themes": [
-      {
-        "label": "Verilog HDL",
-        "uiTheme": "vs-dark",
-        "path": "./themes/verilog-hdl.json"
-      }
-    ],
     "commands": [
       {
         "command": "verilog.showSymbols",
@@ -142,6 +135,16 @@
       },
       "[vhdl]": {
         "editor.semanticHighlighting.enabled": true
+      },
+      "editor.semanticTokenColorCustomizations": {
+        "rules": {
+          "hdlWire": "#4EC9B0",
+          "hdlReg": "#a085df",
+          "hdlInteger": "#B58E78",
+          "hdlParameter": "#9CDCFE",
+          "hdlModule": "#4EC9B0",
+          "*.hdlPort": "#FFD700"
+        }
       }
     }
   },
