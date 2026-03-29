@@ -510,6 +510,44 @@ endmodule
         "warning for 1-bit 'reset' signal connected to 5-bit 'addr' port (width shown as 1, not null)");
 }
 
+// ── Part-select bit width evaluation: signal[hi:lo] and {a, b[hi:lo]} ──────
+// Regression test for bug where range_expression [hi:lo] (parsed as
+// msb_constant_expression ':' lsb_constant_expression in the new ANTLR grammar)
+// was mis-evaluated as 1 bit because rangeExprCtx.expression() returned 0 items.
+
+console.log('\nPart-select width evaluation: signal[hi:lo] and concatenation with [hi:lo]');
+{
+    const verilog = `
+module sub(
+    input [2:0] aport,
+    input [7:0] dport,
+    output out
+);
+endmodule
+
+module top(output out);
+reg [4:0] addr;
+reg [3:0] init_h, init_l;
+sub inst(
+    .aport(addr[2:0]),
+    .dport({init_h, init_l[3:0]}),
+    .out(out)
+);
+endmodule
+`;
+    const warnings = getWarnings(verilog, 'test_part_select_width.v');
+
+    // addr[2:0] should be 3 bits → matches 3-bit 'aport' → no width warning
+    const warnAport = warnings.find((w: any) => w.message.includes("Port 'aport'"));
+    assert(warnAport === undefined,
+        "no width warning for 3-bit 'aport' port connected to addr[2:0] (part-select = 3 bits)");
+
+    // {init_h[3:0]=4bits, init_l[3:0]=4bits} = 8 bits → matches 8-bit 'dport' → no width warning
+    const warnDport = warnings.find((w: any) => w.message.includes("Port 'dport'"));
+    assert(warnDport === undefined,
+        "no width warning for 8-bit 'dport' port connected to {init_h, init_l[3:0]} (concat = 8 bits)");
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

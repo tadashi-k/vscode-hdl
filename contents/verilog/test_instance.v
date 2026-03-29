@@ -52,6 +52,18 @@ ram #(
     .data_out({count_h, count_l})
 );
 
+ram #(
+    .DEPTH(8),
+    .WIDTH(8)
+) ram_i_4 (
+    .clk(clk),
+    .re(1'b0),
+    .we(1'b1),
+    .addr(addr[2:0]),
+    .data_in({init_h, init_l[3:0]}),
+    .data_out({count_h, count_l})
+);
+
 endmodule
 
 module ram #(

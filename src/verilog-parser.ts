@@ -1124,6 +1124,16 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                     }
                     return null;
                 }
+                // New grammar: msb_constant_expression ':' lsb_constant_expression (e.g. lval[2:0])
+                const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
+                if (hiLo) {
+                    const hi = this._evaluateExpression(hiLo[0], moduleParams, moduleSignals);
+                    const lo = this._evaluateExpression(hiLo[1], moduleParams, moduleSignals);
+                    if (hi && hi.value !== null && lo && lo.value !== null) {
+                        return Math.abs(hi.value - lo.value) + 1;
+                    }
+                    return null;
+                }
                 // Single expression in range_expression = bit select → width 1
                 const bitSelectCtx = selectCtx.bit_select ? selectCtx.bit_select() : null;
                 if (bitSelectCtx) {
@@ -1153,6 +1163,15 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                 // simple range: [high : low]
                 const hi = this._evaluateExpression(rangeArr[0], moduleParams, moduleSignals);
                 const lo = this._evaluateExpression(rangeArr[1], moduleParams, moduleSignals);
+                if (hi && hi.value !== null && lo && lo.value !== null) {
+                    return Math.abs(hi.value - lo.value) + 1;
+                }
+            }
+            // New grammar: msb_constant_expression ':' lsb_constant_expression
+            const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
+            if (hiLo) {
+                const hi = this._evaluateExpression(hiLo[0], moduleParams, moduleSignals);
+                const lo = this._evaluateExpression(hiLo[1], moduleParams, moduleSignals);
                 if (hi && hi.value !== null && lo && lo.value !== null) {
                     return Math.abs(hi.value - lo.value) + 1;
                 }
@@ -1233,6 +1252,45 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                 severity: vscode.DiagnosticSeverity.Warning
             });
         }
+    }
+
+    // Extract [hiExpr, loExpr] from a range_expression for a [hi:lo] part-select.
+    // Handles both:
+    //   - old grammar: two direct expression children
+    //   - new grammar: msb_constant_expression ':' lsb_constant_expression
+    // Returns null if the range_expression is not a [hi:lo] part-select.
+    private _extractPartSelectHiLo(rangeExprCtx: any): [any, any] | null {
+        if (!rangeExprCtx) return null;
+        // Exclude indexed part-selects (+: / -:)
+        const rangeText = rangeExprCtx.getText();
+        if (rangeText.includes('+:') || rangeText.includes('-:')) return null;
+        // Old grammar: two direct expression children
+        const rangeExprs = rangeExprCtx.expression ? rangeExprCtx.expression() : null;
+        const rangeArr = Array.isArray(rangeExprs) ? rangeExprs : (rangeExprs ? [rangeExprs] : []);
+        if (rangeArr.length === 2) return [rangeArr[0], rangeArr[1]];
+        // New grammar: msb_constant_expression ':' lsb_constant_expression
+        const msbCtx = rangeExprCtx.msb_constant_expression ? rangeExprCtx.msb_constant_expression() : null;
+        const lsbCtx = rangeExprCtx.lsb_constant_expression ? rangeExprCtx.lsb_constant_expression() : null;
+        if (msbCtx && lsbCtx) {
+            const msbExpr = this._unwrapSingleExpr(msbCtx);
+            const lsbExpr = this._unwrapSingleExpr(lsbCtx);
+            if (msbExpr && lsbExpr) return [msbExpr, lsbExpr];
+        }
+        return null;
+    }
+
+    // Unwrap a single-expression wrapper rule (msb_constant_expression, lsb_constant_expression,
+    // width_constant_expression, constant_expression) to reach the inner expression context.
+    private _unwrapSingleExpr(ctx: any): any {
+        if (!ctx) return null;
+        const constExpr = ctx.constant_expression ? ctx.constant_expression() : null;
+        if (constExpr) {
+            const inner = constExpr.expression ? constExpr.expression() : null;
+            if (inner) return Array.isArray(inner) ? (inner.length > 0 ? inner[0] : null) : inner;
+        }
+        const expr = ctx.expression ? ctx.expression() : null;
+        if (expr) return Array.isArray(expr) ? (expr.length > 0 ? expr[0] : null) : expr;
+        return null;
     }
 
     // Recursively evaluate an expression context; returns an EvalValue or null
@@ -1333,6 +1391,16 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                                 }
                                 return null;
                             }
+                            // New grammar: msb_constant_expression ':' lsb_constant_expression (e.g. signal[2:0])
+                            const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
+                            if (hiLo) {
+                                const hi = this._evaluateExpression(hiLo[0], paramMap, moduleSignals);
+                                const lo = this._evaluateExpression(hiLo[1], paramMap, moduleSignals);
+                                if (hi && hi.value !== null && lo && lo.value !== null) {
+                                    return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                                }
+                                return null;
+                            }
                             // Single expression in range_expression = bit select → width 1
                             // unless bit_select is also present (memory[addr][bit]) or memory access
                             if (!bitSelectCtx && sig.isMemory) {
@@ -1360,6 +1428,15 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                             }
                             const hi = this._evaluateExpression(rangeArr[0], paramMap, moduleSignals);
                             const lo = this._evaluateExpression(rangeArr[1], paramMap, moduleSignals);
+                            if (hi && hi.value !== null && lo && lo.value !== null) {
+                                return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                            }
+                        }
+                        // New grammar: msb_constant_expression ':' lsb_constant_expression
+                        const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
+                        if (hiLo) {
+                            const hi = this._evaluateExpression(hiLo[0], paramMap, moduleSignals);
+                            const lo = this._evaluateExpression(hiLo[1], paramMap, moduleSignals);
                             if (hi && hi.value !== null && lo && lo.value !== null) {
                                 return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
                             }
