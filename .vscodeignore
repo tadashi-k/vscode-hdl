@@ -4,6 +4,7 @@
 .git/**
 *.vsix
 contents/**
+docs/*
 test/**
 src/**
 tsconfig*.json

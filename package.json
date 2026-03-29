@@ -1,8 +1,8 @@
 {
   "name": "hdl-support",
-  "displayName": "Verilog/VHDL Language Support",
+  "displayName": "HDL Language Support",
   "description": "",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "publisher": "tadashi",
   "repository": {
     "type": "git",
