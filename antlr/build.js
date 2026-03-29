@@ -18,10 +18,7 @@ if (!fs.existsSync(outputDir)) {
 const grammars = [
     {
         files: ['VerilogLexer.g4', 'VerilogParser.g4'],
-        visitorBase: 'VerilogVisitor',
-        // ANTLR names the visitor after the grammar file: VerilogParser.g4 → VerilogParserVisitor.js
-        // We need to copy it to VerilogVisitor.js so imports in src/ still work.
-        visitorSourceName: 'VerilogParserVisitor',
+        visitorBase: 'VerilogParserVisitor',
     },
     { files: ['Vhdl2008.g4'], visitorBase: 'Vhdl2008Visitor' },
 ];
@@ -52,23 +49,13 @@ function fixImports(callback) {
     });
 }
 
-function generateVisitorDeclaration(visitorBase, visitorSourceName) {
-    const sourceName = visitorSourceName || visitorBase;
+function generateVisitorDeclaration(visitorBase) {
     const visitorDts = path.join(outputDir, `${visitorBase}.d.ts`);
-    const sourceJs = path.join(outputDir, `${sourceName}.js`);
-    const targetJs = path.join(outputDir, `${visitorBase}.js`);
+    const visitorJs = path.join(outputDir, `${visitorBase}.js`);
 
-    if (!fs.existsSync(sourceJs)) { return; }
+    if (!fs.existsSync(visitorJs)) { return; }
 
-    // If the visitor was generated under a different name (e.g. VerilogParserVisitor.js),
-    // copy it to the expected name (VerilogVisitor.js) so existing imports keep working.
-    if (sourceName !== visitorBase) {
-        let content = fs.readFileSync(sourceJs, 'utf8');
-        content = content.replace(new RegExp(sourceName, 'g'), visitorBase);
-        fs.writeFileSync(targetJs, content, 'utf8');
-    }
-
-    const content = fs.readFileSync(targetJs, 'utf8');
+    const content = fs.readFileSync(visitorJs, 'utf8');
     const methods = [];
     const re = new RegExp(`${visitorBase}\\.prototype\\.(visit\\w+)\\s*=`, 'g');
     let m;
@@ -89,7 +76,7 @@ function generateVisitorDeclaration(visitorBase, visitorSourceName) {
 function buildAll(index) {
     if (index >= grammars.length) {
         fixImports(() => {
-            grammars.forEach(g => generateVisitorDeclaration(g.visitorBase, g.visitorSourceName));
+            grammars.forEach(g => generateVisitorDeclaration(g.visitorBase));
             console.log('\n✓ All grammars built successfully!');
             const files = fs.readdirSync(outputDir);
             console.log('\nGenerated files:');

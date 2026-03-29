@@ -29,8 +29,8 @@
     {
       "type": "pwa-node",
       "request": "launch",
-      "name": "Debug test_warning (tsx)",
-      "program": "${workspaceFolder}/test/test_warning.ts",
+      "name": "Debug test_parse_modules (tsx)",
+      "program": "${workspaceFolder}/test/test_parse_modules.ts",
       "runtimeArgs": [
         "--import=tsx"
       ],

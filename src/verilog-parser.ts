@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { preprocessVerilog } from './verilog-scanner';
 import { VerilogLexer } from '../antlr/generated/VerilogLexer';
 import { VerilogParser } from '../antlr/generated/VerilogParser';
-import { VerilogVisitor } from '../antlr/generated/VerilogVisitor';
+import { VerilogParserVisitor } from '../antlr/generated/VerilogParserVisitor';
 import { Module, ModuleDatabase, Definition, Port, BitRange, Instance} from './database';
 
 let vscode: typeof vsCodeModule;
@@ -91,7 +91,7 @@ class Signal {
  */
 const DEFAULT_NET_TYPE = 'wire';
 
-class VerilogSymbolVisitor extends VerilogVisitor {
+class VerilogSymbolVisitor extends VerilogParserVisitor {
     uri: string;
     errors = [];
     warnings = [];
