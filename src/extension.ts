@@ -139,7 +139,7 @@ function updateDocumentModules(document: vscode.TextDocument) {
  * read and ANTLR-parsed so that full port information becomes available for
  * downstream diagnostics (signal warning generation).
  */
-function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
+async function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
     if (document.languageId !== 'verilog' && document.languageId !== 'vhdl') return;
     // Instance data is tracked internally by the parser visitor.
     // Get the instances recorded in the last parse of this document.
@@ -156,12 +156,13 @@ function ensureInstanceDependenciesParsed(document: vscode.TextDocument) {
         const mod = moduleDatabase.getModule(moduleName);
         if (mod && !mod.scanned && mod.uri && mod.uri !== uri) {
             try {
-                const depFsPath = vscode.Uri.parse(mod.uri).fsPath;
-                const content = fs.readFileSync(depFsPath, 'utf8');
+                const depUri = vscode.Uri.parse(mod.uri);
+                const bytes = await vscode.workspace.fs.readFile(depUri);
+                const content = Buffer.from(bytes).toString('utf8');
                 const depDoc: any = {
                     getText: () => content,
                     uri: { toString: () => mod.uri },
-                    languageId: (mod.uri.endsWith('.vhd') || mod.uri.endsWith('.vhdl')) ? 'vhdl' : 'verilog'
+                    languageId: (mod.uri.endsWith('.vhd') || mod.uri.endsWith('.vhdl')) ? 'vhdl' : 'verilog',
                 };
                 updateDocumentSymbols(depDoc);
             } catch (error) {
@@ -231,7 +232,10 @@ async function scanWorkspaceForModules() {
     const isIgnored = await loadHdlIgnoreFilter();
 
     // --- Step 2: regex-scan all .v files ---
-    const verilogFiles = await vscode.workspace.findFiles('**/*.v', '**/node_modules/**');
+    // Do not pass an explicit exclude — omitting it makes VS Code apply the
+    // workspace's "files.exclude" (and "search.exclude") settings, so
+    // generated directories (out/, build/, sim/, …) are skipped automatically.
+    const verilogFiles = await vscode.workspace.findFiles('**/*.v');
     const filteredFiles = verilogFiles.filter(f => !isIgnored(f.fsPath));
     console.log(`Found ${filteredFiles.length} Verilog files (after .hdlignore filtering)`);
 
@@ -260,7 +264,7 @@ async function scanWorkspaceForModules() {
     console.log(`Regex scan complete: ${regexModuleMap.size} files with modules indexed`);
 
     // --- Step 2b: regex-scan all VHDL files ---
-    const vhdlFiles = await vscode.workspace.findFiles('**/*.{vhd,vhdl}', '**/node_modules/**');
+    const vhdlFiles = await vscode.workspace.findFiles('**/*.{vhd,vhdl}');
     const filteredVhdlFiles = vhdlFiles.filter((f: vscode.Uri) => !isIgnored(f.fsPath));
     console.log(`Found ${filteredVhdlFiles.length} VHDL files (after .hdlignore filtering)`);
 
@@ -309,9 +313,19 @@ async function scanWorkspaceForModules() {
         const mod = moduleDatabase.getModule(moduleName);
         if (mod && !mod.scanned && mod.uri && !openUris.has(mod.uri)) {
             try {
+                // Read the file directly instead of opening it as a VS Code
+                // TextDocument.  openTextDocument() would fire onDidOpenTextDocument
+                // which calls ensureInstanceDependenciesParsed again, causing a
+                // cascade of synchronous parses during startup.
                 const depUri = vscode.Uri.parse(mod.uri);
-                const document = await vscode.workspace.openTextDocument(depUri);
-                updateDocumentModules(document); // simple ANTLR parse to populate ports/parameters for go-to-definition and diagnostics
+                const bytes = await vscode.workspace.fs.readFile(depUri);
+                const content = Buffer.from(bytes).toString('utf8');
+                const depDoc: any = {
+                    getText: () => content,
+                    uri: { toString: () => mod.uri },
+                    languageId: (mod.uri.endsWith('.vhd') || mod.uri.endsWith('.vhdl')) ? 'vhdl' : 'verilog',
+                };
+                updateDocumentModules(depDoc);
                 openUris.add(mod.uri);
             } catch (error) {
                 console.error(`Error parsing dependency ${mod.uri}:`, error);
@@ -456,26 +470,10 @@ class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
     /** Completions for module instantiation outside procedural blocks. */
     private _instantiationCompletions(document: vscode.TextDocument): vscode.CompletionItem[] {
         const items: vscode.CompletionItem[] = [];
+        const docUri = document.uri.toString();
 
         for (const mod of moduleDatabase.getAllModules()) {
-            // If the module isn't fully parsed yet, try to parse it now so that
-            // port and parameter information is available for the snippet.
-            if (!mod.scanned && mod.uri) {
-                try {
-                    const content = fs.readFileSync(vscode.Uri.parse(mod.uri).fsPath, 'utf8');
-                    const depDoc: any = {
-                        getText: () => content,
-                        uri: { toString: () => mod.uri },
-                        languageId: (mod.uri.endsWith('.vhd') || mod.uri.endsWith('.vhdl')) ? 'vhdl' : 'verilog'
-                    };
-                    updateDocumentModules(depDoc);
-                } catch (error) {
-                    console.error(`Error parsing module ${mod.name} for completion:`, error);
-                }
-            }
-
             // Skip modules defined in the same file (avoid self-instantiation suggestions)
-            const docUri = document.uri.toString();
             if (mod.uri === docUri) {
                 continue;
             }
@@ -609,10 +607,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Listen for document open events
     context.subscriptions.push(
-        vscode.workspace.onDidOpenTextDocument(document => {
+        vscode.workspace.onDidOpenTextDocument(async document => {
             if (document.languageId !== 'verilog' && document.languageId !== 'vhdl') return;
             updateDocumentSymbols(document);
-            ensureInstanceDependenciesParsed(document);
+            await ensureInstanceDependenciesParsed(document);
             updateDiagnostics(document, diagnosticCollection);
             semanticTokensProvider.notifyChanged();
         })
@@ -630,7 +628,7 @@ export function activate(context: vscode.ExtensionContext) {
     // Listen for cursor selection changes
     let lastCursorLine : number = 0;
     context.subscriptions.push(
-        vscode.window.onDidChangeTextEditorSelection(event => {
+        vscode.window.onDidChangeTextEditorSelection(async event => {
             const doc = event.textEditor.document;
             if (doc.languageId !== 'verilog' && doc.languageId !== 'vhdl') return;
 
@@ -653,7 +651,7 @@ export function activate(context: vscode.ExtensionContext) {
                 verilogParser.dirty();
             }
             updateDocumentSymbols(doc);
-            ensureInstanceDependenciesParsed(doc);
+            await ensureInstanceDependenciesParsed(doc);
             updateDiagnostics(doc, diagnosticCollection);
             semanticTokensProvider.notifyChanged();
         })
@@ -743,17 +741,23 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 
-    // Re-scan workspace when files are created or deleted
-    context.subscriptions.push(
-        vscode.workspace.onDidCreateFiles(() => {
+    // Re-scan workspace when files are created or deleted.
+    // Debounced so that bulk file operations (e.g. a build) only trigger one scan.
+    let rescanTimer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleRescan = () => {
+        if (rescanTimer) clearTimeout(rescanTimer);
+        rescanTimer = setTimeout(() => {
+            rescanTimer = undefined;
             scanWorkspaceForModules();
-        })
+        }, 2000);
+    };
+
+    context.subscriptions.push(
+        vscode.workspace.onDidCreateFiles(() => scheduleRescan())
     );
 
     context.subscriptions.push(
-        vscode.workspace.onDidDeleteFiles(() => {
-            scanWorkspaceForModules();
-        })
+        vscode.workspace.onDidDeleteFiles(() => scheduleRescan())
     );
 
     // Register command to show symbols
