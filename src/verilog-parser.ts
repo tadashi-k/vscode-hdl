@@ -1151,6 +1151,38 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
             return null;
         }
 
+        // const_select alternative: identifier '[' constant_range_expression ']' (net_lvalue in assign)
+        const constSelectCtx = lvalCtx.const_select ? lvalCtx.const_select() : null;
+        if (constSelectCtx) {
+            const constRangeExprCtx = constSelectCtx.constant_range_expression
+                ? constSelectCtx.constant_range_expression() : null;
+            if (constRangeExprCtx) {
+                // +:/−: indexed part select: constant_base_expression '+:'/'-:' width_constant_expression
+                const indexedWidth = this._evalIndexedPartSelectWidth(constRangeExprCtx, moduleParams, moduleSignals);
+                if (indexedWidth !== null) return indexedWidth;
+                // [hi:lo] range select: msb_constant_expression ':' lsb_constant_expression
+                const msbCtx = constRangeExprCtx.msb_constant_expression
+                    ? constRangeExprCtx.msb_constant_expression() : null;
+                const lsbCtx = constRangeExprCtx.lsb_constant_expression
+                    ? constRangeExprCtx.lsb_constant_expression() : null;
+                if (msbCtx && lsbCtx) {
+                    const hi = this._evaluateConstantExpression(msbCtx, moduleParams);
+                    const lo = this._evaluateConstantExpression(lsbCtx, moduleParams);
+                    if (hi && hi.value !== null && lo && lo.value !== null) {
+                        return Math.abs(hi.value - lo.value) + 1;
+                    }
+                    return null;
+                }
+                // Single constant_expression → bit select (width 1) or memory element access
+                const sig = moduleSignals.get(name);
+                if (sig && sig.isMemory) return this._getSignalWidth(sig.bitRange);
+                return 1;
+            }
+            // const_select present but no range expr (const_bit_select only, e.g. memory[addr]) → use element width
+            const sig = moduleSignals.get(name);
+            return sig ? this._getSignalWidth(sig.bitRange) : null;
+        }
+
         // Legacy range_expression alternative: identifier '[' range_expression ']'
         const rangeExprCtx = lvalCtx.range_expression ? lvalCtx.range_expression() : null;
         if (rangeExprCtx) {

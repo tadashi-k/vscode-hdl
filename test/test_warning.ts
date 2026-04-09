@@ -585,6 +585,35 @@ endmodule
         "no width warning for 4-bit 'a4port' connected to addr[1-:4] (indexed part-select = 4 bits)");
 }
 
+// ── assign lvalue bit/part-select width (net_lvalue with const_select) ────────
+// Regression test for bug where assign wire[3]=... and assign wire[2:1]=...
+// used the full signal width instead of the selected bit count.
+
+console.log('\nassign lvalue bit-select and part-select width (const_select)');
+{
+    const verilog = `
+module top;
+reg [3:0] src;
+wire [3:0] dst;
+
+assign dst[3]   = src[0];   // 1-bit lvalue, 1-bit rvalue → no warning
+assign dst[2:1] = src[2:1]; // 2-bit lvalue, 2-bit rvalue → no warning
+assign dst[1:0] = src[3:2]; // 2-bit lvalue, 2-bit rvalue → no warning
+endmodule
+`;
+    const warnings = getWarnings(verilog, 'test_assign_lval_select.v');
+
+    const warnBit = warnings.find((w: any) =>
+        w.message.includes('Bit width mismatch') && w.message.includes("'dst'"));
+    assert(warnBit === undefined,
+        "no width-mismatch warning for assign dst[3]=src[0] (both 1-bit)");
+
+    const warnRange = warnings.find((w: any) =>
+        w.message.includes('Bit width mismatch') && w.message.includes("'dst'"));
+    assert(warnRange === undefined,
+        "no width-mismatch warning for assign dst[2:1]=src[2:1] (both 2-bit)");
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

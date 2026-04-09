@@ -7,6 +7,8 @@ module test_instance (
 reg[4:0] addr;
 reg[3:0] init_h, init_l;
 wire[3:0] count_h, count_l;
+reg[3:0] addr_next;
+wire[3:0] addr_next_wire;
 
 always @(posedge clk) begin
     {init_h,init_l} <= 8'h45;
@@ -14,7 +16,11 @@ always @(posedge clk) begin
     count_out <= {count_h, count_l};
 
     addr <= addr + 1;
+    addr_next <= addr[0+:4] + 1;
 end
+
+assign addr_next_wire[3] = addr_next[0];
+assign addr_next_wire[2:1] = addr_next[2:1];
 
 ram #(
     .DEPTH(16),
@@ -34,7 +40,7 @@ ram #(
 ) ram_i_2 (
     .clk(clk),
     .re(1'b0),
-    .addr(addr), // no need warning 5-bit address for 32-depth RAM
+    .addr(addr[0+:5]), // no need warning 5-bit address for 32-depth RAM
     .data_in({init_h, init_l}),
     .data_out({count_h, count_l})
 );
