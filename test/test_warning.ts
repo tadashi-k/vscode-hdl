@@ -548,6 +548,43 @@ endmodule
         "no width warning for 8-bit 'dport' port connected to {init_h, init_l[3:0]} (concat = 8 bits)");
 }
 
+// ── Indexed part-select bit width evaluation: signal[base+:width] / [base-:width] ──
+// Regression test for bug where [base +: width] was evaluated as width=1 because
+// rangeExprCtx.expression() returns null for the new grammar's base_expression '+:'
+// width_constant_expression alternative.
+
+console.log('\nIndexed part-select (+: / -:) width evaluation');
+{
+    const verilog = `
+module sub(
+    input [4:0] a5port,
+    input [3:0] a4port,
+    output out
+);
+endmodule
+
+module top(output out);
+reg [4:0] addr;
+sub inst(
+    .a5port(addr[0+:5]),
+    .a4port(addr[1-:4]),
+    .out(out)
+);
+endmodule
+`;
+    const warnings = getWarnings(verilog, 'test_indexed_part_select_width.v');
+
+    // addr[0+:5] → width 5 → matches 5-bit 'a5port' → no width warning
+    const warnA5 = warnings.find((w: any) => w.message.includes("Port 'a5port'"));
+    assert(warnA5 === undefined,
+        "no width warning for 5-bit 'a5port' connected to addr[0+:5] (indexed part-select = 5 bits)");
+
+    // addr[1-:4] → width 4 → matches 4-bit 'a4port' → no width warning
+    const warnA4 = warnings.find((w: any) => w.message.includes("Port 'a4port'"));
+    assert(warnA4 === undefined,
+        "no width warning for 4-bit 'a4port' connected to addr[1-:4] (indexed part-select = 4 bits)");
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

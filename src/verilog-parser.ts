@@ -1124,6 +1124,9 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                     }
                     return null;
                 }
+                // New grammar: base_expression '+:'/'-:' width_constant_expression
+                const indexedWidth = this._evalIndexedPartSelectWidth(rangeExprCtx, moduleParams, moduleSignals);
+                if (indexedWidth !== null) return indexedWidth;
                 // New grammar: msb_constant_expression ':' lsb_constant_expression (e.g. lval[2:0])
                 const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
                 if (hiLo) {
@@ -1167,6 +1170,9 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                     return Math.abs(hi.value - lo.value) + 1;
                 }
             }
+            // New grammar: base_expression '+:'/'-:' width_constant_expression
+            const indexedWidthLegacy = this._evalIndexedPartSelectWidth(rangeExprCtx, moduleParams, moduleSignals);
+            if (indexedWidthLegacy !== null) return indexedWidthLegacy;
             // New grammar: msb_constant_expression ':' lsb_constant_expression
             const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
             if (hiLo) {
@@ -1277,6 +1283,19 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
             if (msbExpr && lsbExpr) return [msbExpr, lsbExpr];
         }
         return null;
+    }
+
+    // Evaluate the width of an indexed part-select [base +: width] or [base -: width].
+    // Handles the new ANTLR grammar where the width part is a width_constant_expression child
+    // (distinct from the base expression). Returns the numeric width, or null if not applicable.
+    private _evalIndexedPartSelectWidth(rangeExprCtx: any, paramMap: any, moduleSignals?: Map<string, Signal>): number | null {
+        if (!rangeExprCtx) return null;
+        const widthCtx = rangeExprCtx.width_constant_expression ? rangeExprCtx.width_constant_expression() : null;
+        if (!widthCtx) return null;
+        const widthExpr = this._unwrapSingleExpr(widthCtx);
+        if (!widthExpr) return null;
+        const widthVal = this._evaluateExpression(widthExpr, paramMap, moduleSignals);
+        return widthVal && widthVal.value !== null ? widthVal.value : null;
     }
 
     // Unwrap a single-expression wrapper rule (msb_constant_expression, lsb_constant_expression,
@@ -1391,6 +1410,9 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                                 }
                                 return null;
                             }
+                            // New grammar: base_expression '+:'/'-:' width_constant_expression
+                            const indexedWidthPrim = this._evalIndexedPartSelectWidth(rangeExprCtx, paramMap, moduleSignals);
+                            if (indexedWidthPrim !== null) return { value: null, width: indexedWidthPrim };
                             // New grammar: msb_constant_expression ':' lsb_constant_expression (e.g. signal[2:0])
                             const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
                             if (hiLo) {
@@ -1432,6 +1454,9 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                                 return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
                             }
                         }
+                        // New grammar: base_expression '+:'/'-:' width_constant_expression
+                        const indexedWidthLeg = this._evalIndexedPartSelectWidth(rangeExprCtx, paramMap, moduleSignals);
+                        if (indexedWidthLeg !== null) return { value: null, width: indexedWidthLeg };
                         // New grammar: msb_constant_expression ':' lsb_constant_expression
                         const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
                         if (hiLo) {
