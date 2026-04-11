@@ -14,6 +14,7 @@ declare module 'antlr4' {
 
     export class CommonTokenStream {
         constructor(lexer: Lexer, channel?: number);
+        seek(index: number): void;
     }
 
     export class ParserRuleContext {
@@ -33,6 +34,12 @@ declare module 'antlr4' {
         constructor(input: CommonTokenStream);
         removeErrorListeners(): void;
         addErrorListener(listener: error.ErrorListener): void;
+        reset(): void;
+        _interp: { predictionMode: number };
+    }
+
+    export namespace atn {
+        const PredictionMode: { SLL: number; LL: number; LL_EXACT_AMBIG_DETECTION: number };
     }
 
     export namespace error {
@@ -54,6 +61,7 @@ declare module 'antlr4' {
         Lexer: typeof Lexer;
         Parser: typeof Parser;
         error: typeof error;
+        atn: typeof atn;
     };
     export default antlr4;
 }

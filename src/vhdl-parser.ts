@@ -35,6 +35,11 @@ class CaseInsensitiveInputStream extends antlr4.InputStream {
     LA(offset: number): number {
         const c = (antlr4.InputStream.prototype as any).LA.call(this, offset);
         if (c <= 0) { return c; }
+        // Fast path: ASCII lowercase a-z → uppercase A-Z without string allocation.
+        // LA() is called for every character the lexer examines, so avoiding
+        // String.fromCodePoint/toUpperCase here gives a large speedup.
+        if (c >= 0x61 && c <= 0x7a) { return c - 32; }
+        // Slow path for non-ASCII (rare in VHDL source)
         return String.fromCodePoint(c).toUpperCase().codePointAt(0) as number;
     }
 }
@@ -579,7 +584,21 @@ class AntlrVhdlParser {
         parser.removeErrorListeners();
         parser.addErrorListener(errorListener);
 
-        const tree = parser.design_file();
+        parser._interp.predictionMode = antlr4.atn.PredictionMode.SLL;
+        let tree = parser.design_file();
+
+        /* disabled because it has too big cost
+        // Two-stage parsing: try fast SLL mode first; fall back to full LL
+        // only when SLL produces errors.  SLL skips full-context ATN simulation
+        if (errorListener.errors.length > 0) {
+            tokenStream.seek(0);
+            parser.reset();
+            errorListener.errors = [];
+            parser._interp.predictionMode = antlr4.atn.PredictionMode.LL;
+            tree = parser.design_file();
+        }
+        */
+
         const visitor = new VhdlSymbolVisitor(uri, db, parseModulesOnly);
         visitor.visit(tree);
         visitor.errors.push(...errorListener.errors);
