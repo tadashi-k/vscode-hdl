@@ -44,12 +44,24 @@
         "number_literal": {
             "patterns": [
                 {
-                    "match": "(?i)X\"[0-9a-f_]+\"",
+                    "comment": "VHDL-2008 hex bit-string literal: [size](UX|SX|X)\"...\" e.g. 8x\"FF\", 16UX\"FFFF\"",
+                    "match": "(?i)[0-9]*(UX|SX|X)\"[0-9a-f_]*\"",
                     "name": "constant.numeric.hex.vhdl"
                 },
                 {
-                    "match": "\"[01_]+\"",
+                    "comment": "VHDL-2008 octal bit-string literal: [size](UO|SO|O)\"...\" e.g. 8o\"17\"",
+                    "match": "(?i)[0-9]*(UO|SO|O)\"[0-7_]*\"",
+                    "name": "constant.numeric.octal.vhdl"
+                },
+                {
+                    "comment": "VHDL-2008 binary bit-string literal: [size](UB|SB|B)\"...\" e.g. 4b\"1010\"",
+                    "match": "(?i)[0-9]*(UB|SB|B)\"[01_]*\"",
                     "name": "constant.numeric.binary.vhdl"
+                },
+                {
+                    "comment": "VHDL-2008 decimal bit-string literal: [size]D\"...\" e.g. 8d\"255\"",
+                    "match": "(?i)[0-9]+D\"[0-9_]*\"",
+                    "name": "constant.numeric.decimal.vhdl"
                 },
                 {
                     "match": "\\b[0-9][0-9_]*\\b",

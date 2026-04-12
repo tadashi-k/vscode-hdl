@@ -16,6 +16,7 @@ end entity counter;
 
 architecture rtl of counter is
     signal count_reg : std_logic_vector(WIDTH-1 downto 0);
+    signal status : std_logic_vector;
 begin
     process(clk)
     begin
@@ -25,6 +26,11 @@ begin
             else
                 count_reg <= std_logic_vector(unsigned(count_in) + 1);
             end if;
+
+            case count_reg is
+                when 8x"00" => status <= 1;
+                when others => status <= 0;
+            end case;
         end if;
     end process;
     count_out <= count_reg;

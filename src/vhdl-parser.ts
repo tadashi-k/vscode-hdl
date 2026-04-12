@@ -599,11 +599,36 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
 // ── AntlrVhdlParser ───────────────────────────────────────────────────────────
 
 /**
- * Preprocess VHDL text: replace -- line comments with spaces (preserving line count).
- * Block comments are handled by the ANTLR lexer grammar.
+ * Preprocess VHDL text before feeding to the ANTLR lexer:
+ *   1. Replace -- line comments with spaces (preserving line/column positions).
+ *   2. Normalize VHDL-2008 bit-string literals to VHDL-93 form so that the
+ *      existing lexer rules (BIT_STRING_LITERAL_BINARY/OCTAL/HEX) match them.
+ *
+ * VHDL-2008 extends bit-string literals with an optional integer size prefix
+ * and an optional U/S signedness modifier before the base specifier, e.g.:
+ *   8x"FF"       → x"FF"   (8-bit hex)
+ *   16x"ABCD"    → x"ABCD" (16-bit hex)
+ *   12ux"FAB"    → x"FAB"  (unsigned 12-bit hex)
+ *   8sx"7F"      → x"7F"   (signed 8-bit hex)
+ *   4b"1010"     → b"1010" (4-bit binary)
+ *   6so"37"      → o"37"   (signed 6-bit octal)
+ *
+ * The stripped characters are replaced with spaces to preserve column numbers
+ * so that any error/definition positions reported by the parser remain accurate.
  */
 function preprocessVhdl(text: string): string {
-    return text.replace(/--[^\n]*/g, (m) => ' '.repeat(m.length));
+    // Pass 1: strip -- line comments
+    let result = text.replace(/--[^\n]*/g, (m) => ' '.repeat(m.length));
+
+    // Pass 2: strip size prefix + optional U/S modifier before X/O/B base specifier.
+    // Regex: one-or-more digits, then optional U or S (case-insensitive),
+    // followed (lookahead, not consumed) by X/O/B then a double-quote.
+    result = result.replace(
+        /([0-9]+)([USus]?)(?=[XxOoBb]")/g,
+        (m) => ' '.repeat(m.length)
+    );
+
+    return result;
 }
 
 class AntlrVhdlParser {
