@@ -797,7 +797,7 @@ export function activate(context: vscode.ExtensionContext) {
                     if (currentModule) {
                         const inst = [...currentModule.instanceList]
                             .reverse()
-                            .find(i => i.line <= position.line);
+                            .find(i => i.moduleNameLine <= position.line);
                         if (inst) {
                             const targetMod = moduleDatabase.getModule(inst.moduleName);
                             if (targetMod) {
@@ -870,7 +870,7 @@ export function activate(context: vscode.ExtensionContext) {
                     if (currentModule) {
                         const inst = [...currentModule.instanceList]
                             .reverse()
-                            .find(i => i.line <= position.line);
+                            .find(i => i.moduleNameLine <= position.line);
                         if (inst) {
                             const targetMod = moduleDatabase.getModule(inst.moduleName);
                             if (targetMod) {
