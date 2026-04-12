@@ -784,37 +784,32 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.languages.registerHoverProvider('verilog', {
             provideHover(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken) {
                 const wordRange = document.getWordRangeAtPosition(position);
+                if (!wordRange) return null;
                 const word = document.getText(wordRange);
+                const docUri = document.uri.toString();
+                const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
+                const lineText = document.lineAt(position.line).text;
+                const charBefore = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
 
-                // Check if hovered word is a port_identifier in a named_port_connection
-                // Pattern: ".portName(" preceded by an instance context
-                if (wordRange) {
-                    const lineText = document.lineAt(position.line).text;
-                    const charBefore = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
-                    if (charBefore === '.') {
-                        // Named port connection: .portName(...)
-                        const docUri = document.uri.toString();
-                        const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
-                        if (currentModule) {
-                            const inst = [...currentModule.instanceList]
-                                .reverse()
-                                .find(i => i.moduleNameLine <= position.line);
-                            if (inst) {
-                                const targetMod = moduleDatabase.getModule(inst.moduleName);
-                                if (targetMod) {
-                                    const def = targetMod.definitionMap.get(word);
-                                    if (def) {
-                                        return new vscode.Hover(new vscode.MarkdownString(`\`\`\`verilog\n${def.description}\n\`\`\``));
-                                    }
+                if (charBefore === '.') {
+                    // Named port connection: .portName(...)
+                    // Find the enclosing instance and look up the port in that module only.
+                    if (currentModule) {
+                        const inst = [...currentModule.instanceList]
+                            .reverse()
+                            .find(i => i.line <= position.line);
+                        if (inst) {
+                            const targetMod = moduleDatabase.getModule(inst.moduleName);
+                            if (targetMod) {
+                                const def = targetMod.definitionMap.get(word);
+                                if (def) {
+                                    return new vscode.Hover(new vscode.MarkdownString(`\`\`\`verilog\n${def.description}\n\`\`\``));
                                 }
                             }
                         }
-                        return null;
                     }
-
-                    // Check for signal/parameter definitions in the current module
-                    const docUri = document.uri.toString();
-                    const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
+                } else {
+                    // Signal/parameter definition in the current module
                     if (currentModule) {
                         const def = currentModule.definitionMap.get(word);
                         if (def) {
@@ -865,12 +860,13 @@ export function activate(context: vscode.ExtensionContext) {
                 const wordRange = document.getWordRangeAtPosition(position);
                 if (!wordRange) return null;
                 const word = document.getText(wordRange);
-
+                const docUri = document.uri.toString();
+                const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
                 const lineText = document.lineAt(position.line).text;
                 const charBefore = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
+
                 if (charBefore === '.') {
-                    const docUri = document.uri.toString();
-                    const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
+                    // Named port connection: .portName(...)
                     if (currentModule) {
                         const inst = [...currentModule.instanceList]
                             .reverse()
@@ -885,15 +881,16 @@ export function activate(context: vscode.ExtensionContext) {
                             }
                         }
                     }
-                }
-                const docUri = document.uri.toString();
-                const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
-                if (currentModule) {
-                    const def = currentModule.definitionMap.get(word);
-                    if (def) {
-                        return new vscode.Hover(new vscode.MarkdownString(`\`\`\`vhdl\n${def.description}\n\`\`\``));
+                } else {
+                    // Signal/parameter definition in the current module
+                    if (currentModule) {
+                        const def = currentModule.definitionMap.get(word);
+                        if (def) {
+                            return new vscode.Hover(new vscode.MarkdownString(`\`\`\`vhdl\n${def.description}\n\`\`\``));
+                        }
                     }
                 }
+
                 return null;
             }
         })
