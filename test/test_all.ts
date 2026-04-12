@@ -20,6 +20,7 @@ const testFiles = [
     'test_vhdl_definitions.ts',
     'test_vhdl_warnings.ts',
     'test_vhdl_completion.ts',
+    'test_vhdl_bitwidth.ts',
 ];
 
 const total = testFiles.length;

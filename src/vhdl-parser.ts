@@ -6,7 +6,7 @@ import antlr4 from 'antlr4';
 import { Vhdl2008Lexer } from '../antlr/generated/Vhdl2008Lexer';
 import { Vhdl2008Parser } from '../antlr/generated/Vhdl2008Parser';
 import { Vhdl2008Visitor } from '../antlr/generated/Vhdl2008Visitor';
-import { Module, ModuleDatabase, Definition, Port, Parameter, Instance } from './database';
+import { Module, ModuleDatabase, Definition, Port, Parameter, Instance, BitRange } from './database';
 // Used by instantiation completion — referenced indirectly via extension.ts
 import { buildInstantiationSnippet } from './instantiation-snippet'; // eslint-disable-line @typescript-eslint/no-unused-vars
 
@@ -70,6 +70,47 @@ function vhdlModeToDirection(mode: string): 'input' | 'output' | 'inout' {
         case 'buffer': return 'output';
         default:       return 'input';   // 'in', 'linkage', or no mode
     }
+}
+
+/**
+ * Parse a VHDL subtype_indication text (as returned by ANTLR getText(), which
+ * strips whitespace) and extract a BitRange when the type carries an explicit
+ * index constraint, e.g. `std_logic_vector(7downto0)` or `unsigned(0to7)`.
+ *
+ * Returns null for scalar types such as `std_logic` or `boolean`.
+ */
+function parseVhdlBitRange(typeText: string): BitRange | null {
+    // Numeric descending: (7downto0)
+    const numDownto = typeText.match(/\((\d+)downto(\d+)\)/i);
+    if (numDownto) {
+        return new BitRange(parseInt(numDownto[1], 10), parseInt(numDownto[2], 10));
+    }
+    // Numeric ascending: (0to7) — store as [MSB:LSB] = [7:0]
+    const numTo = typeText.match(/\((\d+)to(\d+)\)/i);
+    if (numTo) {
+        return new BitRange(parseInt(numTo[2], 10), parseInt(numTo[1], 10));
+    }
+    // Expression-based descending: (WIDTH-1downto0)
+    const exprDownto = typeText.match(/\((.+?)downto(.+?)\)/i);
+    if (exprDownto) {
+        const br = new BitRange(0, 0);
+        br.msb = null;
+        br.lsb = null;
+        br.exprMsb = exprDownto[1];
+        br.exprLsb = exprDownto[2];
+        return br;
+    }
+    // Expression-based ascending: (0to WIDTH-1)
+    const exprTo = typeText.match(/\((.+?)to(.+?)\)/i);
+    if (exprTo) {
+        const br = new BitRange(0, 0);
+        br.msb = null;
+        br.lsb = null;
+        br.exprMsb = exprTo[2];
+        br.exprLsb = exprTo[1];
+        return br;
+    }
+    return null;
 }
 
 // ── VhdlSymbolVisitor ─────────────────────────────────────────────────────────
@@ -167,8 +208,9 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         const character = ctx.start.column;
 
         for (const name of names) {
-            this._currentModule.addPort({ name, direction, line, character, bitRange: null });
             const typeText = ctx.subtype_indication ? ctx.subtype_indication().getText() : '';
+            const bitRange = parseVhdlBitRange(typeText);
+            this._currentModule.addPort({ name, direction, line, character, bitRange });
             const desc = `${direction.padEnd(6)}  ${name} : ${typeText}`;
             this._currentModule.addDefinition(
                 new Definition(name, line, character, 'port', desc)
@@ -196,7 +238,8 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         // Treat those as input ports instead of generics.
         if (this._inPortClause) {
             for (const name of names) {
-                this._currentModule.addPort({ name, direction: 'input', line, character, bitRange: null });
+                const bitRange = parseVhdlBitRange(typeText);
+                this._currentModule.addPort({ name, direction: 'input', line, character, bitRange });
                 const desc = `input   ${name} : ${typeText}`;
                 this._currentModule.addDefinition(
                     new Definition(name, line, character, 'port', desc)
