@@ -792,19 +792,24 @@ export function activate(context: vscode.ExtensionContext) {
                     const lineText = document.lineAt(position.line).text;
                     const charBefore = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
                     if (charBefore === '.') {
-                        // This looks like a named port connection: .portName(...)
-                        // Look up all known modules for a port with this name
-                        for (const mod of moduleDatabase.getAllModules()) {
-                            const port = mod.getPort(word);
-                            if (port) {
-                                const dirStr = port.direction || '';
-                                let hoverContent = `**${port.name}**\n\n`;
-                                const range = port.bitRange ? port.bitRange.toExprString() : '';
-                                hoverContent += `${dirStr}${range}\n`;
-                                hoverContent += `module ${mod.name}`;
-                                return new vscode.Hover(hoverContent);
+                        // Named port connection: .portName(...)
+                        const docUri = document.uri.toString();
+                        const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
+                        if (currentModule) {
+                            const inst = [...currentModule.instanceList]
+                                .reverse()
+                                .find(i => i.moduleNameLine <= position.line);
+                            if (inst) {
+                                const targetMod = moduleDatabase.getModule(inst.moduleName);
+                                if (targetMod) {
+                                    const def = targetMod.definitionMap.get(word);
+                                    if (def) {
+                                        return new vscode.Hover(new vscode.MarkdownString(`\`\`\`verilog\n${def.description}\n\`\`\``));
+                                    }
+                                }
                             }
                         }
+                        return null;
                     }
 
                     // Check for signal/parameter definitions in the current module
@@ -864,11 +869,20 @@ export function activate(context: vscode.ExtensionContext) {
                 const lineText = document.lineAt(position.line).text;
                 const charBefore = wordRange.start.character > 0 ? lineText[wordRange.start.character - 1] : '';
                 if (charBefore === '.') {
-                    for (const mod of moduleDatabase.getAllModules()) {
-                        const port = mod.getPort(word);
-                        if (port) {
-                            const hoverContent = `**${port.name}**\n\nentity ${mod.name}`;
-                            return new vscode.Hover(hoverContent);
+                    const docUri = document.uri.toString();
+                    const currentModule = moduleDatabase.getModuleByUriPosition(docUri, position.line);
+                    if (currentModule) {
+                        const inst = [...currentModule.instanceList]
+                            .reverse()
+                            .find(i => i.line <= position.line);
+                        if (inst) {
+                            const targetMod = moduleDatabase.getModule(inst.moduleName);
+                            if (targetMod) {
+                                const def = targetMod.definitionMap.get(word);
+                                if (def) {
+                                    return new vscode.Hover(new vscode.MarkdownString(`\`\`\`vhdl\n${def.description}\n\`\`\``));
+                                }
+                            }
                         }
                     }
                 }
