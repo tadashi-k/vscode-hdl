@@ -2,7 +2,7 @@
   "name": "hdl-support",
   "displayName": "HDL Language Support",
   "description": "",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "tadashi",
   "repository": {
     "type": "git",
