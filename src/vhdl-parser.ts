@@ -169,7 +169,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         for (const name of names) {
             this._currentModule.addPort({ name, direction, line, character, bitRange: null });
             const typeText = ctx.subtype_indication ? ctx.subtype_indication().getText() : '';
-            const desc = `${direction.padEnd(6)}  ${typeText}`;
+            const desc = `${direction.padEnd(6)}  ${name} : ${typeText}`;
             this._currentModule.addDefinition(
                 new Definition(name, line, character, 'port', desc)
             );
@@ -197,7 +197,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         if (this._inPortClause) {
             for (const name of names) {
                 this._currentModule.addPort({ name, direction: 'input', line, character, bitRange: null });
-                const desc = `input   ${typeText}`;
+                const desc = `input   ${name} : ${typeText}`;
                 this._currentModule.addDefinition(
                     new Definition(name, line, character, 'port', desc)
                 );
