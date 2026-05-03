@@ -135,6 +135,8 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
     _inPortClause: boolean = false;
     _instanceList: Instance[] = [];
     _instPortConnections: Map<string, Set<string>> = new Map();
+    // Maps instanceName → { named: formalPortName→actualSignal, positional: [actualSignal, ...] }
+    _instPortActuals: Map<string, { named: Map<string, string>; positional: string[] }> = new Map();
 
     // All entity names referenced in instantiations
     allModuleRefs: Set<string> = new Set();
@@ -145,6 +147,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         signalRefs: Set<string>;
         assignedNames: Map<string, { line: number; character: number }>;
         instPortConnections: Map<string, Set<string>>;
+        instPortActuals: Map<string, { named: Map<string, string>; positional: string[] }>;
         instanceList: Instance[];
     }> = [];
 
@@ -298,6 +301,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         this._assignedNames = new Map();
         this._instanceList = [];
         this._instPortConnections = new Map();
+        this._instPortActuals = new Map();
 
         this.visitChildren(ctx);
 
@@ -310,6 +314,7 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
             signalRefs: new Set(this._signalRefs),
             assignedNames: new Map(this._assignedNames),
             instPortConnections: new Map(this._instPortConnections),
+            instPortActuals: new Map(this._instPortActuals),
             instanceList: [...this._instanceList],
         });
 
@@ -494,19 +499,30 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
             this._currentModule.instanceList.push(inst);
             this._instanceList.push(inst);
 
-            // Track connected ports for VHDL-W4
+            // Track connected ports for VHDL-W4, and actual signal names for W3
             const portMapCtx = ctx.port_map_aspect ? ctx.port_map_aspect() : null;
             if (portMapCtx) {
                 const connectedPorts = new Set<string>();
+                const named = new Map<string, string>();
+                const positional: string[] = [];
                 const assocList = portMapCtx.association_list
                     ? portMapCtx.association_list().association_element()
                     : [];
                 for (const assoc of assocList) {
+                    // Extract the actual signal name (strip index expressions and whitespace)
+                    const actualText = assoc.actual_part
+                        ? assoc.actual_part().getText().toLowerCase().replace(/[(\s].*/, '')
+                        : '';
                     if (assoc.formal_part) {
-                        connectedPorts.add(assoc.formal_part().getText().toLowerCase());
+                        const portName = assoc.formal_part().getText().toLowerCase();
+                        connectedPorts.add(portName);
+                        if (actualText) { named.set(portName, actualText); }
+                    } else {
+                        positional.push(actualText);
                     }
                 }
                 this._instPortConnections.set(instanceName, connectedPorts);
+                this._instPortActuals.set(instanceName, { named, positional });
             }
         }
         return null;
@@ -518,7 +534,28 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
         this._moduleDatabase = moduleDatabase;
 
         for (const pending of this._pendingWarningData) {
-            const { module, signalList, signalRefs, assignedNames, instPortConnections } = pending;
+            const { module, signalList, signalRefs, assignedNames, instPortConnections, instPortActuals } = pending;
+
+            // Build the set of signals that are driven by output ports of component instances.
+            // A signal appears in an output-port connection cannot produce a W3 warning.
+            const outputDrivenSignals = new Set<string>();
+            for (const [instanceName, { named, positional }] of instPortActuals) {
+                const inst = module.instanceList.find(i => i.instanceName === instanceName);
+                if (!inst) continue;
+                const entityMod = moduleDatabase.getModule(inst.moduleName);
+                if (!entityMod) continue;
+                entityMod.ports.forEach((port: any, portIndex: number) => {
+                    if (port.direction !== 'output' && port.direction !== 'inout') return;
+                    const portNameLow = port.name.toLowerCase();
+                    // Named connection
+                    const namedActual = named.get(portNameLow);
+                    if (namedActual) { outputDrivenSignals.add(namedActual); return; }
+                    // Positional connection
+                    if (portIndex < positional.length && positional[portIndex]) {
+                        outputDrivenSignals.add(positional[portIndex]);
+                    }
+                });
+            }
 
             for (const sig of signalList) {
                 const nameLow = sig.name.toLowerCase();
@@ -535,8 +572,9 @@ class VhdlSymbolVisitor extends Vhdl2008Visitor {
                     });
                 }
 
-                // VHDL-W3: never assigned (only when not already flagged by W1)
-                if (!assignedNames.has(nameLow) && !neverRead) {
+                // VHDL-W3: never assigned (only when not already flagged by W1 or driven by
+                // an output port of a component instantiation)
+                if (!assignedNames.has(nameLow) && !neverRead && !outputDrivenSignals.has(nameLow)) {
                     this.warnings.push({
                         line: sig.line,
                         character: sig.character,
