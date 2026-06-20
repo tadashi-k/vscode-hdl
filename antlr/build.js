@@ -10,6 +10,21 @@ const fs = require('fs');
 
 const antlrDir = __dirname;
 const outputDir = path.join(antlrDir, 'generated');
+const whichShimDir = antlrDir;
+const antlr4ToolPath = require.resolve('antlr4-tool/dist/app.js');
+
+function getBuildEnv() {
+    const env = { ...process.env };
+    if (process.platform === 'win32') {
+        const currentPath = env.PATH || env.Path || '';
+        const prependedPath = `${whichShimDir}${path.delimiter}${currentPath}`;
+        env.PATH = prependedPath;
+        env.Path = prependedPath;
+        process.env.PATH = prependedPath;
+        process.env.Path = prependedPath;
+    }
+    return env;
+}
 
 if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
@@ -26,8 +41,8 @@ const grammars = [
 function buildGrammar(grammarFiles, callback) {
     console.log(`\nBuilding: ${grammarFiles.join(', ')}`);
     const fileArgs = grammarFiles.map(f => `"${path.join(antlrDir, f)}"`).join(' ');
-    const command = `npx antlr4-tool -l typescript -o "${outputDir}" ${fileArgs}`;
-    exec(command, { cwd: antlrDir }, (error, stdout, stderr) => {
+    const command = `"${process.execPath}" "${antlr4ToolPath}" -l typescript -o "${outputDir}" ${fileArgs}`;
+    exec(command, { cwd: antlrDir, env: getBuildEnv() }, (error, stdout, stderr) => {
         if (error) {
             console.error(`Error building ${grammarFiles.join(', ')}:`, error.message);
             process.exit(1);
@@ -41,7 +56,7 @@ function buildGrammar(grammarFiles, callback) {
 
 function fixImports(callback) {
     const fixImportsScript = path.join(antlrDir, 'fix-imports.js');
-    exec(`node "${fixImportsScript}"`, (error, stdout, stderr) => {
+    exec(`node "${fixImportsScript}"`, { env: getBuildEnv() }, (error, stdout, stderr) => {
         if (error) { console.error('Error fixing imports:', error.message); process.exit(1); }
         if (stdout) console.log(stdout);
         if (stderr) console.error(stderr);
