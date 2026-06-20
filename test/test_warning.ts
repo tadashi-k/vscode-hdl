@@ -614,6 +614,29 @@ endmodule
         "no width-mismatch warning for assign dst[2:1]=src[2:1] (both 2-bit)");
 }
 
+// ── counter.v: current warning set for integer cnt declaration ─────────────
+
+console.log('\ncounter.v: current warning set for integer cnt declaration');
+{
+    const warnings = getFileWarnings('counter.v');
+    assert(warnings.length === 2, 'counter.v produces two current warnings for cnt');
+
+    const cntWarnings = warnings.filter((w: any) => w.message.includes("'cnt'"));
+    assert(cntWarnings.length === 2, 'both warnings mention the cnt symbol');
+
+    const usedWarning = cntWarnings.find((w: any) => w.message.includes('declared but never used'));
+    const assignedWarning = cntWarnings.find((w: any) => w.message.includes('never assigned'));
+
+    assert(usedWarning !== undefined, "one warning is 'declared but never used'");
+    assert(assignedWarning !== undefined, "one warning is 'never assigned'");
+
+    // VS Code diagnostics use 0-based line numbers, so line 17 in the file is reported as 16.
+    assert(usedWarning.line === 16 && usedWarning.character === 8,
+        'the used warning points at cnt on line 17 of counter.v');
+    assert(assignedWarning.line === 16 && assignedWarning.character === 8,
+        'the assigned warning points at cnt on line 17 of counter.v');
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
