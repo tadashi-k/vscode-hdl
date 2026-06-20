@@ -229,7 +229,7 @@ ESCAPED_IDENTIFIER   : '\\' ASCII_PRINTABLE_NO_SPACE* [ \t\r\n];
 EXPONENTIAL_NUMBER   : UNSIGNED_NUMBER ( '.' UNSIGNED_NUMBER)? [eE] [+\-]? UNSIGNED_NUMBER;
 FIXED_POINT_NUMBER   : UNSIGNED_NUMBER '.' UNSIGNED_NUMBER;
 HEX_BASE             : '\'' [sS]? [hH]        -> pushMode(HEX_NUMBER_MODE);
-LINE_COMMENT         : '//' ASCII_NO_NEWLINE* -> channel(COMMENTS);
+LINE_COMMENT         : '//' ~[\r\n]* -> channel(COMMENTS);
 OCTAL_BASE           : '\'' [sS]? [oO]        -> pushMode(OCTAL_NUMBER_MODE);
 SIMPLE_IDENTIFIER    : [a-zA-Z_] [a-zA-Z0-9_$]*;
 STRING               : '"' ( ASCII_NO_NEWLINE_QUOTE_BACKSLASH | ESC_SPECIAL_CHAR)* '"';
