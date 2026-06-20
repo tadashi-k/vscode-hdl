@@ -185,6 +185,24 @@ console.log('\nTest: parseSymbols on test_bitwidth.v (arrayed wire bit-width)');
         "no bit-width warning for 'data_out <= array[1]' (both 8 bits)");
 }
 
+// ── Test 7: test_paramter.v – module with parameters and expressions ─────
+
+console.log('\nTest: parseSymbols on test_paramter.v (module with parameters and expressions)');
+{
+     const db = new ModuleDatabase();
+     parser.parseSymbols(makeDoc('test_paramter.v'), db, null);
+     const diags = parser.getDiagnostics(db);
+     const errors = diags.filter((d: any) => d.severity === SEVERITY_ERROR);
+     assert(errors.length === 0, 'no syntax errors in test_paramter.v');
+     
+     if (errors.length > 0) {
+         console.error('  Errors found:');
+         for (const err of errors) {
+             console.error(`    Line ${err.line}: ${err.message}`);
+         }
+     }
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

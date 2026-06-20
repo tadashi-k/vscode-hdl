@@ -2,7 +2,8 @@
 module test_parameter #(
     parameter DEPTH = 32,
     parameter WIDTH = 8,
-    parameter ADR_WIDTH = (DEPTH == 16) ? 4 : (DEPTH == 32) ? 5 : (DEPTH == 64) ? 6 : 0
+    parameter ADR_WIDTH = (DEPTH == 16) ? 4 : (DEPTH == 32) ? 5 : (DEPTH == 64) ? 6 : 0,
+    parameter ADDITIONAL_BIT = "TRUE"
 )
 (
     input clk,
@@ -14,7 +15,8 @@ module test_parameter #(
     output reg [WIDTH-1:0] data_out
 );
 
-reg[WIDTH-1:0] mem[0:DEPTH-1];
+localparam BIT = (ADDITIONAL_BIT == "TRUE") ? 1 : 0;
+reg[WIDTH+BIT-1:0] mem[0:DEPTH-1];
 
 always @(posedge clk) begin
     if (reset) begin

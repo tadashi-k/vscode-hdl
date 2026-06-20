@@ -979,12 +979,13 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
 
     // Evaluate a simple expression string using a parameter map.
     // Used as a fallback text-based evaluator for ternary and other expressions.
-    // @param exprText  Expression text (e.g. "WIDTH-1", "(1<<8)-1")
-    // @param paramMap  Map of parameter name -> EvalValue
+    // @param exprText  Expression text (e.g. "WIDTH-1", "(1<<8)-1", "(ADDITIONAL_BIT == \"TRUE\") ? 1 : 0")
+    // @param paramMap  Map of parameter name -> EvalValue (supports both numeric and string values)
     _evalSimpleExpr(exprText: string, paramMap: any): number | null {
         if (!exprText) return null;
         let text = exprText.trim();
-        // Replace parameter names with their numeric values
+        
+        // Replace parameter names with their values (both numeric and string)
         if (paramMap) {
             // Iterate params from longest name to shortest to avoid partial replacement
             const names: string[] = [];
@@ -994,16 +995,29 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                 names.push(...Object.keys(paramMap));
             }
             names.sort((a, b) => b.length - a.length);
+            
             for (const name of names) {
                 const evalValue = paramMap instanceof Map ? paramMap.get(name) : paramMap[name];
                 const val = evalValue && typeof evalValue === 'object' ? evalValue.value : evalValue;
-                if (val !== null && val !== undefined && typeof val === 'number') {
-                    text = text.replace(new RegExp(`\\b${name}\\b`, 'g'), String(val));
+                
+                if (val !== null && val !== undefined) {
+                    // Handle numeric values
+                    if (typeof val === 'number') {
+                        text = text.replace(new RegExp(`\\b${name}\\b`, 'g'), String(val));
+                    }
+                    // Handle string values: replace with quoted string
+                    else if (typeof val === 'string') {
+                        // Escape backslashes and quotes in the string value
+                        const escapedVal = val.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                        text = text.replace(new RegExp(`\\b${name}\\b`, 'g'), `"${escapedVal}"`);
+                    }
                 }
             }
         }
+        
         // Remove any remaining identifiers (unresolved params) – bail out
         if (/[a-zA-Z_]/.test(text)) return null;
+        
         try {
             // eslint-disable-next-line no-new-func
             const result = Function('"use strict"; return (' + text + ')')();
