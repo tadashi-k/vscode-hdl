@@ -1,6 +1,6 @@
 // Counter module definition   
 module counter #(
-    parameter WIDTH = 8
+    parameter WIDTH = 8, // 最大16
 )
 (
     input clk,
