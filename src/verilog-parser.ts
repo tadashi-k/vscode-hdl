@@ -65,12 +65,22 @@ class VerilogErrorListener extends antlr4.error.ErrorListener {
 /**
  * Helper class to represent evaluated expression values.
  * 
- * value: the numeric value of the expression, or null if it cannot be evaluated
+ * value: the numeric (or string) value of the expression, or null if it cannot be evaluated
  * width: the bit-width of the expression, or null if no base prefix
  */
 class EvalValue {
-    value: number | null;
+    value: number | string | null;
     width: number | null;
+
+    constructor(value: number | string | null, width: number | null) {
+        this.value = value;
+        this.width = width;
+    }
+
+    /** Returns true (and narrows value to number) when this EvalValue holds a numeric result. */
+    valid(): this is EvalValue & { value: number } {
+        return typeof this.value === 'number';
+    }
 }
 
 class Signal {
@@ -220,7 +230,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
         const hi = this._evaluateConstantExpression(msbCe, this._params);
         const lo = this._evaluateConstantExpression(lsbCe, this._params);
 
-        const bitRange = new BitRange(hi ? hi.value : null, lo ? lo.value : null);
+        const bitRange = new BitRange(hi && hi.valid() ? hi.value : null, lo && lo.valid() ? lo.value : null);
         if (!bitRange.msb || !bitRange.lsb) {
             bitRange.exprMsb = msbCe.getText();
             bitRange.exprLsb = lsbCe.getText();
@@ -914,10 +924,10 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
     _parseVerilogLiteral(text: any): EvalValue | null {
         if (!text) return null;
         // Plain integer (no base prefix) – unsized, width = null
-        if (/^\d+$/.test(text)) return { value: parseInt(text, 10), width: null };
+        if (/^\d+$/.test(text)) return new EvalValue(parseInt(text, 10), null);
         // Real number – unsized
         if (/^\d+\.\d+([eE][+-]?\d+)?$/.test(text) || /^\d+[eE][+-]?\d+$/.test(text)) {
-            return { value: parseFloat(text), width: null };
+            return new EvalValue(parseFloat(text), null);
         }
         // Verilog number with optional size and base: [size]'[s]<base><digits>
         const match = text.match(/^(\d*)'[sS]?([dDbBhHoO])([0-9a-fA-F_xXzZ?]+)$/);
@@ -926,7 +936,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
         const width = sizeStr ? parseInt(sizeStr, 10) : null;
         const clean = digits.replace(/[_]/g, '');
         // Unknowns / high-Z: width is still known but value is not
-        if (/[xXzZ?]/.test(clean)) return { value: null, width };
+        if (/[xXzZ?]/.test(clean)) return new EvalValue(null, width);
         let value: number | null;
         switch (base.toLowerCase()) {
             case 'd': value = parseInt(clean, 10); break;
@@ -935,7 +945,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
             case 'o': value = parseInt(clean, 8); break;
             default:  return null;
         }
-        return { value, width };
+        return new EvalValue(value, width);
     }
 
     // Helper: evaluate a constant_expression context
@@ -957,9 +967,16 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
         // Try text-based parsing first (handles ternary and arithmetic correctly)
         const simpleVal = this._evalSimpleExpr(exprText, paramMap);
         if (simpleVal !== null) {
-            return { value: simpleVal, width: null };
+            return new EvalValue(simpleVal, null);
         }
-        
+
+        // Check for a bare string literal: "..." – store as a string-valued parameter
+        // so that expressions like `(ADDITIONAL_BIT == "TRUE") ? 1 : 0` can be evaluated.
+        const strMatch = exprText.match(/^"((?:[^"\\]|\\.)*)"$/);
+        if (strMatch) {
+            return new EvalValue(strMatch[1], null);
+        }
+
         // Fall back to ANTLR tree-based evaluation (needs an expression context)
         if (exprCtxToUse) {
             return this._evaluateExpression(exprCtxToUse, paramMap);
@@ -1015,8 +1032,12 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
             }
         }
         
-        // Remove any remaining identifiers (unresolved params) – bail out
-        if (/[a-zA-Z_]/.test(text)) return null;
+        // Remove any remaining identifiers (unresolved params) – bail out.
+        // Strip string literals first so that letters inside quoted strings
+        // (e.g. "TRUE" in `("TRUE" == "TRUE") ? 1 : 0`) are not mistaken for
+        // unresolved parameter identifiers.
+        const textWithoutStrings = text.replace(/"([^"\\]|\\.)*"/g, '""');
+        if (/[a-zA-Z_]/.test(textWithoutStrings)) return null;
         
         try {
             // eslint-disable-next-line no-new-func
@@ -1044,7 +1065,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
         if (Array.isArray(params)) {
             for (const p of params) {
                 if (p.name && p.value !== null && p.value !== undefined) {
-                    paramMap.set(p.name, { value: p.value, width: null });
+                    paramMap.set(p.name, new EvalValue(p.value, null));
                 }
             }
         }
@@ -1061,7 +1082,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                 if (p.exprText && p.name && !(p.name in overrides)) {
                     const reeval = this._evalSimpleExpr(p.exprText, paramMap);
                     if (reeval !== null) {
-                        paramMap.set(p.name, { value: reeval, width: null });
+                        paramMap.set(p.name, new EvalValue(reeval, null));
                     }
                 }
             }
@@ -1129,11 +1150,11 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                     const rangeText = rangeExprCtx.getText();
                     if (rangeText.includes('+:') || rangeText.includes('-:')) {
                         const widthVal = this._evaluateExpression(rangeArr[1], moduleParams, moduleSignals);
-                        return widthVal && widthVal.value !== null ? widthVal.value : null;
+                        return widthVal && widthVal.valid() ? widthVal.value : null;
                     }
                     const hi = this._evaluateExpression(rangeArr[0], moduleParams, moduleSignals);
                     const lo = this._evaluateExpression(rangeArr[1], moduleParams, moduleSignals);
-                    if (hi && hi.value !== null && lo && lo.value !== null) {
+                    if (hi && hi.valid() && lo && lo.valid()) {
                         return Math.abs(hi.value - lo.value) + 1;
                     }
                     return null;
@@ -1146,7 +1167,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                 if (hiLo) {
                     const hi = this._evaluateExpression(hiLo[0], moduleParams, moduleSignals);
                     const lo = this._evaluateExpression(hiLo[1], moduleParams, moduleSignals);
-                    if (hi && hi.value !== null && lo && lo.value !== null) {
+                    if (hi && hi.valid() && lo && lo.valid()) {
                         return Math.abs(hi.value - lo.value) + 1;
                     }
                     return null;
@@ -1182,7 +1203,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                 if (msbCtx && lsbCtx) {
                     const hi = this._evaluateConstantExpression(msbCtx, moduleParams);
                     const lo = this._evaluateConstantExpression(lsbCtx, moduleParams);
-                    if (hi && hi.value !== null && lo && lo.value !== null) {
+                    if (hi && hi.valid() && lo && lo.valid()) {
                         return Math.abs(hi.value - lo.value) + 1;
                     }
                     return null;
@@ -1207,12 +1228,12 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                 if (rangeText.includes('+:') || rangeText.includes('-:')) {
                     // indexed part select: [base +: width] or [base -: width]
                     const widthVal = this._evaluateExpression(rangeArr[1], moduleParams, moduleSignals);
-                    return widthVal && widthVal.value !== null ? widthVal.value : null;
+                    return widthVal && widthVal.valid() ? widthVal.value : null;
                 }
                 // simple range: [high : low]
                 const hi = this._evaluateExpression(rangeArr[0], moduleParams, moduleSignals);
                 const lo = this._evaluateExpression(rangeArr[1], moduleParams, moduleSignals);
-                if (hi && hi.value !== null && lo && lo.value !== null) {
+                if (hi && hi.valid() && lo && lo.valid()) {
                     return Math.abs(hi.value - lo.value) + 1;
                 }
             }
@@ -1224,7 +1245,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
             if (hiLo) {
                 const hi = this._evaluateExpression(hiLo[0], moduleParams, moduleSignals);
                 const lo = this._evaluateExpression(hiLo[1], moduleParams, moduleSignals);
-                if (hi && hi.value !== null && lo && lo.value !== null) {
+                if (hi && hi.valid() && lo && lo.valid()) {
                     return Math.abs(hi.value - lo.value) + 1;
                 }
             }
@@ -1254,13 +1275,13 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
             const fullText = lvalCtx.getText();
             if (fullText.includes('+:') || fullText.includes('-:')) {
                 const widthVal = this._evaluateExpression(exprArr[exprArr.length - 1], moduleParams, moduleSignals);
-                return widthVal && widthVal.value !== null ? widthVal.value : null;
+                return widthVal && widthVal.valid() ? widthVal.value : null;
             }
             if (exprArr.length === 3) {
                 // identifier[expr][high:low]
                 const hi = this._evaluateExpression(exprArr[1], moduleParams, moduleSignals);
                 const lo = this._evaluateExpression(exprArr[2], moduleParams, moduleSignals);
-                if (hi && hi.value !== null && lo && lo.value !== null) {
+                if (hi && hi.valid() && lo && lo.valid()) {
                     return Math.abs(hi.value - lo.value) + 1;
                 }
             }
@@ -1341,7 +1362,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
         const widthExpr = this._unwrapSingleExpr(widthCtx);
         if (!widthExpr) return null;
         const widthVal = this._evaluateExpression(widthExpr, paramMap, moduleSignals);
-        return widthVal && widthVal.value !== null ? widthVal.value : null;
+        return widthVal && widthVal.valid() ? widthVal.value : null;
     }
 
     // Unwrap a single-expression wrapper rule (msb_constant_expression, lsb_constant_expression,
@@ -1447,25 +1468,25 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                                 const rangeText = rangeExprCtx.getText();
                                 if (rangeText.includes('+:') || rangeText.includes('-:')) {
                                     const widthVal = this._evaluateExpression(rangeArr[1], paramMap, moduleSignals);
-                                    return { value: null, width: widthVal && widthVal.value !== null ? widthVal.value : null };
+                                    return new EvalValue(null, widthVal && widthVal.valid() ? widthVal.value : null);
                                 }
                                 const hi = this._evaluateExpression(rangeArr[0], paramMap, moduleSignals);
                                 const lo = this._evaluateExpression(rangeArr[1], paramMap, moduleSignals);
-                                if (hi && hi.value !== null && lo && lo.value !== null) {
-                                    return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                                if (hi && hi.valid() && lo && lo.valid()) {
+                                    return new EvalValue(null, Math.abs(hi.value - lo.value) + 1);
                                 }
                                 return null;
                             }
                             // New grammar: base_expression '+:'/'-:' width_constant_expression
                             const indexedWidthPrim = this._evalIndexedPartSelectWidth(rangeExprCtx, paramMap, moduleSignals);
-                            if (indexedWidthPrim !== null) return { value: null, width: indexedWidthPrim };
+                            if (indexedWidthPrim !== null) return new EvalValue(null, indexedWidthPrim);
                             // New grammar: msb_constant_expression ':' lsb_constant_expression (e.g. signal[2:0])
                             const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
                             if (hiLo) {
                                 const hi = this._evaluateExpression(hiLo[0], paramMap, moduleSignals);
                                 const lo = this._evaluateExpression(hiLo[1], paramMap, moduleSignals);
-                                if (hi && hi.value !== null && lo && lo.value !== null) {
-                                    return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                                if (hi && hi.valid() && lo && lo.valid()) {
+                                    return new EvalValue(null, Math.abs(hi.value - lo.value) + 1);
                                 }
                                 return null;
                             }
@@ -1473,13 +1494,13 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                             // unless bit_select is also present (memory[addr][bit]) or memory access
                             if (!bitSelectCtx && sig.isMemory) {
                                 // memory[addr] - element width
-                                return { value: null, width: this._getSignalWidth(sig.bitRange) };
+                                return new EvalValue(null, this._getSignalWidth(sig.bitRange));
                             }
-                            return { value: null, width: 1 };
+                            return new EvalValue(null, 1);
                         }
                         if (bitSelectCtx) {
                             // Only bit_select without final range_expression (unusual but safe)
-                            return { value: null, width: 1 };
+                            return new EvalValue(null, 1);
                         }
                     }
 
@@ -1492,24 +1513,24 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                             const rangeText = rangeExprCtx.getText();
                             if (rangeText.includes('+:') || rangeText.includes('-:')) {
                                 const widthVal = this._evaluateExpression(rangeArr[1], paramMap, moduleSignals);
-                                return { value: null, width: widthVal && widthVal.value !== null ? widthVal.value : null };
+                                return new EvalValue(null, widthVal && widthVal.valid() ? widthVal.value : null);
                             }
                             const hi = this._evaluateExpression(rangeArr[0], paramMap, moduleSignals);
                             const lo = this._evaluateExpression(rangeArr[1], paramMap, moduleSignals);
-                            if (hi && hi.value !== null && lo && lo.value !== null) {
-                                return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                            if (hi && hi.valid() && lo && lo.valid()) {
+                                return new EvalValue(null, Math.abs(hi.value - lo.value) + 1);
                             }
                         }
                         // New grammar: base_expression '+:'/'-:' width_constant_expression
                         const indexedWidthLeg = this._evalIndexedPartSelectWidth(rangeExprCtx, paramMap, moduleSignals);
-                        if (indexedWidthLeg !== null) return { value: null, width: indexedWidthLeg };
+                        if (indexedWidthLeg !== null) return new EvalValue(null, indexedWidthLeg);
                         // New grammar: msb_constant_expression ':' lsb_constant_expression
                         const hiLo = this._extractPartSelectHiLo(rangeExprCtx);
                         if (hiLo) {
                             const hi = this._evaluateExpression(hiLo[0], paramMap, moduleSignals);
                             const lo = this._evaluateExpression(hiLo[1], paramMap, moduleSignals);
-                            if (hi && hi.value !== null && lo && lo.value !== null) {
-                                return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                            if (hi && hi.valid() && lo && lo.valid()) {
+                                return new EvalValue(null, Math.abs(hi.value - lo.value) + 1);
                             }
                         }
                         return null;
@@ -1521,21 +1542,21 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                     if (exprArr.length === 1) {
                         if (sig.isMemory) {
                             const w = this._getSignalWidth(sig.bitRange);
-                            return { value: null, width: w};
+                            return new EvalValue(null, w);
                         }
-                        return { value: null, width: 1 };
+                        return new EvalValue(null, 1);
                     }
                     if (exprArr.length >= 2) {
                         const fullText = ctx.getText();
                         if (fullText.includes('+:') || fullText.includes('-:')) {
                             const widthVal = this._evaluateExpression(exprArr[exprArr.length - 1], paramMap, moduleSignals);
-                            return { value: null, width: widthVal && widthVal.value !== null ? widthVal.value : null };
+                            return new EvalValue(null, widthVal && widthVal.valid() ? widthVal.value : null);
                         }
                         if (exprArr.length === 3) {
                             const hi = this._evaluateExpression(exprArr[1], paramMap, moduleSignals);
                             const lo = this._evaluateExpression(exprArr[2], paramMap, moduleSignals);
-                            if (hi && hi.value !== null && lo && lo.value !== null) {
-                                return { value: null, width: Math.abs(hi.value - lo.value) + 1 };
+                            if (hi && hi.valid() && lo && lo.valid()) {
+                                return new EvalValue(null, Math.abs(hi.value - lo.value) + 1);
                             }
                         }
                         return null;
@@ -1543,7 +1564,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
 
                     // Plain identifier: use declared signal width (default 1 for scalars)
                     const w = this._getSignalWidth(sig.bitRange);
-                    return { value: null, width: w};
+                    return new EvalValue(null, w);
                 }
             }
             return null;
@@ -1560,7 +1581,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                 if (!ev || ev.width === null) return null;
                 totalWidth += ev.width;
             }
-            return { value: null, width: totalWidth > 0 ? totalWidth : null };
+            return new EvalValue(null, totalWidth > 0 ? totalWidth : null);
         }
 
         // New grammar: parenthesized expression uses '(' mintypmax_expression ')'
@@ -1607,15 +1628,15 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
     _applyUnary(op: any, val: EvalValue): EvalValue | null {
         const width = this._applyUnaryWidth(op, val);
         switch (op) {
-            case '+':  return { value: val.value !== null ? +val.value : null, width };
-            case '-':  return { value: val.value !== null ? -val.value : null, width };
-            case '!':  return { value: val.value !== null ? (val.value === 0 ? 1 : 0) : null, width };
-            case '~':  return { value: val.value !== null ? ~val.value : null, width };
+            case '+':  return new EvalValue(val.value !== null ? +val.value : null, width);
+            case '-':  return new EvalValue(val.value !== null ? -val.value : null, width);
+            case '!':  return new EvalValue(val.value !== null ? (val.value === 0 ? 1 : 0) : null, width);
+            case '~':  return new EvalValue(val.value !== null ? ~val.value : null, width);
             // Reduction operators (&, |, ^) require bit-by-bit evaluation of multi-bit values –
             // value is skipped for constant folding, but width (always 1) is still tracked.
-            case '&':  return { value: null, width };
-            case '|':  return { value: null, width };
-            case '^':  return { value: null, width };
+            case '&':  return new EvalValue(null, width);
+            case '|':  return new EvalValue(null, width);
+            case '^':  return new EvalValue(null, width);
             default:   return null;
         }
     }
@@ -1632,7 +1653,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
 
     _applyBinary(op: any, left: EvalValue, right: EvalValue): EvalValue | null {
         let value: number | null = null;
-        if (left.value !== null && right.value !== null) {
+        if (left.valid() && right.valid()) {
             switch (op) {
                 case '+':   value = left.value + right.value; break;
                 case '-':   value = left.value - right.value; break;
@@ -1670,7 +1691,7 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
                 default: return null;
             }
         }
-        return { value, width: this._applyBinaryWidth(op, left, right) };
+        return new EvalValue(value, this._applyBinaryWidth(op, left, right));
     }
 
     _applyBinaryWidth(op: string, left: EvalValue, right: EvalValue) : number | null {
@@ -1698,9 +1719,9 @@ class VerilogSymbolVisitor extends VerilogParserVisitor {
             case '*': return left.width + right.width;
             case '/': return left.width; // Division can reduce bit-width but is complex to evaluate precisely
             case '%': return right.width; // because maximum value is right - 1
-            case '**': return left.width * right.value; // Exponentiation can greatly increase bit-width
+            case '**': return right.valid() ? left.width * right.value : null; // Exponentiation can greatly increase bit-width
             case '<<':
-            case '<<<': return left.width + right.value; // not precisely
+            case '<<<': return right.valid() ? left.width + right.value : null; // not precisely
             case '>>':
             case '>>>': return left.width; // not precisely
             case '&':

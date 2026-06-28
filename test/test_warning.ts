@@ -637,6 +637,35 @@ console.log('\ncounter.v: current warning set for integer cnt declaration');
         'the assigned warning points at cnt on line 17 of counter.v');
 }
 
+// ── test_parameter.v: BIT localparam string-ternary and memory element width ─
+
+console.log('\ntest_parameter.v: BIT localparam and memory element bit width');
+{
+    const warnings = getFileWarnings('test_parameter.v');
+
+    // BIT is a localparam defined by a string-comparison ternary; it must NOT be
+    // flagged as "used but not declared".
+    const warnBit = warnings.find((w: any) =>
+        w.message.includes("'BIT'") && w.message.includes('not declared'));
+    assert(warnBit === undefined,
+        "no 'not declared' warning for localparam 'BIT'");
+
+    // mem[addr] is the l-value: element width is WIDTH+BIT = 9.
+    // data_in is [WIDTH-1:0] = 8 bits → mismatch 9 vs 8.
+    const warnMem = warnings.find((w: any) =>
+        w.message.includes("'mem[addr]'") && w.message.includes('width 9'));
+    assert(warnMem !== undefined,
+        "width mismatch warning for 'mem[addr]' reports element width 9");
+
+    // data_out is [WIDTH-1:0] = 8 bits; mem[addr] expression has width 9 → mismatch.
+    const warnDataOut = warnings.find((w: any) =>
+        w.message.includes("'data_out'") &&
+        w.message.includes('width 8') &&
+        w.message.includes('width 9'));
+    assert(warnDataOut !== undefined,
+        "width mismatch warning for 'data_out' (width 8) assigned from mem[addr] (width 9)");
+}
+
 // ── Summary ────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

@@ -48,7 +48,7 @@ export class Parameter {
     character: number;
     bitRange: BitRange | null; // treated as [31:0] if null
     exprText: string;
-    value: number | null;
+    value: number | string | null;
     kind: 'parameter' | 'localparam';
 }
 
