@@ -2163,7 +2163,34 @@ class AntlrVerilogParser {
 
         // Preprocess (handle `include, `define, etc.)
         text = preprocessVerilog(text, basePath, fileReader);
+
+        // Pre-pass: when the file contains multiple modules, register all their
+        // headers first so that forward references (module A instantiates module B
+        // declared later in the same file) resolve correctly during the main parse.
+        // Skipped for single-module files (the common case) to avoid extra work.
+        const moduleCount = (text.match(/\bmodule\b/g) || []).length;
+        if (moduleDatabase && moduleCount > 1) {
+            this._parse(this._stripModuleBodies(text), uri, moduleDatabase);
+        }
+
+        // Main pass: full symbol and warning analysis.
         this._parse(text, uri, moduleDatabase);
+    }
+
+    /**
+     * Strip module bodies from Verilog text, keeping only module headers
+     * (port and parameter declarations). Applied per-module so that all
+     * modules in a multi-module file are preserved.
+     *
+     * Each module body begins at the first body-level wire/reg/integer/genvar
+     * declaration (one that appears at the start of a line, not inside a port
+     * list) and extends to the matching endmodule keyword.
+     */
+    private _stripModuleBodies(text: string): string {
+        return text.replace(
+            /(\n[ \t]*(wire|reg|integer|genvar)\b[\s\S]*?)(\bendmodule\b)/g,
+            '\nendmodule'
+        );
     }
 
     getDiagnostics(moduleDatabase: ModuleDatabase) : any[] {
