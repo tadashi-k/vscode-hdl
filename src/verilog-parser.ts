@@ -2152,6 +2152,73 @@ class AntlrVerilogParser {
         return [...syntaxErrors, ...this._lastVisitor.getWarnings()];
     }
 
+    /**
+     * Detect the syntactic context at the end of the given text (i.e. at the cursor position).
+     * @param text  Source text from the start of file up to (and including) the cursor position.
+     * @returns
+     *   'out_module'   – cursor is outside any module declaration
+     *   'in_module'    – cursor is inside a module body but not inside a procedural/expression block
+     *   'in_expression'– cursor is inside a begin/end block, assignment RHS, or expression
+     */
+    parseContext(text: string): 'out_module' | 'in_module' | 'in_expression' {
+        // Strip complete block comments /* ... */
+        let stripped = text.replace(/\/\*[\s\S]*?\*\//g, m => ' '.repeat(m.length));
+        // Strip an unclosed block comment (no closing */)
+        stripped = stripped.replace(/\/\*[\s\S]*$/, m => ' '.repeat(m.length));
+        // Strip line comments // ...
+        stripped = stripped.replace(/\/\/[^\n]*/g, m => ' '.repeat(m.length));
+
+        // Count 'module' vs 'endmodule' to determine whether cursor is inside a module.
+        // \bmodule\b does not match inside 'endmodule' because 'm' is preceded by 'd'.
+        const moduleCount = (stripped.match(/\bmodule\b/g) || []).length;
+        const endmoduleCount = (stripped.match(/\bendmodule\b/g) || []).length;
+
+        if (moduleCount === 0 || moduleCount <= endmoduleCount) {
+            return 'out_module';
+        }
+
+        // Get text from the start of the last open module.
+        let lastModulePos = 0;
+        const moduleRe = /\bmodule\b/g;
+        let m: RegExpExecArray | null;
+        while ((m = moduleRe.exec(stripped)) !== null) {
+            lastModulePos = m.index + m[0].length;
+        }
+        const moduleText = stripped.substring(lastModulePos);
+
+        // Detect unmatched always/initial begin/end blocks.
+        const alwaysRe = /\b(always|initial)\b/g;
+        let lastAlwaysPos = -1;
+        while ((m = alwaysRe.exec(moduleText)) !== null) {
+            lastAlwaysPos = m.index + m[0].length;
+        }
+
+        if (lastAlwaysPos >= 0) {
+            const afterAlways = moduleText.substring(lastAlwaysPos);
+            const beginCount = (afterAlways.match(/\bbegin\b/g) || []).length;
+            const endCount = (afterAlways.match(/\bend\b/g) || []).length;
+            if (beginCount > endCount) {
+                return 'in_expression';
+            }
+            // Single-statement always/initial without begin — statement ends at ';'
+            if (beginCount === 0 && endCount === 0 && !afterAlways.includes(';')) {
+                return 'in_expression';
+            }
+        }
+
+        // Detect an incomplete assign statement (no closing ';' yet).
+        const assignRe = /\bassign\b/g;
+        let lastAssignPos = -1;
+        while ((m = assignRe.exec(moduleText)) !== null) {
+            lastAssignPos = m.index + m[0].length;
+        }
+        if (lastAssignPos >= 0 && !moduleText.substring(lastAssignPos).includes(';')) {
+            return 'in_expression';
+        }
+
+        return 'in_module';
+    }
+
 }
 
 export = AntlrVerilogParser;

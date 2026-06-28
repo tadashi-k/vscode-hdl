@@ -9,7 +9,6 @@ import { regexScanEntities } from './vhdl-scanner';
 import { computeSemanticTokens, TOKEN_TYPES, TOKEN_MODIFIERS } from './semantic-tokens';
 import { Module, ModuleDatabase } from './database';
 import { buildInstantiationSnippet, buildVhdlInstantiationSnippet } from './instantiation-snippet';
-import { isInsideProceduralBlock } from './context-detector';
 import { formatVerilog } from './verilog-formatter';
 
 /**
@@ -412,13 +411,46 @@ class VerilogSemanticTokensProvider implements vscode.DocumentSemanticTokensProv
 }
 
 /**
+ * A code template offered as a completion snippet.
+ * Add entries to VERILOG_TEMPLATES to introduce new templates.
+ *
+ * Fields:
+ *   label       – the text shown in the completion list
+ *   detail      – the type/category string shown next to the label
+ *   documentation – optional markdown description shown in the detail pane
+ *   snippet     – VS Code snippet string; use $0 for the final cursor position
+ *                 and \t for one level of indentation (expanded by the editor)
+ */
+interface CompletionTemplate {
+    label: string;
+    detail: string;
+    documentation?: string;
+    snippet: string;
+}
+
+/** Verilog code templates shown in `in_module` context. */
+const VERILOG_TEMPLATES: CompletionTemplate[] = [
+    {
+        label: 'always',
+        detail: 'always block',
+        documentation: 'Clocked always block',
+        snippet: 'always @(posedge clk) begin\n\t$0\nend',
+    },
+    {
+        label: 'initial',
+        detail: 'initial block',
+        documentation: 'Initial block',
+        snippet: 'initial begin\n\t$0\nend',
+    },
+];
+
+/**
  * Completion Item Provider for Verilog.
  *
  * Context-aware behaviour:
- *  - Inside an `always` or `initial` block: suggests the wire, reg, integer,
- *    parameter, and localparam signals defined in the enclosing module.
- *  - Outside procedural blocks (module body): suggests module instantiation
- *    snippets for every module in the workspace database.
+ *  - out_module : no completions offered
+ *  - in_module  : module instantiation snippets + code templates (always, initial, …)
+ *  - in_expression: signals/parameters defined in the enclosing module
  */
 class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
     provideCompletionItems(
@@ -427,13 +459,33 @@ class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
         _token: vscode.CancellationToken,
         _context: vscode.CompletionContext
     ): vscode.CompletionItem[] {
-        const offset = document.offsetAt(position);
+        const text = document.getText().substring(0, document.offsetAt(position));
+        const ctx = document.languageId === 'vhdl'
+            ? vhdlParser.parseContext(text)
+            : verilogParser.parseContext(text);
 
-        if (isInsideProceduralBlock(document.getText(), offset)) {
+        if (ctx === 'out_module') {
+            return [];
+        }
+        if (ctx === 'in_expression') {
             return this._signalCompletions(document, position);
         }
+        return [...this._templateCompletions(VERILOG_TEMPLATES), ...this._instantiationCompletions(document)];
+    }
 
-        return this._instantiationCompletions(document);
+    /** Build completion items from a template list. */
+    private _templateCompletions(templates: CompletionTemplate[]): vscode.CompletionItem[] {
+        return templates.map(tpl => {
+            const item = new vscode.CompletionItem(tpl.label, vscode.CompletionItemKind.Snippet);
+            item.detail = tpl.detail;
+            if (tpl.documentation) {
+                item.documentation = new vscode.MarkdownString(tpl.documentation);
+            }
+            item.insertText = new vscode.SnippetString(tpl.snippet);
+            // Sort templates before module-instantiation items
+            item.sortText = `0_${tpl.label}`;
+            return item;
+        });
     }
 
     /** Completions for signals inside always/initial blocks. */
@@ -486,6 +538,11 @@ class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
         item: vscode.CompletionItem,
         _token: vscode.CancellationToken
     ): Promise<vscode.CompletionItem> {
+        // Template items already have insertText set; skip module-instantiation resolution.
+        if (item.insertText !== undefined) {
+            return item;
+        }
+
         const moduleName = typeof item.label === 'string' ? item.label : item.label.label;
         let mod = moduleDatabase.getModule(moduleName);
         if (!mod) {

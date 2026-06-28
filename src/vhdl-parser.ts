@@ -741,6 +741,70 @@ class AntlrVhdlParser {
             this._lastVisitor.generateWarnings(moduleDatabase);
         }
     }
+
+    /**
+     * Detect the syntactic context at the end of the given text (i.e. at the cursor position).
+     * @param text  Source text from the start of file up to (and including) the cursor position.
+     * @returns
+     *   'out_module'   – cursor is outside any architecture body
+     *   'in_module'    – cursor is inside an architecture body but not inside a process
+     *   'in_expression'– cursor is inside an open process body
+     */
+    parseContext(text: string): 'out_module' | 'in_module' | 'in_expression' {
+        // Strip VHDL line comments (-- ...)
+        const stripped = text.replace(/--[^\n]*/g, m => ' '.repeat(m.length));
+        const lower = stripped.toLowerCase();
+
+        // Find the last 'architecture' keyword
+        const archRe = /\barchitecture\b/g;
+        let lastArchIdx = -1;
+        let m: RegExpExecArray | null;
+        while ((m = archRe.exec(lower)) !== null) {
+            lastArchIdx = m.index;
+        }
+
+        if (lastArchIdx < 0) {
+            return 'out_module';
+        }
+
+        const afterArch = lower.substring(lastArchIdx + 'architecture'.length);
+
+        // Find 'is' that opens the declarative region
+        const isMatch = /\bis\b/.exec(afterArch);
+        if (!isMatch) {
+            return 'in_module'; // Still in architecture header
+        }
+
+        const afterIs = afterArch.substring(isMatch.index + isMatch[0].length);
+
+        // Find the 'begin' that opens the concurrent statement body
+        const bodyBeginMatch = /\bbegin\b/.exec(afterIs);
+        if (!bodyBeginMatch) {
+            return 'in_module'; // In declarative region
+        }
+
+        const afterBodyBegin = afterIs.substring(bodyBeginMatch.index + 'begin'.length);
+
+        // Detect whether cursor is inside an open process body
+        const processRe = /\bprocess\b/g;
+        let lastProcessIdx = -1;
+        while ((m = processRe.exec(afterBodyBegin)) !== null) {
+            lastProcessIdx = m.index;
+        }
+
+        if (lastProcessIdx >= 0) {
+            const afterProcess = afterBodyBegin.substring(lastProcessIdx + 'process'.length);
+            const procBeginMatch = /\bbegin\b/.exec(afterProcess);
+            if (procBeginMatch) {
+                const afterProcBegin = afterProcess.substring(procBeginMatch.index + 'begin'.length);
+                if (!/\bend\s+process\b/.test(afterProcBegin)) {
+                    return 'in_expression';
+                }
+            }
+        }
+
+        return 'in_module';
+    }
 }
 
 export = AntlrVhdlParser;
