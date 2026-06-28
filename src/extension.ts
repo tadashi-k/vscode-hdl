@@ -470,25 +470,46 @@ class VerilogCompletionItemProvider implements vscode.CompletionItemProvider {
     /** Completions for module instantiation outside procedural blocks. */
     private _instantiationCompletions(document: vscode.TextDocument): vscode.CompletionItem[] {
         const items: vscode.CompletionItem[] = [];
-        const docUri = document.uri.toString();
-
         for (const mod of moduleDatabase.getAllModules()) {
-            // Skip modules defined in the same file (avoid self-instantiation suggestions)
-            if (mod.uri === docUri) {
-                continue;
-            }
-
             const item = new vscode.CompletionItem(mod.name, vscode.CompletionItemKind.Module);
             item.detail = 'module instantiation';
             item.documentation = new vscode.MarkdownString(`Instantiate module \`${mod.name}\``);
-            const snippet = document.languageId === 'vhdl'
-                ? buildVhdlInstantiationSnippet(mod)
-                : buildInstantiationSnippet(mod);
-            item.insertText = new vscode.SnippetString(snippet);
+            (item as any)._langId = document.languageId;
+            // insertText is resolved lazily in resolveCompletionItem
             items.push(item);
         }
 
         return items;
+    }
+
+    async resolveCompletionItem(
+        item: vscode.CompletionItem,
+        _token: vscode.CancellationToken
+    ): Promise<vscode.CompletionItem> {
+        const moduleName = typeof item.label === 'string' ? item.label : item.label.label;
+        let mod = moduleDatabase.getModule(moduleName);
+        if (!mod) {
+            return item;
+        }
+
+        if (!mod.scanned) {
+            const uri = vscode.Uri.parse(mod.uri);
+            const doc = await vscode.workspace.openTextDocument(uri);
+            const langId = (item as any)._langId ?? doc.languageId;
+            if (langId === 'vhdl') {
+                vhdlParser.parseSymbols(doc, moduleDatabase, fsFileReader);
+            } else {
+                verilogParser.parseSymbols(doc, moduleDatabase, fsFileReader);
+            }
+            mod = moduleDatabase.getModule(moduleName);
+        }
+
+        const langId = (item as any)._langId ?? 'verilog';
+        const snippet = langId === 'vhdl'
+            ? buildVhdlInstantiationSnippet(mod)
+            : buildInstantiationSnippet(mod);
+        item.insertText = new vscode.SnippetString(snippet);
+        return item;
     }
 }
 
@@ -520,7 +541,7 @@ function updateDiagnostics(document: vscode.TextDocument, diagnosticCollection: 
         diagnostics.push(diagnostic);
     }
     diagnosticCollection.set(document.uri, diagnostics);
-    console.log(`Updated diagnostics for ${document.uri}: ${diagnostics.length} issues found`);
+    //console.log(`Updated diagnostics for ${document.uri}: ${diagnostics.length} issues found`);
 }
 
 /**
